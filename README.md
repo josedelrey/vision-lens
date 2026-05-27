@@ -34,3 +34,6 @@ vision-lens --config configs/vit_attention.example.yaml
 
 Input images should go in `data/samples/`. Generated attention maps and
 overlays should go in `outputs/`.
+
+The example config expects a few local sample images in `data/samples/`.
+Those images are ignored by Git so experiments can stay local.

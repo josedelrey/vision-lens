@@ -9,8 +9,9 @@ model:
 
 images:
   paths:
-    - data/samples/dog.jpg
-    - data/samples/car.jpg
+    - data/samples/cat.jpg
+    - data/samples/coffee.jpg
+    - data/samples/astronaut.jpg
 
 output:
   directory: outputs
