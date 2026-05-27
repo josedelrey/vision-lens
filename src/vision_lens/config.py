@@ -10,8 +10,11 @@ Device = Literal["auto", "cpu", "cuda", "mps"]
 
 @dataclass(frozen=True)
 class ModelConfig:
+    architecture: str
+    backend: str
     name: str
     pretrained: bool = True
+    options: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -44,10 +47,11 @@ class VisualizationConfig:
 
 @dataclass(frozen=True)
 class VisionLensConfig:
+    task: str
     model: ModelConfig
     images: ImageConfig
     output: OutputConfig
-    attention: AttentionConfig
+    attention: AttentionConfig | None
     runtime: RuntimeConfig
     visualization: VisualizationConfig
 
@@ -84,14 +88,19 @@ def parse_config(
     model = _section(raw_config, "model")
     images = _section(raw_config, "images")
     output = _section(raw_config, "output")
-    attention = _section(raw_config, "attention")
+    task = _optional_str(raw_config.get("task", "vit_attention"), "task")
+    attention = _optional_section(raw_config, "attention")
     runtime = _section(raw_config, "runtime")
     visualization = _section(raw_config, "visualization")
 
     return VisionLensConfig(
+        task=task,
         model=ModelConfig(
+            architecture=_required_str(model, "architecture", "model"),
+            backend=_required_str(model, "backend", "model"),
             name=_required_str(model, "name", "model"),
             pretrained=_bool(model.get("pretrained", True), "model.pretrained"),
+            options=_optional_mapping(model.get("options"), "model.options"),
         ),
         images=ImageConfig(
             paths=tuple(
@@ -105,19 +114,7 @@ def parse_config(
                 base,
             ),
         ),
-        attention=AttentionConfig(
-            layers=tuple(
-                _non_negative_ints(
-                    _required_list(attention, "layers", "attention"),
-                    "attention.layers",
-                )
-            ),
-            heads=_optional_non_negative_ints(
-                attention.get("heads"),
-                "attention.heads",
-            ),
-            head_fusion=_head_fusion(attention.get("head_fusion", "mean")),
-        ),
+        attention=_parse_attention(attention, task),
         runtime=RuntimeConfig(
             device=_device(runtime.get("device", "auto")),
             image_size=_positive_int(
@@ -138,6 +135,45 @@ def _section(config: dict[str, Any], name: str) -> dict[str, Any]:
     return section
 
 
+def _optional_section(config: dict[str, Any], name: str) -> dict[str, Any] | None:
+    section = config.get(name)
+    if section is None:
+        return None
+    if not isinstance(section, dict):
+        raise ValueError(f"{name} must be a mapping.")
+    return section
+
+
+def _parse_attention(
+    section: dict[str, Any] | None,
+    task: str,
+) -> AttentionConfig | None:
+    if section is None:
+        if task == "vit_attention":
+            raise ValueError("attention is required when task is vit_attention.")
+        return None
+
+    return AttentionConfig(
+        layers=tuple(
+            _non_negative_ints(
+                _required_list(section, "layers", "attention"),
+                "attention.layers",
+            )
+        ),
+        heads=_optional_non_negative_ints(
+            section.get("heads"),
+            "attention.heads",
+        ),
+        head_fusion=_head_fusion(section.get("head_fusion", "mean")),
+    )
+
+
+def _optional_str(value: Any, field_name: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{field_name} must be a non-empty string.")
+    return value
+
+
 def _required_str(section: dict[str, Any], key: str, section_name: str) -> str:
     value = section.get(key)
     if not isinstance(value, str) or not value.strip():
@@ -150,6 +186,14 @@ def _required_list(section: dict[str, Any], key: str, section_name: str) -> list
     if not isinstance(value, list) or not value:
         raise ValueError(f"{section_name}.{key} must be a non-empty list.")
     return value
+
+
+def _optional_mapping(value: Any, field_name: str) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError(f"{field_name} must be a mapping or null.")
+    return dict(value)
 
 
 def _resolve_path(path: Any, base_dir: Path) -> Path:

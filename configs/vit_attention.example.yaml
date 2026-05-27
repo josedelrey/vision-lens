@@ -1,6 +1,11 @@
+task: vit_attention
+
 model:
+  architecture: vit
+  backend: timm
   name: vit_base_patch16_224
   pretrained: true
+  options: {}
 
 images:
   paths:
