@@ -216,3 +216,12 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Local exercise planning notes
+EXERCISE_IMPLEMENTATION_PLAN.md
+
+# Local datasets and generated artifacts
+data/samples/*
+outputs/*
+!data/samples/.gitkeep
+!outputs/.gitkeep
