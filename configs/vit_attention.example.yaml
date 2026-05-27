@@ -1,0 +1,23 @@
+model:
+  name: vit_base_patch16_224
+  pretrained: true
+
+images:
+  paths:
+    - data/samples/dog.jpg
+    - data/samples/car.jpg
+
+output:
+  directory: outputs
+
+attention:
+  layers: [0, 5, 11]
+  heads: null
+  head_fusion: mean
+
+runtime:
+  device: auto
+  image_size: 224
+
+visualization:
+  overlay_alpha: 0.45
