@@ -224,4 +224,10 @@ EXERCISE_IMPLEMENTATION_PLAN.md
 data/samples/*
 outputs/*
 !data/samples/.gitkeep
+!data/samples/README.md
+!data/samples/astronaut.jpg
+!data/samples/cat.jpg
+!data/samples/coffee.jpg
+!data/samples/motorcycle.jpg
+!data/samples/rocket.jpg
 !outputs/.gitkeep

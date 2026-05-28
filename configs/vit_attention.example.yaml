@@ -11,6 +11,8 @@ images:
   paths:
     - data/samples/cat.jpg
     - data/samples/coffee.jpg
+    - data/samples/rocket.jpg
+    - data/samples/motorcycle.jpg
     - data/samples/astronaut.jpg
 
 output:
