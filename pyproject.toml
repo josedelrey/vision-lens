@@ -32,6 +32,9 @@ dependencies = [
   "torchvision>=0.17",
 ]
 
+[project.scripts]
+vision-lens = "vision_lens.cli:main"
+
 [project.optional-dependencies]
 dev = [
   "pytest>=8.0",
