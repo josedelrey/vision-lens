@@ -26,14 +26,20 @@ Run the exercise pipeline from an example script:
 python examples/run_vit_attention.py
 ```
 
-Or, once the CLI is implemented:
+Or with the CLI:
+
+```bash
+python -m vision_lens.cli --config configs/vit_attention.example.yaml
+```
+
+If the package is installed, the console command is also available:
 
 ```bash
 vision-lens --config configs/vit_attention.example.yaml
 ```
 
-Input images should go in `data/samples/`. Generated attention maps and
-overlays should go in `outputs/`.
+Input images live in `data/samples/`. Generated attention maps and overlays go
+in `outputs/`.
 
-The example config expects a few local sample images in `data/samples/`.
-Those images are ignored by Git so experiments can stay local.
+The example config uses curated sample images from `scikit-image`. Extra local
+images placed in `data/samples/` are ignored by Git by default.
