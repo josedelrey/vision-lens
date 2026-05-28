@@ -4,11 +4,18 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from vision_lens.attention import AttentionExtractionResult, LayerAttentionMaps
+from vision_lens.attention import (
+    AttentionExtractionResult,
+    GradCamResult,
+    LayerAttentionMaps,
+    extract_gradcam,
+)
 from vision_lens.config import VisionLensConfig, load_config
 from vision_lens.images import build_preprocess, load_images, preprocess_images
 from vision_lens.models import LoadedModel, load_model
 from vision_lens.visualization import (
+    image_grid,
+    labeled_image,
     make_image_comparison_grid,
     make_layer_comparison_grid,
     overlay_attention,
@@ -25,11 +32,129 @@ class PipelineResult:
     output_paths: tuple[Path, ...]
 
 
+@dataclass(frozen=True)
+class GradCamPipelineResult:
+    config: VisionLensConfig
+    loaded_model: LoadedModel
+    gradcam: GradCamResult
+    output_paths: tuple[Path, ...]
+
+
 def run_vit_attention(
     config_path: str | Path = "configs/vit_attention.example.yaml",
 ) -> PipelineResult:
     config = load_config(config_path)
     return run_vit_attention_from_config(config)
+
+
+def run_pipeline(config_path: str | Path) -> PipelineResult | GradCamPipelineResult:
+    config = load_config(config_path)
+    if config.task == "vit_attention":
+        return run_vit_attention_from_config(config)
+    if config.task == "gradcam":
+        return run_gradcam_from_config(config)
+
+    raise ValueError(f"Unsupported task: {config.task}")
+
+
+def run_vit_rollout_comparison(
+    config_path: str | Path = "configs/vit_attention.example.yaml",
+    output_dir: str | Path | None = None,
+) -> PipelineResult:
+    config = load_config(config_path)
+    return run_vit_rollout_comparison_from_config(config, output_dir=output_dir)
+
+
+def run_vit_rollout_comparison_from_config(
+    config: VisionLensConfig,
+    output_dir: str | Path | None = None,
+) -> PipelineResult:
+    from vision_lens.attention import extract_attention_rollout
+
+    if config.task != "vit_attention":
+        raise ValueError(f"Expected task='vit_attention', got {config.task!r}.")
+    if config.attention is None:
+        raise ValueError("ViT rollout comparison requires an attention config.")
+
+    loaded_model = load_model(config)
+    images = load_images(config.images.paths)
+    transform = build_preprocess(
+        loaded_model.model,
+        backend=config.model.backend,
+        image_size=config.runtime.image_size,
+    )
+    inputs = preprocess_images(images, transform)
+    rollout = extract_attention_rollout(
+        loaded_model.model,
+        inputs,
+        loaded_model.metadata,
+        layers=config.attention.layers,
+    )
+    layer_attention = _extract_attention(
+        loaded_model=loaded_model,
+        inputs=inputs,
+        config=config,
+    )
+
+    resolved_output_dir = Path(output_dir) if output_dir else config.output.directory
+    output_paths = export_rollout_comparison_outputs(
+        images=images,
+        image_paths=config.images.paths,
+        layer_attention=layer_attention,
+        rollout=rollout,
+        output_dir=resolved_output_dir,
+        alpha=config.visualization.overlay_alpha,
+    )
+
+    return PipelineResult(
+        config=config,
+        loaded_model=loaded_model,
+        attention=rollout,
+        output_paths=output_paths,
+    )
+
+
+def run_gradcam(
+    config_path: str | Path = "configs/gradcam.example.yaml",
+) -> GradCamPipelineResult:
+    config = load_config(config_path)
+    return run_gradcam_from_config(config)
+
+
+def run_gradcam_from_config(config: VisionLensConfig) -> GradCamPipelineResult:
+    if config.model.architecture != "cnn":
+        raise ValueError("Grad-CAM pipeline expects a CNN model config.")
+
+    loaded_model = load_model(config)
+    images = load_images(config.images.paths)
+    transform = build_preprocess(
+        loaded_model.model,
+        backend=config.model.backend,
+        image_size=config.runtime.image_size,
+    )
+    inputs = preprocess_images(images, transform)
+    target_layer = None
+    if config.model.options is not None:
+        target_layer = config.model.options.get("gradcam_target_layer")
+    gradcam = extract_gradcam(
+        loaded_model.model,
+        inputs,
+        loaded_model.metadata,
+        target_layer=target_layer,
+    )
+    output_paths = export_gradcam_outputs(
+        images=images,
+        image_paths=config.images.paths,
+        gradcam=gradcam,
+        output_dir=config.output.directory,
+        alpha=config.visualization.overlay_alpha,
+    )
+    return GradCamPipelineResult(
+        config=config,
+        loaded_model=loaded_model,
+        gradcam=gradcam,
+        output_paths=output_paths,
+    )
 
 
 def run_vit_attention_from_config(config: VisionLensConfig) -> PipelineResult:
@@ -132,6 +257,94 @@ def export_attention_outputs(
             )
             output_paths.append(output_path)
 
+    return tuple(output_paths)
+
+
+def export_rollout_comparison_outputs(
+    images: list[Any],
+    image_paths: tuple[Path, ...],
+    layer_attention: AttentionExtractionResult,
+    rollout: AttentionExtractionResult,
+    output_dir: Path,
+    alpha: float,
+) -> tuple[Path, ...]:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_paths: list[Path] = []
+    labels = [path.stem for path in image_paths]
+
+    for image_index, image in enumerate(images):
+        tiles = []
+        for layer, rollout_layer in zip(layer_attention.layers, rollout.layers):
+            layer_for_image = _layer_for_image(layer, image_index)
+            rollout_for_image = _layer_for_image(rollout_layer, image_index)
+            tiles.append(
+                labeled_image(
+                    overlay_attention(image, layer_for_image.maps, alpha=alpha),
+                    f"layer {layer.layer_index}",
+                )
+            )
+            tiles.append(
+                labeled_image(
+                    overlay_attention(image, rollout_for_image.maps, alpha=alpha),
+                    f"rollout {rollout_layer.layer_index}",
+                )
+            )
+
+            stem = f"{labels[image_index]}_rollout-{rollout_layer.layer_index}"
+            output_paths.append(
+                save_image(
+                    render_heatmap(rollout_for_image.maps),
+                    output_dir / f"{stem}_heatmap.png",
+                )
+            )
+            output_paths.append(
+                save_image(
+                    overlay_attention(image, rollout_for_image.maps, alpha=alpha),
+                    output_dir / f"{stem}_overlay.png",
+                )
+            )
+
+        grid_path = output_dir / f"{labels[image_index]}_rollout_comparison.png"
+        save_image(image_grid(tiles, columns=2), grid_path)
+        output_paths.append(grid_path)
+
+    return tuple(output_paths)
+
+
+def export_gradcam_outputs(
+    images: list[Any],
+    image_paths: tuple[Path, ...],
+    gradcam: GradCamResult,
+    output_dir: Path,
+    alpha: float,
+) -> tuple[Path, ...]:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_paths: list[Path] = []
+    labels = [path.stem for path in image_paths]
+
+    for image_index, image in enumerate(images):
+        maps = _slice_batch(gradcam.maps, image_index)
+        stem = f"{labels[image_index]}_gradcam"
+        output_paths.append(
+            save_image(render_heatmap(maps), output_dir / f"{stem}_heatmap.png")
+        )
+        output_paths.append(
+            save_image(
+                overlay_attention(image, maps, alpha=alpha),
+                output_dir / f"{stem}_overlay.png",
+            )
+        )
+
+    image_maps = [_slice_batch(gradcam.maps, index) for index in range(len(images))]
+    grid_path = output_dir / "gradcam_images.png"
+    make_image_comparison_grid(
+        images,
+        image_maps,
+        labels=labels,
+        output_path=grid_path,
+        alpha=alpha,
+    )
+    output_paths.append(grid_path)
     return tuple(output_paths)
 
 

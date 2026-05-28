@@ -26,6 +26,15 @@ class AttentionExtractionResult:
     image_size: tuple[int, int]
 
 
+@dataclass(frozen=True)
+class GradCamResult:
+    logits: Any
+    maps: Any
+    target_layer: str
+    target_classes: tuple[int, ...]
+    image_size: tuple[int, int]
+
+
 def extract_attention_maps(
     model: Any,
     inputs: Any,
@@ -86,6 +95,215 @@ def extract_attention_maps(
     return AttentionExtractionResult(
         logits=logits.detach().cpu(),
         layers=layer_maps,
+        image_size=metadata.image_size,
+    )
+
+
+def extract_attention_rollout(
+    model: Any,
+    inputs: Any,
+    metadata: ModelMetadata,
+    layers: LayerSelection = "all",
+) -> AttentionExtractionResult:
+    try:
+        import torch
+    except ImportError as error:
+        raise RuntimeError(
+            "PyTorch is required to extract attention rollout. "
+            "Install the project dependencies in the cv environment."
+        ) from error
+
+    blocks = _vit_blocks(model)
+    layer_indices = _select_layers(layers, total_layers=len(blocks))
+    max_layer = max(layer_indices)
+    captured_attention: dict[int, Any] = {}
+    capture_layers = tuple(range(max_layer + 1))
+    handles = [
+        blocks[layer_index].attn.register_forward_pre_hook(
+            _capture_attention_hook(captured_attention, layer_index)
+        )
+        for layer_index in capture_layers
+    ]
+
+    try:
+        with torch.no_grad():
+            model_inputs = inputs.to(_model_device(model))
+            logits = model(model_inputs)
+    finally:
+        for handle in handles:
+            handle.remove()
+
+    rollout_by_layer = compute_attention_rollout(
+        tuple(captured_attention[layer_index] for layer_index in capture_layers)
+    )
+    layer_maps = tuple(
+        LayerAttentionMaps(
+            layer_index=layer_index,
+            maps=token_attention_to_map(
+                rollout_by_layer[layer_index],
+                image_size=metadata.image_size,
+                patch_size=metadata.patch_size,
+            ),
+            head_indices=None,
+            head_fusion="mean",
+            patch_grid=infer_patch_grid(
+                num_patches=rollout_by_layer[layer_index].shape[-1] - 1,
+                image_size=metadata.image_size,
+                patch_size=metadata.patch_size,
+            ),
+        )
+        for layer_index in layer_indices
+    )
+
+    return AttentionExtractionResult(
+        logits=logits.detach().cpu(),
+        layers=layer_maps,
+        image_size=metadata.image_size,
+    )
+
+
+def compute_attention_rollout(attentions: Iterable[Any]) -> tuple[Any, ...]:
+    try:
+        import torch
+    except ImportError as error:
+        raise RuntimeError(
+            "PyTorch is required to compute attention rollout. "
+            "Install the project dependencies in the cv environment."
+        ) from error
+
+    rollout_layers = []
+    joint_attention = None
+    for attention in attentions:
+        _validate_attention_tensor(attention)
+        fused_attention = attention.mean(dim=1)
+        identity = torch.eye(
+            fused_attention.shape[-1],
+            device=fused_attention.device,
+            dtype=fused_attention.dtype,
+        )
+        fused_attention = fused_attention + identity
+        fused_attention = fused_attention / fused_attention.sum(
+            dim=-1,
+            keepdim=True,
+        )
+        if joint_attention is None:
+            joint_attention = fused_attention
+        else:
+            joint_attention = fused_attention @ joint_attention
+        rollout_layers.append(joint_attention.detach().cpu())
+
+    return tuple(rollout_layers)
+
+
+def token_attention_to_map(
+    token_attention: Any,
+    image_size: tuple[int, int],
+    patch_size: tuple[int, int] | None,
+    normalize: bool = True,
+) -> Any:
+    try:
+        import torch.nn.functional as functional
+    except ImportError as error:
+        raise RuntimeError(
+            "PyTorch is required to convert rollout tensors. "
+            "Install the project dependencies in the cv environment."
+        ) from error
+
+    if len(token_attention.shape) != 3:
+        raise ValueError("token_attention must have shape (batch, tokens, tokens).")
+    if token_attention.shape[-1] != token_attention.shape[-2]:
+        raise ValueError("token_attention query and key dimensions must match.")
+
+    cls_attention = token_attention[:, 0, 1:]
+    patch_grid = infer_patch_grid(
+        num_patches=cls_attention.shape[-1],
+        image_size=image_size,
+        patch_size=patch_size,
+    )
+    patch_maps = cls_attention.reshape(
+        cls_attention.shape[0],
+        1,
+        patch_grid[0],
+        patch_grid[1],
+    )
+    resized_maps = functional.interpolate(
+        patch_maps,
+        size=image_size,
+        mode="bilinear",
+        align_corners=False,
+    )
+    if normalize:
+        return normalize_maps(resized_maps)
+    return resized_maps
+
+
+def extract_gradcam(
+    model: Any,
+    inputs: Any,
+    metadata: ModelMetadata,
+    target_layer: str | None = None,
+    target_classes: Iterable[int] | None = None,
+) -> GradCamResult:
+    try:
+        import torch
+        import torch.nn.functional as functional
+    except ImportError as error:
+        raise RuntimeError(
+            "PyTorch is required to compute Grad-CAM. "
+            "Install the project dependencies in the cv environment."
+        ) from error
+
+    resolved_layer_name, layer_module = _resolve_gradcam_layer(model, target_layer)
+    activations = None
+    gradients = None
+
+    def forward_hook(_module: Any, _args: tuple[Any, ...], output: Any) -> None:
+        nonlocal activations
+        activations = output
+
+    def backward_hook(_module: Any, _grad_input: Any, grad_output: Any) -> None:
+        nonlocal gradients
+        gradients = grad_output[0]
+
+    forward_handle = layer_module.register_forward_hook(forward_hook)
+    backward_handle = layer_module.register_full_backward_hook(backward_hook)
+
+    try:
+        model.zero_grad(set_to_none=True)
+        model_inputs = inputs.to(_model_device(model))
+        logits = model(model_inputs)
+        if target_classes is None:
+            class_tensor = logits.argmax(dim=1)
+        else:
+            class_tensor = torch.tensor(
+                tuple(target_classes),
+                device=logits.device,
+                dtype=torch.long,
+            )
+        score = logits.gather(1, class_tensor[:, None]).sum()
+        score.backward()
+    finally:
+        forward_handle.remove()
+        backward_handle.remove()
+
+    if activations is None or gradients is None:
+        raise RuntimeError("Grad-CAM hooks did not capture activations/gradients.")
+
+    weights = gradients.mean(dim=(2, 3), keepdim=True)
+    maps = (weights * activations).sum(dim=1, keepdim=True)
+    maps = functional.relu(maps)
+    maps = functional.interpolate(
+        maps,
+        size=metadata.image_size,
+        mode="bilinear",
+        align_corners=False,
+    )
+
+    return GradCamResult(
+        logits=logits.detach().cpu(),
+        maps=normalize_maps(maps.detach().cpu()),
+        target_layer=resolved_layer_name,
+        target_classes=tuple(class_tensor.detach().cpu().tolist()),
         image_size=metadata.image_size,
     )
 
@@ -253,6 +471,33 @@ def _validate_attention_tensor(attention: Any) -> None:
         raise ValueError("Attention tensor must include class and patch tokens.")
     if attention.shape[-1] != attention.shape[-2]:
         raise ValueError("Attention query and key dimensions must match.")
+
+
+def _resolve_gradcam_layer(model: Any, target_layer: str | None) -> tuple[str, Any]:
+    if target_layer is not None:
+        modules = dict(model.named_modules())
+        if target_layer not in modules:
+            raise ValueError(f"Grad-CAM target layer does not exist: {target_layer}")
+        return target_layer, modules[target_layer]
+
+    try:
+        import torch.nn as nn
+    except ImportError as error:
+        raise RuntimeError(
+            "PyTorch is required to resolve Grad-CAM layers. "
+            "Install the project dependencies in the cv environment."
+        ) from error
+
+    last_conv_name = None
+    last_conv = None
+    for name, module in model.named_modules():
+        if isinstance(module, nn.Conv2d):
+            last_conv_name = name
+            last_conv = module
+
+    if last_conv_name is None or last_conv is None:
+        raise ValueError("Could not find a convolutional layer for Grad-CAM.")
+    return last_conv_name, last_conv
 
 
 def _model_device(model: Any) -> Any:

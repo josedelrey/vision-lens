@@ -28,4 +28,4 @@ runtime:
   image_size: 224
 
 visualization:
-  overlay_alpha: 0.45
+  overlay_alpha: 0.35

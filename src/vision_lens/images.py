@@ -55,8 +55,34 @@ def build_timm_preprocess(model, image_size: int | None = None):
 def build_preprocess(model, backend: str, image_size: int | None = None):
     if backend == "timm":
         return build_timm_preprocess(model, image_size=image_size)
+    if backend == "torchvision":
+        return build_torchvision_preprocess(image_size=image_size)
 
     raise ValueError(f"Unsupported preprocessing backend: {backend}")
+
+
+def build_torchvision_preprocess(image_size: int | None = None):
+    try:
+        from PIL import Image as _Image  # noqa: F401
+        from torchvision import transforms
+    except ImportError as error:
+        raise RuntimeError(
+            "torchvision is required to build preprocessing for torchvision "
+            "models. Install the project dependencies in the cv environment."
+        ) from error
+
+    size = 224 if image_size is None else image_size
+    return transforms.Compose(
+        [
+            transforms.Resize(size),
+            transforms.CenterCrop(size),
+            transforms.ToTensor(),
+            transforms.Normalize(
+                mean=(0.485, 0.456, 0.406),
+                std=(0.229, 0.224, 0.225),
+            ),
+        ]
+    )
 
 
 def preprocess_image(image, transform):
