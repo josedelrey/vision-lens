@@ -6,6 +6,7 @@ from typing import Any, Literal
 
 HeadFusion = Literal["mean", "max", "none"]
 Device = Literal["auto", "cpu", "cuda", "mps"]
+AttentionLayers = Literal["all"] | tuple[int, ...]
 
 
 @dataclass(frozen=True)
@@ -29,7 +30,7 @@ class OutputConfig:
 
 @dataclass(frozen=True)
 class AttentionConfig:
-    layers: tuple[int, ...]
+    layers: AttentionLayers
     heads: tuple[int, ...] | None = None
     head_fusion: HeadFusion = "mean"
 
@@ -154,12 +155,7 @@ def _parse_attention(
         return None
 
     return AttentionConfig(
-        layers=tuple(
-            _non_negative_ints(
-                _required_list(section, "layers", "attention"),
-                "attention.layers",
-            )
-        ),
+        layers=_attention_layers(section.get("layers")),
         heads=_optional_non_negative_ints(
             section.get("heads"),
             "attention.heads",
@@ -186,6 +182,14 @@ def _required_list(section: dict[str, Any], key: str, section_name: str) -> list
     if not isinstance(value, list) or not value:
         raise ValueError(f"{section_name}.{key} must be a non-empty list.")
     return value
+
+
+def _attention_layers(value: Any) -> AttentionLayers:
+    if value == "all":
+        return "all"
+    if not isinstance(value, list) or not value:
+        raise ValueError("attention.layers must be `all` or a non-empty list.")
+    return tuple(_non_negative_ints(value, "attention.layers"))
 
 
 def _optional_mapping(value: Any, field_name: str) -> dict[str, Any] | None:
