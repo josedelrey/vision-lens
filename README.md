@@ -43,3 +43,10 @@ in `outputs/`.
 
 The example config uses curated sample images from `scikit-image`. Extra local
 images placed in `data/samples/` are ignored by Git by default.
+
+Optional helpers are also available in Python for ViT attention rollout and a
+simple torchvision CNN Grad-CAM baseline:
+
+```python
+from vision_lens.pipeline import run_gradcam, run_vit_rollout_comparison
+```

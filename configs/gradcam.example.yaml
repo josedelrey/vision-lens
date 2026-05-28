@@ -1,11 +1,12 @@
-task: vit_attention
+task: gradcam
 
 model:
-  architecture: vit
-  backend: timm
-  name: vit_base_patch16_224
+  architecture: cnn
+  backend: torchvision
+  name: resnet50
   pretrained: true
-  options: {}
+  options:
+    gradcam_target_layer: layer4
 
 images:
   paths:
@@ -16,12 +17,7 @@ images:
     - data/samples/astronaut.jpg
 
 output:
-  directory: outputs
-
-attention:
-  layers: [0, 5, 11]
-  heads: null
-  head_fusion: mean
+  directory: outputs/gradcam
 
 runtime:
   device: auto

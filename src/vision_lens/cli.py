@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from vision_lens.pipeline import run_vit_attention
+from vision_lens.pipeline import run_pipeline
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -18,7 +18,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    result = run_vit_attention(Path(args.config))
+    result = run_pipeline(Path(args.config))
     print(f"saved {len(result.output_paths)} files to {result.config.output.directory}")
     for output_path in result.output_paths:
         print(output_path)
