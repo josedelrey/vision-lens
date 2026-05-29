@@ -8,11 +8,14 @@ from pathlib import Path
 repo_root = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(repo_root / "src"))
 
-from vision_lens.config import AttentionConfig, OutputConfig, load_config
-from vision_lens.pipeline import (
-    GradCamPipelineResult,
+from vision_lens.config import (  # noqa: E402
+    AttentionConfig,
+    OutputConfig,
+    VisionLensConfig,
+    load_config,
+)
+from vision_lens.pipeline import (  # noqa: E402
     PipelineResult,
-    run_gradcam_from_config,
     run_vit_attention_from_config,
     run_vit_rollout_comparison_from_config,
 )
@@ -21,65 +24,60 @@ from vision_lens.pipeline import (
 def main() -> None:
     args = parse_args()
     output_dir = Path(args.output_dir)
-
-    vit_config = load_config(args.vit_config)
-    cnn_config = load_config(args.cnn_config)
+    config = load_config(args.config)
 
     results = {
-        "vit fused heads": export_vit_fused(vit_config, output_dir),
-        "vit individual heads": export_vit_heads(
-            vit_config,
+        "fused heads": export_fused_heads(config, output_dir),
+        "individual heads": export_individual_heads(
+            config,
             output_dir,
             heads=tuple(args.heads),
         ),
-        "vit rollout": export_vit_rollout(vit_config, output_dir),
-        "cnn grad-cam": export_cnn_gradcam(cnn_config, output_dir),
+        "attention rollout": export_rollout(config, output_dir),
     }
 
-    print(f"saved visualization gallery to {output_dir}")
+    print(f"saved ViT attention figures to {output_dir}")
     for label, result in results.items():
         print(f"{label}: {len(result.output_paths)} files")
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Export example figures for every Vision Lens visualization path.",
+        description="Export ViT attention figures for the course exercise.",
     )
     parser.add_argument(
-        "--vit-config",
+        "--config",
         default="configs/vit_attention.example.yaml",
         help="Config used for ViT attention and rollout figures.",
     )
     parser.add_argument(
-        "--cnn-config",
-        default="configs/gradcam.example.yaml",
-        help="Config used for CNN Grad-CAM figures.",
-    )
-    parser.add_argument(
         "--output-dir",
-        default="outputs/visualization_gallery",
-        help="Directory where all generated figure folders are written.",
+        default="outputs/vit_attention",
+        help="Directory where generated ViT figure folders are written.",
     )
     parser.add_argument(
         "--heads",
         nargs="+",
         type=int,
         default=[0, 1, 2],
-        help="ViT heads exported individually for the head-comparison example.",
+        help="Heads exported individually for the head-comparison example.",
     )
     return parser.parse_args()
 
 
-def export_vit_fused(config, output_dir: Path) -> PipelineResult:
+def export_fused_heads(
+    config: VisionLensConfig,
+    output_dir: Path,
+) -> PipelineResult:
     config = replace(
         config,
-        output=OutputConfig(output_dir / "vit_fused_heads"),
+        output=OutputConfig(output_dir / "fused_heads"),
     )
     return run_vit_attention_from_config(config)
 
 
-def export_vit_heads(
-    config,
+def export_individual_heads(
+    config: VisionLensConfig,
     output_dir: Path,
     heads: tuple[int, ...],
 ) -> PipelineResult:
@@ -93,24 +91,19 @@ def export_vit_heads(
             heads=heads,
             head_fusion="none",
         ),
-        output=OutputConfig(output_dir / "vit_individual_heads"),
+        output=OutputConfig(output_dir / "individual_heads"),
     )
     return run_vit_attention_from_config(config)
 
 
-def export_vit_rollout(config, output_dir: Path) -> PipelineResult:
+def export_rollout(
+    config: VisionLensConfig,
+    output_dir: Path,
+) -> PipelineResult:
     return run_vit_rollout_comparison_from_config(
         config,
-        output_dir=output_dir / "vit_rollout",
+        output_dir=output_dir / "rollout",
     )
-
-
-def export_cnn_gradcam(config, output_dir: Path) -> GradCamPipelineResult:
-    config = replace(
-        config,
-        output=OutputConfig(output_dir / "cnn_gradcam"),
-    )
-    return run_gradcam_from_config(config)
 
 
 if __name__ == "__main__":

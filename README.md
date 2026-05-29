@@ -20,14 +20,20 @@ python -m pip install -e ".[dev]"
 
 ## Intended usage
 
-Run the exercise pipeline from an example script:
+Run the ViT exercise figures from an example script:
 
 ```bash
-python examples/export_visualization_gallery.py
+python examples/run_vit_attention.py
 ```
 
-That script exports fused ViT attention maps, individual-head ViT maps, rollout
-comparisons, and CNN Grad-CAM figures under `outputs/visualization_gallery/`.
+That script exports fused-head attention maps, individual-head maps, and
+attention rollout comparisons under `outputs/vit_attention/`.
+
+Run the CNN Grad-CAM baseline separately:
+
+```bash
+python examples/run_cnn_gradcam.py
+```
 
 Or with the CLI:
 

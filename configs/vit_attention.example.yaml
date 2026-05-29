@@ -3,7 +3,7 @@ task: vit_attention
 model:
   architecture: vit
   backend: timm
-  name: vit_base_patch16_224
+  name: vit_small_patch8_224.dino
   pretrained: true
   options: {}
 
@@ -14,12 +14,18 @@ images:
     - data/samples/rocket.jpg
     - data/samples/motorcycle.jpg
     - data/samples/astronaut.jpg
+    - data/samples/p1.jpg
+    - data/samples/p2.jpg
+    - data/samples/p3.jpg
+    - data/samples/p4.jpg
+    - data/samples/p5.jpg
+    - data/samples/p6.jpg
 
 output:
-  directory: outputs
+  directory: outputs/dino_vits8_attention
 
 attention:
-  layers: [0, 5, 11]
+  layers: [2, 5, 8, 11]
   heads: null
   head_fusion: mean
 
@@ -28,4 +34,4 @@ runtime:
   image_size: 224
 
 visualization:
-  overlay_alpha: 0.35
+  overlay_alpha: 0.45
