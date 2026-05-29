@@ -113,3 +113,56 @@ def test_vit_pipeline_exports_figures_with_mocked_model(monkeypatch, tmp_path):
         "layer-0_images_heads-mean.svg",
     }
     assert all(Path(path).is_file() for path in result.output_paths)
+
+
+def test_rollout_grid_items_place_layer_row_above_rollout_row():
+    from vision_lens.pipeline import _rollout_grid_items
+
+    layer_attention = _attention_result(layer_indices=(0, 1, 2, 3, 4))
+    rollout = _attention_result(layer_indices=(0, 1, 2, 3, 4))
+
+    _images, labels, columns = _rollout_grid_items(
+        image=Image.new("RGB", (4, 4), "white"),
+        layer_attention=layer_attention,
+        rollout=rollout,
+        image_index=0,
+        alpha=0.35,
+        cmap="viridis",
+    )
+
+    assert columns == 4
+    assert labels == [
+        "layer 0",
+        "layer 1",
+        "layer 2",
+        "layer 3",
+        "rollout 0",
+        "rollout 1",
+        "rollout 2",
+        "rollout 3",
+        "layer 4",
+        "",
+        "",
+        "",
+        "rollout 4",
+        "",
+        "",
+        "",
+    ]
+
+
+def _attention_result(layer_indices: tuple[int, ...]) -> AttentionExtractionResult:
+    return AttentionExtractionResult(
+        logits=torch.zeros(1, 2),
+        layers=tuple(
+            LayerAttentionMaps(
+                layer_index=layer_index,
+                maps=torch.rand(1, 1, 4, 4),
+                head_indices=None,
+                head_fusion="mean",
+                patch_grid=(2, 2),
+            )
+            for layer_index in layer_indices
+        ),
+        image_size=(4, 4),
+    )
