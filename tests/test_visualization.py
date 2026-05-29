@@ -71,3 +71,21 @@ def test_save_grid_figure_supports_pdf_output(tmp_path):
 
     assert saved_path == output_path
     assert output_path.is_file()
+
+
+def test_save_grid_figure_uses_fixed_tile_size(tmp_path):
+    output_path = tmp_path / "grid.svg"
+
+    save_grid_figure(
+        images=[
+            Image.new("RGB", (32, 32), "white"),
+            Image.new("RGB", (518, 518), "black"),
+        ],
+        labels=["small", "large"],
+        output_path=output_path,
+        columns=2,
+    )
+
+    svg = output_path.read_text(encoding="utf-8")
+    assert 'width="331.2pt"' in svg
+    assert 'height="184.32pt"' in svg
