@@ -3,7 +3,7 @@ task: vit_attention
 model:
   architecture: vit
   backend: timm
-  name: vit_small_patch8_224.dino
+  name: hf_hub:timm/vit_small_patch14_reg4_dinov2.lvd142m
   pretrained: true
   options: {}
 
@@ -16,7 +16,7 @@ images:
     - data/samples/astronaut.jpg
 
 output:
-  directory: outputs/dino_vits8_attention
+  directory: outputs/dinov2_vits14_reg4_attention
 
 attention:
   layers: [2, 5, 8, 11]
@@ -25,7 +25,7 @@ attention:
 
 runtime:
   device: auto
-  image_size: 224
+  image_size: 518
 
 visualization:
   overlay_alpha: 0.8

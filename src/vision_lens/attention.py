@@ -79,11 +79,11 @@ def extract_attention_maps(
             ),
             head_indices=head_indices,
             head_fusion=head_fusion,
-            patch_grid=infer_patch_grid(
-                num_patches=captured_attention[layer_index].shape[-1] - 1,
+            patch_grid=infer_prefix_tokens_and_patch_grid(
+                token_count=captured_attention[layer_index].shape[-1],
                 image_size=metadata.image_size,
                 patch_size=metadata.patch_size,
-            ),
+            )[1],
         )
         for layer_index in layer_indices
     )
@@ -134,11 +134,11 @@ def extract_attention_rollout(
             ),
             head_indices=None,
             head_fusion="mean",
-            patch_grid=infer_patch_grid(
-                num_patches=rollout_by_layer[layer_index].shape[-1] - 1,
+            patch_grid=infer_prefix_tokens_and_patch_grid(
+                token_count=rollout_by_layer[layer_index].shape[-1],
                 image_size=metadata.image_size,
                 patch_size=metadata.patch_size,
-            ),
+            )[1],
         )
         for layer_index in layer_indices
     )
@@ -186,12 +186,12 @@ def token_attention_to_map(
     if token_attention.shape[-1] != token_attention.shape[-2]:
         raise ValueError("token_attention query and key dimensions must match.")
 
-    cls_attention = token_attention[:, 0, 1:]
-    patch_grid = infer_patch_grid(
-        num_patches=cls_attention.shape[-1],
+    prefix_token_count, patch_grid = infer_prefix_tokens_and_patch_grid(
+        token_count=token_attention.shape[-1],
         image_size=image_size,
         patch_size=patch_size,
     )
+    cls_attention = token_attention[:, 0, prefix_token_count:]
     patch_maps = cls_attention.reshape(
         cls_attention.shape[0],
         1,
@@ -281,12 +281,12 @@ def class_token_attention_to_map(
 ) -> Any:
     _validate_attention_tensor(attention)
     selected_heads = _select_heads(attention, heads)
-    cls_attention = selected_heads[:, :, 0, 1:]
-    patch_grid = infer_patch_grid(
-        num_patches=cls_attention.shape[-1],
+    prefix_token_count, patch_grid = infer_prefix_tokens_and_patch_grid(
+        token_count=selected_heads.shape[-1],
         image_size=image_size,
         patch_size=patch_size,
     )
+    cls_attention = selected_heads[:, :, 0, prefix_token_count:]
     fused_attention = _fuse_heads(cls_attention, head_fusion)
     patch_maps = fused_attention.reshape(
         fused_attention.shape[0],
@@ -323,6 +323,47 @@ def infer_patch_grid(
             f"{num_patches} patches and patch_size={patch_size}."
         )
     return (grid_size, grid_size)
+
+
+def infer_patch_grid_from_image(
+    image_size: tuple[int, int],
+    patch_size: tuple[int, int],
+) -> tuple[int, int]:
+    if patch_size[0] <= 0 or patch_size[1] <= 0:
+        raise ValueError("patch_size values must be positive.")
+    if image_size[0] % patch_size[0] != 0 or image_size[1] % patch_size[1] != 0:
+        raise ValueError(
+            "Image dimensions must be divisible by patch_size: "
+            f"image_size={image_size}, patch_size={patch_size}."
+        )
+    return (image_size[0] // patch_size[0], image_size[1] // patch_size[1])
+
+
+def infer_prefix_tokens_and_patch_grid(
+    token_count: int,
+    image_size: tuple[int, int],
+    patch_size: tuple[int, int] | None,
+) -> tuple[int, tuple[int, int]]:
+    if token_count < 2:
+        raise ValueError("token_count must include at least one prefix and one patch.")
+
+    if patch_size is None:
+        patch_token_count = token_count - 1
+        return 1, infer_patch_grid(
+            num_patches=patch_token_count,
+            image_size=image_size,
+            patch_size=None,
+        )
+
+    patch_grid = infer_patch_grid_from_image(image_size, patch_size)
+    patch_token_count = patch_grid[0] * patch_grid[1]
+    prefix_token_count = token_count - patch_token_count
+    if prefix_token_count < 1:
+        raise ValueError(
+            "Token count must include at least one non-patch prefix token: "
+            f"token_count={token_count}, patch_token_count={patch_token_count}."
+        )
+    return prefix_token_count, patch_grid
 
 
 def normalize_maps(maps: Any, eps: float = 1e-8) -> Any:

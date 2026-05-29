@@ -47,12 +47,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--config",
-        default="configs/vit_attention.example.yaml",
+        default="configs/vit_attention.dinov2_reg4.example.yaml",
         help="Config used for ViT attention and rollout figures.",
     )
     parser.add_argument(
         "--output-dir",
-        default="outputs/vit_attention",
+        default="outputs/dinov2_reg4_attention",
         help="Directory where generated ViT figure folders are written.",
     )
     parser.add_argument(
