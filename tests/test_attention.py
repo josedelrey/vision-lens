@@ -69,6 +69,38 @@ def test_class_token_attention_to_map_fuses_and_resizes_heads():
     assert torch.all(maps <= 1)
 
 
+def test_class_token_attention_to_map_mean_fusion_values():
+    attention = torch.zeros(1, 2, 5, 5)
+    attention[:, 0, 0, 1:] = torch.tensor([1.0, 3.0, 5.0, 7.0])
+    attention[:, 1, 0, 1:] = torch.tensor([3.0, 5.0, 7.0, 9.0])
+
+    maps = class_token_attention_to_map(
+        attention,
+        image_size=(2, 2),
+        patch_size=(1, 1),
+        head_fusion="mean",
+        normalize=False,
+    )
+
+    assert torch.equal(maps, torch.tensor([[[[2.0, 4.0], [6.0, 8.0]]]]))
+
+
+def test_class_token_attention_to_map_max_fusion_values():
+    attention = torch.zeros(1, 2, 5, 5)
+    attention[:, 0, 0, 1:] = torch.tensor([1.0, 8.0, 5.0, 2.0])
+    attention[:, 1, 0, 1:] = torch.tensor([3.0, 5.0, 7.0, 9.0])
+
+    maps = class_token_attention_to_map(
+        attention,
+        image_size=(2, 2),
+        patch_size=(1, 1),
+        head_fusion="max",
+        normalize=False,
+    )
+
+    assert torch.equal(maps, torch.tensor([[[[3.0, 8.0], [7.0, 9.0]]]]))
+
+
 def test_class_token_attention_to_map_can_keep_individual_heads():
     attention = torch.zeros(1, 3, 5, 5)
     attention[:, :, 0, 1:] = torch.rand(1, 3, 4)
