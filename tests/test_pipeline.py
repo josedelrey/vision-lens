@@ -40,6 +40,7 @@ def test_vit_pipeline_exports_figures_with_mocked_model(monkeypatch, tmp_path):
             "visualization": {
                 "overlay_alpha": 0.35,
                 "cmap": "viridis",
+                "grid_format": "svg",
             },
         }
     )
@@ -108,7 +109,7 @@ def test_vit_pipeline_exports_figures_with_mocked_model(monkeypatch, tmp_path):
     assert {path.name for path in result.output_paths} == {
         "cat_layer-0_heads-mean_heatmap.png",
         "cat_layer-0_heads-mean_overlay.png",
-        "cat_layers_heads-mean.png",
-        "layer-0_images_heads-mean.png",
+        "cat_layers_heads-mean.svg",
+        "layer-0_images_heads-mean.svg",
     }
     assert all(Path(path).is_file() for path in result.output_paths)

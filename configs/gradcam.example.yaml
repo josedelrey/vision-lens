@@ -15,7 +15,7 @@ images:
     - data/samples/rocket.jpg
     - data/samples/motorcycle.jpg
     - data/samples/astronaut.jpg
-    - data/samples/1.jpg
+    - data/samples/kodim19.png
 
 output:
   directory: outputs/gradcam
@@ -27,3 +27,4 @@ runtime:
 visualization:
   overlay_alpha: 0.8
   cmap: viridis
+  grid_format: svg

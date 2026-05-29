@@ -6,6 +6,7 @@ from vision_lens.visualization import (
     make_image_comparison_grid,
     overlay_attention,
     render_heatmap,
+    save_grid_figure,
 )
 
 
@@ -38,7 +39,7 @@ def test_image_grid_uses_largest_tile_dimensions():
 
 
 def test_image_comparison_grid_keeps_expected_output_dimensions(tmp_path):
-    output_path = tmp_path / "comparison.png"
+    output_path = tmp_path / "comparison.svg"
     grid = make_image_comparison_grid(
         images=[
             Image.new("RGB", (8, 8), "white"),
@@ -56,4 +57,17 @@ def test_image_comparison_grid_keeps_expected_output_dimensions(tmp_path):
 
     assert grid.mode == "RGB"
     assert grid.size == (28, 36)
+    assert output_path.is_file()
+
+
+def test_save_grid_figure_supports_pdf_output(tmp_path):
+    output_path = tmp_path / "grid.pdf"
+
+    saved_path = save_grid_figure(
+        images=[Image.new("RGB", (8, 8), "white")],
+        labels=["example"],
+        output_path=output_path,
+    )
+
+    assert saved_path == output_path
     assert output_path.is_file()

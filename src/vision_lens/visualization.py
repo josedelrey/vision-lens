@@ -1,11 +1,18 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+import os
 from pathlib import Path
 from typing import Any
 
+# Prevent a Windows OpenMP runtime abort when torch is imported before matplotlib.
+os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+
 import matplotlib
+matplotlib.use("Agg")
+
 import numpy as np
+from matplotlib.figure import Figure
 from PIL import Image, ImageDraw
 
 from vision_lens.attention import LayerAttentionMaps
@@ -58,23 +65,25 @@ def make_layer_comparison_grid(
     head_index: int = 0,
     columns: int | None = None,
 ) -> Any:
-    tiles = [
-        labeled_image(
-            overlay_attention(
-                image,
-                layer.maps,
-                alpha=alpha,
-                cmap=cmap,
-                batch_index=batch_index,
-                head_index=head_index,
-            ),
-            f"layer {layer.layer_index}",
+    labels = [f"layer {layer.layer_index}" for layer in layers]
+    overlays = [
+        overlay_attention(
+            image,
+            layer.maps,
+            alpha=alpha,
+            cmap=cmap,
+            batch_index=batch_index,
+            head_index=head_index,
         )
         for layer in layers
     ]
+    tiles = [
+        labeled_image(overlay, label)
+        for overlay, label in zip(overlays, labels)
+    ]
     grid = image_grid(tiles, columns=columns)
     if output_path is not None:
-        save_image(grid, output_path)
+        save_grid(overlays, labels, output_path, columns=columns)
     return grid
 
 
@@ -97,24 +106,85 @@ def make_image_comparison_grid(
     if len(labels) != len(images):
         raise ValueError("labels must match the number of images.")
 
-    tiles = [
-        labeled_image(
-            overlay_attention(
-                image,
-                attention_map,
-                alpha=alpha,
-                cmap=cmap,
-                batch_index=batch_index,
-                head_index=head_index,
-            ),
-            label,
+    overlays = [
+        overlay_attention(
+            image,
+            attention_map,
+            alpha=alpha,
+            cmap=cmap,
+            batch_index=batch_index,
+            head_index=head_index,
         )
-        for image, attention_map, label in zip(images, attention_maps, labels)
+        for image, attention_map in zip(images, attention_maps)
+    ]
+    tiles = [
+        labeled_image(overlay, label)
+        for overlay, label in zip(overlays, labels)
     ]
     grid = image_grid(tiles, columns=columns)
     if output_path is not None:
-        save_image(grid, output_path)
+        save_grid(overlays, labels, output_path, columns=columns)
     return grid
+
+
+def save_grid(
+    images: Sequence[Any],
+    labels: Sequence[str],
+    output_path: str | Path,
+    columns: int | None = None,
+) -> Path:
+    return save_grid_figure(
+        images,
+        labels=labels,
+        output_path=output_path,
+        columns=columns,
+    )
+
+
+def save_grid_figure(
+    images: Sequence[Any],
+    labels: Sequence[str],
+    output_path: str | Path,
+    columns: int | None = None,
+) -> Path:
+    if len(images) != len(labels):
+        raise ValueError("images and labels must have the same length.")
+    if not images:
+        raise ValueError("save_grid_figure requires at least one image.")
+
+    pil_images = [_as_rgb_image(image) for image in images]
+    columns = _grid_columns(len(pil_images), columns)
+    rows = (len(pil_images) + columns - 1) // columns
+    tile_width = max(image.width for image in pil_images)
+    tile_height = max(image.height for image in pil_images)
+    label_height = 32
+    gap = 12
+    width = columns * tile_width + (columns - 1) * gap
+    height = rows * (tile_height + label_height) + (rows - 1) * gap
+    dpi = 100
+    figure = Figure(figsize=(width / dpi, height / dpi), dpi=dpi, frameon=False)
+
+    for index, (image, label) in enumerate(zip(pil_images, labels)):
+        row, column = divmod(index, columns)
+        cell_x = column * (tile_width + gap)
+        cell_y = row * (tile_height + label_height + gap)
+        image_x = cell_x + (tile_width - image.width) / 2
+        image_y_top = cell_y + label_height + (tile_height - image.height) / 2
+        image_y = height - image_y_top - image.height
+        figure.figimage(np.asarray(image), xo=image_x, yo=image_y)
+        figure.text(
+            (cell_x + tile_width / 2) / width,
+            1 - (cell_y + label_height / 2) / height,
+            label,
+            ha="center",
+            va="center",
+            fontsize=10,
+        )
+
+    output = Path(output_path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    figure.savefig(output)
+    return output
 
 
 def image_grid(
