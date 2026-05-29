@@ -4,6 +4,10 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any, Literal
 
+import torch
+import torch.nn as nn
+import torch.nn.functional as functional
+
 from vision_lens.models import ModelMetadata
 
 LayerSelection = Literal["all"] | int | Iterable[int]
@@ -43,14 +47,6 @@ def extract_attention_maps(
     heads: Iterable[int] | None = None,
     head_fusion: HeadFusion = "mean",
 ) -> AttentionExtractionResult:
-    try:
-        import torch
-    except ImportError as error:
-        raise RuntimeError(
-            "PyTorch is required to extract attention maps. "
-            "Install the project dependencies in the cv environment."
-        ) from error
-
     blocks = _vit_blocks(model)
     layer_indices = _select_layers(layers, total_layers=len(blocks))
     head_indices = None if heads is None else tuple(heads)
@@ -105,14 +101,6 @@ def extract_attention_rollout(
     metadata: ModelMetadata,
     layers: LayerSelection = "all",
 ) -> AttentionExtractionResult:
-    try:
-        import torch
-    except ImportError as error:
-        raise RuntimeError(
-            "PyTorch is required to extract attention rollout. "
-            "Install the project dependencies in the cv environment."
-        ) from error
-
     blocks = _vit_blocks(model)
     layer_indices = _select_layers(layers, total_layers=len(blocks))
     max_layer = max(layer_indices)
@@ -163,14 +151,6 @@ def extract_attention_rollout(
 
 
 def compute_attention_rollout(attentions: Iterable[Any]) -> tuple[Any, ...]:
-    try:
-        import torch
-    except ImportError as error:
-        raise RuntimeError(
-            "PyTorch is required to compute attention rollout. "
-            "Install the project dependencies in the cv environment."
-        ) from error
-
     rollout_layers = []
     joint_attention = None
     for attention in attentions:
@@ -201,14 +181,6 @@ def token_attention_to_map(
     patch_size: tuple[int, int] | None,
     normalize: bool = True,
 ) -> Any:
-    try:
-        import torch.nn.functional as functional
-    except ImportError as error:
-        raise RuntimeError(
-            "PyTorch is required to convert rollout tensors. "
-            "Install the project dependencies in the cv environment."
-        ) from error
-
     if len(token_attention.shape) != 3:
         raise ValueError("token_attention must have shape (batch, tokens, tokens).")
     if token_attention.shape[-1] != token_attention.shape[-2]:
@@ -244,15 +216,6 @@ def extract_gradcam(
     target_layer: str | None = None,
     target_classes: Iterable[int] | None = None,
 ) -> GradCamResult:
-    try:
-        import torch
-        import torch.nn.functional as functional
-    except ImportError as error:
-        raise RuntimeError(
-            "PyTorch is required to compute Grad-CAM. "
-            "Install the project dependencies in the cv environment."
-        ) from error
-
     resolved_layer_name, layer_module = _resolve_gradcam_layer(model, target_layer)
     activations = None
     gradients = None
@@ -316,14 +279,6 @@ def class_token_attention_to_map(
     head_fusion: HeadFusion = "mean",
     normalize: bool = True,
 ) -> Any:
-    try:
-        import torch.nn.functional as functional
-    except ImportError as error:
-        raise RuntimeError(
-            "PyTorch is required to convert attention tensors. "
-            "Install the project dependencies in the cv environment."
-        ) from error
-
     _validate_attention_tensor(attention)
     selected_heads = _select_heads(attention, heads)
     cls_attention = selected_heads[:, :, 0, 1:]
@@ -479,14 +434,6 @@ def _resolve_gradcam_layer(model: Any, target_layer: str | None) -> tuple[str, A
         if target_layer not in modules:
             raise ValueError(f"Grad-CAM target layer does not exist: {target_layer}")
         return target_layer, modules[target_layer]
-
-    try:
-        import torch.nn as nn
-    except ImportError as error:
-        raise RuntimeError(
-            "PyTorch is required to resolve Grad-CAM layers. "
-            "Install the project dependencies in the cv environment."
-        ) from error
 
     last_conv_name = None
     last_conv = None

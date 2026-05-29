@@ -3,6 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+import timm
+import torch
+from timm.data import ImageNetInfo, resolve_model_data_config
+from torchvision.models import get_model, get_model_weights
+
 from vision_lens.config import ModelConfig, RuntimeConfig, VisionLensConfig
 
 
@@ -51,17 +56,6 @@ def load_torchvision_cnn(
     model_config: ModelConfig,
     runtime_config: RuntimeConfig,
 ) -> LoadedModel:
-    try:
-        from PIL import Image as _Image  # noqa: F401
-        import torch
-        from torchvision.models import get_model, get_model_weights
-    except ImportError as error:
-        raise RuntimeError(
-            "Loading torchvision CNN models requires Pillow, PyTorch, "
-            "and torchvision. Install the project dependencies in the cv "
-            "environment."
-        ) from error
-
     device = resolve_device(runtime_config.device)
     model_options = model_config.options or {}
     model_options = {
@@ -108,17 +102,6 @@ def load_timm_vit(
     model_config: ModelConfig,
     runtime_config: RuntimeConfig,
 ) -> LoadedModel:
-    try:
-        from PIL import Image as _Image  # noqa: F401
-        import timm
-        import torch
-        from timm.data import resolve_model_data_config
-    except ImportError as error:
-        raise RuntimeError(
-            "Loading timm ViT models requires Pillow, PyTorch, torchvision, "
-            "and timm. Install the project dependencies in the cv environment."
-        ) from error
-
     device = resolve_device(runtime_config.device)
     model_options = model_config.options or {}
     model = timm.create_model(
@@ -153,14 +136,6 @@ def load_timm_vit(
 
 
 def resolve_device(requested: str) -> str:
-    try:
-        import torch
-    except ImportError as error:
-        raise RuntimeError(
-            "PyTorch is required for device selection. "
-            "Install the project dependencies in the cv environment."
-        ) from error
-
     if requested != "auto":
         return requested
     if torch.cuda.is_available():
@@ -210,9 +185,4 @@ def _num_classes(model: Any) -> int | None:
 
 
 def _imagenet_labels() -> tuple[str, ...] | None:
-    try:
-        from timm.data import ImageNetInfo
-    except ImportError:
-        return None
-
     return tuple(ImageNetInfo().label_descriptions())

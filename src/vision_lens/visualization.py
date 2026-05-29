@@ -4,6 +4,10 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+import matplotlib
+import numpy as np
+from PIL import Image, ImageDraw
+
 from vision_lens.attention import LayerAttentionMaps
 
 
@@ -40,14 +44,6 @@ def overlay_attention(
         batch_index=batch_index,
         head_index=head_index,
     ).resize(base_image.size)
-
-    try:
-        from PIL import Image
-    except ImportError as error:
-        raise RuntimeError(
-            "Pillow is required to overlay attention maps. "
-            "Install the project dependencies in the cv environment."
-        ) from error
 
     return Image.blend(base_image, heatmap, alpha=alpha)
 
@@ -136,14 +132,6 @@ def image_grid(
     tile_width = max(image.width for image in pil_images)
     tile_height = max(image.height for image in pil_images)
 
-    try:
-        from PIL import Image
-    except ImportError as error:
-        raise RuntimeError(
-            "Pillow is required to build image grids. "
-            "Install the project dependencies in the cv environment."
-        ) from error
-
     width = columns * tile_width + (columns - 1) * gap
     height = rows * tile_height + (rows - 1) * gap
     grid = Image.new("RGB", (width, height), background)
@@ -158,14 +146,6 @@ def image_grid(
 
 
 def labeled_image(image: Any, label: str, label_height: int = 28) -> Any:
-    try:
-        from PIL import Image, ImageDraw
-    except ImportError as error:
-        raise RuntimeError(
-            "Pillow is required to draw labels. "
-            "Install the project dependencies in the cv environment."
-        ) from error
-
     base_image = _as_rgb_image(image)
     labeled = Image.new(
         "RGB",
@@ -191,14 +171,6 @@ def attention_map_to_array(
     batch_index: int = 0,
     head_index: int = 0,
 ) -> Any:
-    try:
-        import numpy as np
-    except ImportError as error:
-        raise RuntimeError(
-            "NumPy is required to render attention maps. "
-            "Install the project dependencies in the cv environment."
-        ) from error
-
     array = _to_numpy(attention_map)
     if array.ndim == 4:
         array = array[batch_index, head_index]
@@ -216,54 +188,21 @@ def attention_map_to_array(
 
 
 def _to_numpy(value: Any) -> Any:
-    try:
-        import numpy as np
-    except ImportError as error:
-        raise RuntimeError(
-            "NumPy is required to render attention maps. "
-            "Install the project dependencies in the cv environment."
-        ) from error
-
     if hasattr(value, "detach"):
         value = value.detach().cpu().numpy()
     return np.asarray(value)
 
 
 def _colormap(array: Any, cmap: str) -> Any:
-    try:
-        import matplotlib
-        import numpy as np
-    except ImportError as error:
-        raise RuntimeError(
-            "Matplotlib and NumPy are required to render heatmaps. "
-            "Install the project dependencies in the cv environment."
-        ) from error
-
     colorized = matplotlib.colormaps[cmap](array)[..., :3]
     return (colorized * 255).astype(np.uint8)
 
 
 def _image_from_array(array: Any) -> Any:
-    try:
-        from PIL import Image
-    except ImportError as error:
-        raise RuntimeError(
-            "Pillow is required to render images. "
-            "Install the project dependencies in the cv environment."
-        ) from error
-
     return Image.fromarray(array).convert("RGB")
 
 
 def _as_rgb_image(image: Any) -> Any:
-    try:
-        from PIL import Image
-    except ImportError as error:
-        raise RuntimeError(
-            "Pillow is required to render images. "
-            "Install the project dependencies in the cv environment."
-        ) from error
-
     if isinstance(image, Image.Image):
         return image.convert("RGB")
     return Image.fromarray(_to_numpy(image)).convert("RGB")
