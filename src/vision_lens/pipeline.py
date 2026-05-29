@@ -114,6 +114,7 @@ def run_vit_rollout_comparison_from_config(
         rollout=rollout,
         output_dir=resolved_output_dir,
         alpha=config.visualization.overlay_alpha,
+        cmap=config.visualization.cmap,
     )
 
     return PipelineResult(
@@ -164,6 +165,7 @@ def run_gradcam_from_config(config: VisionLensConfig) -> GradCamPipelineResult:
         gradcam=gradcam,
         output_dir=config.output.directory,
         alpha=config.visualization.overlay_alpha,
+        cmap=config.visualization.cmap,
     )
     return GradCamPipelineResult(
         config=config,
@@ -204,6 +206,7 @@ def run_vit_attention_from_config(config: VisionLensConfig) -> PipelineResult:
         attention=attention,
         output_dir=config.output.directory,
         alpha=config.visualization.overlay_alpha,
+        cmap=config.visualization.cmap,
     )
 
     return PipelineResult(
@@ -220,6 +223,7 @@ def export_attention_outputs(
     attention: AttentionExtractionResult,
     output_dir: Path,
     alpha: float,
+    cmap: str,
 ) -> tuple[Path, ...]:
     output_dir.mkdir(parents=True, exist_ok=True)
     output_paths: list[Path] = []
@@ -232,11 +236,16 @@ def export_attention_outputs(
                 suffix = _head_suffix(image_layer, head_index)
                 stem = f"{labels[image_index]}_layer-{layer.layer_index}_{suffix}"
 
-                heatmap = render_heatmap(image_layer.maps, head_index=head_index)
+                heatmap = render_heatmap(
+                    image_layer.maps,
+                    cmap=cmap,
+                    head_index=head_index,
+                )
                 overlay = overlay_attention(
                     image,
                     image_layer.maps,
                     alpha=alpha,
+                    cmap=cmap,
                     head_index=head_index,
                 )
 
@@ -259,6 +268,7 @@ def export_attention_outputs(
                 image_layers,
                 output_path=output_path,
                 alpha=alpha,
+                cmap=cmap,
                 head_index=head_index,
             )
             output_paths.append(output_path)
@@ -274,6 +284,7 @@ def export_attention_outputs(
                 labels=labels,
                 output_path=output_path,
                 alpha=alpha,
+                cmap=cmap,
                 head_index=head_index,
             )
             output_paths.append(output_path)
@@ -288,6 +299,7 @@ def export_rollout_comparison_outputs(
     rollout: AttentionExtractionResult,
     output_dir: Path,
     alpha: float,
+    cmap: str,
 ) -> tuple[Path, ...]:
     output_dir.mkdir(parents=True, exist_ok=True)
     output_paths: list[Path] = []
@@ -301,13 +313,23 @@ def export_rollout_comparison_outputs(
 
             tiles.append(
                 labeled_image(
-                    overlay_attention(image, layer_for_image.maps, alpha=alpha),
+                    overlay_attention(
+                        image,
+                        layer_for_image.maps,
+                        alpha=alpha,
+                        cmap=cmap,
+                    ),
                     f"layer {layer.layer_index}",
                 )
             )
             tiles.append(
                 labeled_image(
-                    overlay_attention(image, rollout_for_image.maps, alpha=alpha),
+                    overlay_attention(
+                        image,
+                        rollout_for_image.maps,
+                        alpha=alpha,
+                        cmap=cmap,
+                    ),
                     f"rollout {rollout_layer.layer_index}",
                 )
             )
@@ -315,13 +337,18 @@ def export_rollout_comparison_outputs(
             stem = f"{labels[image_index]}_rollout-{rollout_layer.layer_index}"
             output_paths.append(
                 save_image(
-                    render_heatmap(rollout_for_image.maps),
+                    render_heatmap(rollout_for_image.maps, cmap=cmap),
                     output_dir / f"{stem}_heatmap.png",
                 )
             )
             output_paths.append(
                 save_image(
-                    overlay_attention(image, rollout_for_image.maps, alpha=alpha),
+                    overlay_attention(
+                        image,
+                        rollout_for_image.maps,
+                        alpha=alpha,
+                        cmap=cmap,
+                    ),
                     output_dir / f"{stem}_overlay.png",
                 )
             )
@@ -339,6 +366,7 @@ def export_gradcam_outputs(
     gradcam: GradCamResult,
     output_dir: Path,
     alpha: float,
+    cmap: str,
 ) -> tuple[Path, ...]:
     output_dir.mkdir(parents=True, exist_ok=True)
     output_paths: list[Path] = []
@@ -348,11 +376,14 @@ def export_gradcam_outputs(
         maps = _slice_batch(gradcam.maps, image_index)
         stem = f"{labels[image_index]}_gradcam"
         output_paths.append(
-            save_image(render_heatmap(maps), output_dir / f"{stem}_heatmap.png")
+            save_image(
+                render_heatmap(maps, cmap=cmap),
+                output_dir / f"{stem}_heatmap.png",
+            )
         )
         output_paths.append(
             save_image(
-                overlay_attention(image, maps, alpha=alpha),
+                overlay_attention(image, maps, alpha=alpha, cmap=cmap),
                 output_dir / f"{stem}_overlay.png",
             )
         )
@@ -365,6 +396,7 @@ def export_gradcam_outputs(
         labels=labels,
         output_path=grid_path,
         alpha=alpha,
+        cmap=cmap,
     )
     output_paths.append(grid_path)
     return tuple(output_paths)
