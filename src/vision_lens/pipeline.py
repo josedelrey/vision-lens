@@ -11,7 +11,12 @@ from vision_lens.attention import (
     extract_gradcam,
 )
 from vision_lens.config import VisionLensConfig, load_config
-from vision_lens.images import build_preprocess, load_images, preprocess_images
+from vision_lens.images import (
+    build_preprocess,
+    load_images,
+    preprocess_images,
+    tensors_to_display_images,
+)
 from vision_lens.models import LoadedModel, load_model
 from vision_lens.visualization import (
     image_grid,
@@ -84,6 +89,11 @@ def run_vit_rollout_comparison_from_config(
         image_size=config.runtime.image_size,
     )
     inputs = preprocess_images(images, transform)
+    display_images = tensors_to_display_images(
+        inputs,
+        loaded_model.metadata.data_config,
+    )
+
     rollout = extract_attention_rollout(
         loaded_model.model,
         inputs,
@@ -98,7 +108,7 @@ def run_vit_rollout_comparison_from_config(
 
     resolved_output_dir = Path(output_dir) if output_dir else config.output.directory
     output_paths = export_rollout_comparison_outputs(
-        images=images,
+        images=display_images,
         image_paths=config.images.paths,
         layer_attention=layer_attention,
         rollout=rollout,
@@ -133,9 +143,15 @@ def run_gradcam_from_config(config: VisionLensConfig) -> GradCamPipelineResult:
         image_size=config.runtime.image_size,
     )
     inputs = preprocess_images(images, transform)
+    display_images = tensors_to_display_images(
+        inputs,
+        loaded_model.metadata.data_config,
+    )
+
     target_layer = None
     if config.model.options is not None:
         target_layer = config.model.options.get("gradcam_target_layer")
+
     gradcam = extract_gradcam(
         loaded_model.model,
         inputs,
@@ -143,7 +159,7 @@ def run_gradcam_from_config(config: VisionLensConfig) -> GradCamPipelineResult:
         target_layer=target_layer,
     )
     output_paths = export_gradcam_outputs(
-        images=images,
+        images=display_images,
         image_paths=config.images.paths,
         gradcam=gradcam,
         output_dir=config.output.directory,
@@ -171,6 +187,11 @@ def run_vit_attention_from_config(config: VisionLensConfig) -> PipelineResult:
         image_size=config.runtime.image_size,
     )
     inputs = preprocess_images(images, transform)
+    display_images = tensors_to_display_images(
+        inputs,
+        loaded_model.metadata.data_config,
+    )
+
     attention = _extract_attention(
         loaded_model=loaded_model,
         inputs=inputs,
@@ -178,7 +199,7 @@ def run_vit_attention_from_config(config: VisionLensConfig) -> PipelineResult:
     )
 
     output_paths = export_attention_outputs(
-        images=images,
+        images=display_images,
         image_paths=config.images.paths,
         attention=attention,
         output_dir=config.output.directory,
@@ -277,6 +298,7 @@ def export_rollout_comparison_outputs(
         for layer, rollout_layer in zip(layer_attention.layers, rollout.layers):
             layer_for_image = _layer_for_image(layer, image_index)
             rollout_for_image = _layer_for_image(rollout_layer, image_index)
+
             tiles.append(
                 labeled_image(
                     overlay_attention(image, layer_for_image.maps, alpha=alpha),

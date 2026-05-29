@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
+import yaml
+
 HeadFusion = Literal["mean", "max", "none"]
 Device = Literal["auto", "cpu", "cuda", "mps"]
 AttentionLayers = Literal["all"] | tuple[int, ...]
@@ -58,14 +60,6 @@ class VisionLensConfig:
 
 
 def load_config(path: str | Path) -> VisionLensConfig:
-    try:
-        import yaml
-    except ImportError as error:
-        raise RuntimeError(
-            "PyYAML is required to load YAML config files. "
-            'Install the project with `python -m pip install -e ".[dev]"`.'
-        ) from error
-
     config_path = Path(path)
     with config_path.open("r", encoding="utf-8") as file:
         raw_config = yaml.safe_load(file) or {}
