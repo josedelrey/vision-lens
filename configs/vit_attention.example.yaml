@@ -14,6 +14,7 @@ images:
     - data/samples/rocket.jpg
     - data/samples/motorcycle.jpg
     - data/samples/astronaut.jpg
+    - data/samples/1.jpg
 
 output:
   directory: outputs/dino_vits8_attention

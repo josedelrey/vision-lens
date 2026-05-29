@@ -230,4 +230,5 @@ outputs/*
 !data/samples/coffee.jpg
 !data/samples/motorcycle.jpg
 !data/samples/rocket.jpg
+!data/samples/kodim19.png
 !outputs/.gitkeep
