@@ -23,8 +23,11 @@ python -m pip install -e ".[dev]"
 Run the exercise pipeline from an example script:
 
 ```bash
-python examples/run_vit_attention.py
+python examples/export_visualization_gallery.py
 ```
+
+That script exports fused ViT attention maps, individual-head ViT maps, rollout
+comparisons, and CNN Grad-CAM figures under `outputs/visualization_gallery/`.
 
 Or with the CLI:
 
