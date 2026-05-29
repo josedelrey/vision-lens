@@ -17,6 +17,12 @@ from PIL import Image, ImageDraw
 
 from vision_lens.attention import LayerAttentionMaps
 
+GRID_TILE_SIZE = (224, 224)
+GRID_LABEL_HEIGHT = 32
+GRID_GAP = 12
+GRID_DPI = 100
+GRID_LABEL_FONT_SIZE = 10
+
 
 def render_heatmap(
     attention_map: Any,
@@ -152,24 +158,29 @@ def save_grid_figure(
     if not images:
         raise ValueError("save_grid_figure requires at least one image.")
 
-    pil_images = [_as_rgb_image(image) for image in images]
+    pil_images = [
+        _fit_image_to_tile(_as_rgb_image(image), GRID_TILE_SIZE)
+        for image in images
+    ]
     columns = _grid_columns(len(pil_images), columns)
     rows = (len(pil_images) + columns - 1) // columns
-    tile_width = max(image.width for image in pil_images)
-    tile_height = max(image.height for image in pil_images)
-    label_height = 32
-    gap = 12
+    tile_width, tile_height = GRID_TILE_SIZE
+    label_height = GRID_LABEL_HEIGHT
+    gap = GRID_GAP
     width = columns * tile_width + (columns - 1) * gap
     height = rows * (tile_height + label_height) + (rows - 1) * gap
-    dpi = 100
-    figure = Figure(figsize=(width / dpi, height / dpi), dpi=dpi, frameon=False)
+    figure = Figure(
+        figsize=(width / GRID_DPI, height / GRID_DPI),
+        dpi=GRID_DPI,
+        frameon=False,
+    )
 
     for index, (image, label) in enumerate(zip(pil_images, labels)):
         row, column = divmod(index, columns)
         cell_x = column * (tile_width + gap)
         cell_y = row * (tile_height + label_height + gap)
-        image_x = cell_x + (tile_width - image.width) / 2
-        image_y_top = cell_y + label_height + (tile_height - image.height) / 2
+        image_x = cell_x
+        image_y_top = cell_y + label_height
         image_y = height - image_y_top - image.height
         figure.figimage(np.asarray(image), xo=image_x, yo=image_y)
         figure.text(
@@ -178,7 +189,7 @@ def save_grid_figure(
             label,
             ha="center",
             va="center",
-            fontsize=10,
+            fontsize=GRID_LABEL_FONT_SIZE,
         )
 
     output = Path(output_path)
@@ -270,6 +281,18 @@ def _colormap(array: Any, cmap: str) -> Any:
 
 def _image_from_array(array: Any) -> Any:
     return Image.fromarray(array).convert("RGB")
+
+
+def _fit_image_to_tile(image: Any, tile_size: tuple[int, int]) -> Any:
+    base_image = _as_rgb_image(image)
+    fitted = base_image.copy()
+    fitted.thumbnail(tile_size, Image.Resampling.LANCZOS)
+
+    tile = Image.new("RGB", tile_size, "white")
+    x = (tile_size[0] - fitted.width) // 2
+    y = (tile_size[1] - fitted.height) // 2
+    tile.paste(fitted, (x, y))
+    return tile
 
 
 def _as_rgb_image(image: Any) -> Any:
