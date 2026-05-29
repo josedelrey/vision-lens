@@ -15,6 +15,12 @@ images:
     - data/samples/rocket.jpg
     - data/samples/motorcycle.jpg
     - data/samples/astronaut.jpg
+    - data/samples/p1.jpg
+    - data/samples/p2.jpg
+    - data/samples/p3.jpg
+    - data/samples/p4.jpg
+    - data/samples/p5.jpg
+    - data/samples/p6.jpg
 
 output:
   directory: outputs/gradcam
