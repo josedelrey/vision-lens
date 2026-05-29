@@ -47,6 +47,7 @@ class RuntimeConfig:
 class VisualizationConfig:
     overlay_alpha: float = 0.45
     cmap: str = "viridis"
+    grid_format: str = "png"
 
 
 @dataclass(frozen=True)
@@ -124,6 +125,7 @@ def parse_config(
                 visualization.get("cmap", "viridis"),
                 "visualization.cmap",
             ),
+            grid_format=_grid_format(visualization.get("grid_format", "png")),
         ),
     )
 
@@ -266,3 +268,11 @@ def _alpha(value: Any) -> float:
     ):
         raise ValueError("visualization.overlay_alpha must be between 0 and 1.")
     return float(value)
+
+
+def _grid_format(value: Any) -> str:
+    allowed = {"pdf", "png", "svg"}
+    if value not in allowed:
+        options = ", ".join(sorted(allowed))
+        raise ValueError(f"visualization.grid_format must be one of: {options}.")
+    return value

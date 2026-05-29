@@ -19,12 +19,11 @@ from vision_lens.images import (
 )
 from vision_lens.models import LoadedModel, load_model
 from vision_lens.visualization import (
-    image_grid,
-    labeled_image,
     make_image_comparison_grid,
     make_layer_comparison_grid,
     overlay_attention,
     render_heatmap,
+    save_grid,
     save_image,
 )
 
@@ -115,6 +114,7 @@ def run_vit_rollout_comparison_from_config(
         output_dir=resolved_output_dir,
         alpha=config.visualization.overlay_alpha,
         cmap=config.visualization.cmap,
+        grid_format=config.visualization.grid_format,
     )
 
     return PipelineResult(
@@ -166,6 +166,7 @@ def run_gradcam_from_config(config: VisionLensConfig) -> GradCamPipelineResult:
         output_dir=config.output.directory,
         alpha=config.visualization.overlay_alpha,
         cmap=config.visualization.cmap,
+        grid_format=config.visualization.grid_format,
     )
     return GradCamPipelineResult(
         config=config,
@@ -207,6 +208,7 @@ def run_vit_attention_from_config(config: VisionLensConfig) -> PipelineResult:
         output_dir=config.output.directory,
         alpha=config.visualization.overlay_alpha,
         cmap=config.visualization.cmap,
+        grid_format=config.visualization.grid_format,
     )
 
     return PipelineResult(
@@ -224,6 +226,7 @@ def export_attention_outputs(
     output_dir: Path,
     alpha: float,
     cmap: str,
+    grid_format: str,
 ) -> tuple[Path, ...]:
     output_dir.mkdir(parents=True, exist_ok=True)
     output_paths: list[Path] = []
@@ -262,7 +265,9 @@ def export_attention_outputs(
         )
         for head_index in range(_head_count(image_layers[0])):
             suffix = _head_suffix(image_layers[0], head_index)
-            output_path = output_dir / f"{labels[image_index]}_layers_{suffix}.png"
+            output_path = (
+                output_dir / f"{labels[image_index]}_layers_{suffix}.{grid_format}"
+            )
             make_layer_comparison_grid(
                 image,
                 image_layers,
@@ -277,7 +282,10 @@ def export_attention_outputs(
         image_maps = [_slice_batch(layer.maps, index) for index in range(len(images))]
         for head_index in range(_head_count(layer)):
             suffix = _head_suffix(layer, head_index)
-            output_path = output_dir / f"layer-{layer.layer_index}_images_{suffix}.png"
+            output_path = (
+                output_dir
+                / f"layer-{layer.layer_index}_images_{suffix}.{grid_format}"
+            )
             make_image_comparison_grid(
                 images,
                 image_maps,
@@ -300,39 +308,36 @@ def export_rollout_comparison_outputs(
     output_dir: Path,
     alpha: float,
     cmap: str,
+    grid_format: str,
 ) -> tuple[Path, ...]:
     output_dir.mkdir(parents=True, exist_ok=True)
     output_paths: list[Path] = []
     labels = [path.stem for path in image_paths]
 
     for image_index, image in enumerate(images):
-        tiles = []
+        comparison_images = []
+        comparison_labels = []
         for layer, rollout_layer in zip(layer_attention.layers, rollout.layers):
             layer_for_image = _layer_for_image(layer, image_index)
             rollout_for_image = _layer_for_image(rollout_layer, image_index)
-
-            tiles.append(
-                labeled_image(
-                    overlay_attention(
-                        image,
-                        layer_for_image.maps,
-                        alpha=alpha,
-                        cmap=cmap,
-                    ),
-                    f"layer {layer.layer_index}",
+            comparison_images.append(
+                overlay_attention(
+                    image,
+                    layer_for_image.maps,
+                    alpha=alpha,
+                    cmap=cmap,
                 )
             )
-            tiles.append(
-                labeled_image(
-                    overlay_attention(
-                        image,
-                        rollout_for_image.maps,
-                        alpha=alpha,
-                        cmap=cmap,
-                    ),
-                    f"rollout {rollout_layer.layer_index}",
+            comparison_labels.append(f"layer {layer.layer_index}")
+            comparison_images.append(
+                overlay_attention(
+                    image,
+                    rollout_for_image.maps,
+                    alpha=alpha,
+                    cmap=cmap,
                 )
             )
+            comparison_labels.append(f"rollout {rollout_layer.layer_index}")
 
             stem = f"{labels[image_index]}_rollout-{rollout_layer.layer_index}"
             output_paths.append(
@@ -353,8 +358,16 @@ def export_rollout_comparison_outputs(
                 )
             )
 
-        grid_path = output_dir / f"{labels[image_index]}_rollout_comparison.png"
-        save_image(image_grid(tiles, columns=2), grid_path)
+        grid_path = (
+            output_dir
+            / f"{labels[image_index]}_rollout_comparison.{grid_format}"
+        )
+        save_grid(
+            comparison_images,
+            labels=comparison_labels,
+            output_path=grid_path,
+            columns=2,
+        )
         output_paths.append(grid_path)
 
     return tuple(output_paths)
@@ -367,6 +380,7 @@ def export_gradcam_outputs(
     output_dir: Path,
     alpha: float,
     cmap: str,
+    grid_format: str,
 ) -> tuple[Path, ...]:
     output_dir.mkdir(parents=True, exist_ok=True)
     output_paths: list[Path] = []
@@ -389,7 +403,7 @@ def export_gradcam_outputs(
         )
 
     image_maps = [_slice_batch(gradcam.maps, index) for index in range(len(images))]
-    grid_path = output_dir / "gradcam_images.png"
+    grid_path = output_dir / f"gradcam_images.{grid_format}"
     make_image_comparison_grid(
         images,
         image_maps,

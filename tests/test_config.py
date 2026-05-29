@@ -38,18 +38,21 @@ def test_parse_config_reads_visualization_cmap():
             {
                 "overlay_alpha": 0.35,
                 "cmap": "viridis",
+                "grid_format": "svg",
             }
         )
     )
 
     assert config.visualization.overlay_alpha == 0.35
     assert config.visualization.cmap == "viridis"
+    assert config.visualization.grid_format == "svg"
 
 
 def test_parse_config_defaults_visualization_cmap_to_viridis():
     config = parse_config(_minimal_config({"overlay_alpha": 0.35}))
 
     assert config.visualization.cmap == "viridis"
+    assert config.visualization.grid_format == "png"
 
 
 def test_load_config_resolves_paths_from_config_file(tmp_path):
