@@ -46,6 +46,7 @@ class RuntimeConfig:
 @dataclass(frozen=True)
 class VisualizationConfig:
     overlay_alpha: float = 0.45
+    cmap: str = "viridis"
 
 
 @dataclass(frozen=True)
@@ -119,6 +120,10 @@ def parse_config(
         ),
         visualization=VisualizationConfig(
             overlay_alpha=_alpha(visualization.get("overlay_alpha", 0.45)),
+            cmap=_optional_str(
+                visualization.get("cmap", "viridis"),
+                "visualization.cmap",
+            ),
         ),
     )
 

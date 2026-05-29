@@ -13,7 +13,7 @@ from vision_lens.attention import LayerAttentionMaps
 
 def render_heatmap(
     attention_map: Any,
-    cmap: str = "magma",
+    cmap: str = "viridis",
     batch_index: int = 0,
     head_index: int = 0,
 ) -> Any:
@@ -30,7 +30,7 @@ def overlay_attention(
     image: Any,
     attention_map: Any,
     alpha: float = 0.45,
-    cmap: str = "magma",
+    cmap: str = "viridis",
     batch_index: int = 0,
     head_index: int = 0,
 ) -> Any:
@@ -53,7 +53,7 @@ def make_layer_comparison_grid(
     layers: Sequence[LayerAttentionMaps],
     output_path: str | Path | None = None,
     alpha: float = 0.45,
-    cmap: str = "magma",
+    cmap: str = "viridis",
     batch_index: int = 0,
     head_index: int = 0,
     columns: int | None = None,
@@ -84,7 +84,7 @@ def make_image_comparison_grid(
     labels: Sequence[str] | None = None,
     output_path: str | Path | None = None,
     alpha: float = 0.45,
-    cmap: str = "magma",
+    cmap: str = "viridis",
     batch_index: int = 0,
     head_index: int = 0,
     columns: int | None = None,

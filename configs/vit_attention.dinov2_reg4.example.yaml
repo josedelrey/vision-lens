@@ -29,3 +29,4 @@ runtime:
 
 visualization:
   overlay_alpha: 0.8
+  cmap: viridis
