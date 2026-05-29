@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from PIL import Image
+
 from vision_lens.attention import (
     AttentionExtractionResult,
     GradCamResult,
@@ -26,6 +28,8 @@ from vision_lens.visualization import (
     save_grid,
     save_image,
 )
+
+ROLLOUT_GRID_MAX_COLUMNS = 4
 
 
 @dataclass(frozen=True)
@@ -315,30 +319,8 @@ def export_rollout_comparison_outputs(
     labels = [path.stem for path in image_paths]
 
     for image_index, image in enumerate(images):
-        comparison_images = []
-        comparison_labels = []
         for layer, rollout_layer in zip(layer_attention.layers, rollout.layers):
-            layer_for_image = _layer_for_image(layer, image_index)
             rollout_for_image = _layer_for_image(rollout_layer, image_index)
-            comparison_images.append(
-                overlay_attention(
-                    image,
-                    layer_for_image.maps,
-                    alpha=alpha,
-                    cmap=cmap,
-                )
-            )
-            comparison_labels.append(f"layer {layer.layer_index}")
-            comparison_images.append(
-                overlay_attention(
-                    image,
-                    rollout_for_image.maps,
-                    alpha=alpha,
-                    cmap=cmap,
-                )
-            )
-            comparison_labels.append(f"rollout {rollout_layer.layer_index}")
-
             stem = f"{labels[image_index]}_rollout-{rollout_layer.layer_index}"
             output_paths.append(
                 save_image(
@@ -362,11 +344,19 @@ def export_rollout_comparison_outputs(
             output_dir
             / f"{labels[image_index]}_rollout_comparison.{grid_format}"
         )
+        comparison_images, comparison_labels, columns = _rollout_grid_items(
+            image=image,
+            layer_attention=layer_attention,
+            rollout=rollout,
+            image_index=image_index,
+            alpha=alpha,
+            cmap=cmap,
+        )
         save_grid(
             comparison_images,
             labels=comparison_labels,
             output_path=grid_path,
-            columns=2,
+            columns=columns,
         )
         output_paths.append(grid_path)
 
@@ -460,3 +450,69 @@ def _head_suffix(layer: LayerAttentionMaps, head_index: int) -> str:
     if layer.head_indices is None:
         return f"head-{head_index}"
     return f"head-{layer.head_indices[head_index]}"
+
+
+def _rollout_grid_items(
+    image: Any,
+    layer_attention: AttentionExtractionResult,
+    rollout: AttentionExtractionResult,
+    image_index: int,
+    alpha: float,
+    cmap: str,
+) -> tuple[list[Any], list[str], int]:
+    pairs = tuple(zip(layer_attention.layers, rollout.layers))
+    if not pairs:
+        raise ValueError("Rollout comparison requires at least one layer.")
+
+    columns = min(len(pairs), ROLLOUT_GRID_MAX_COLUMNS)
+    comparison_images = []
+    comparison_labels = []
+
+    for chunk_start in range(0, len(pairs), columns):
+        chunk = pairs[chunk_start : chunk_start + columns]
+        layer_images = []
+        layer_labels = []
+        rollout_images = []
+        rollout_labels = []
+
+        for layer, rollout_layer in chunk:
+            layer_for_image = _layer_for_image(layer, image_index)
+            rollout_for_image = _layer_for_image(rollout_layer, image_index)
+            layer_images.append(
+                overlay_attention(
+                    image,
+                    layer_for_image.maps,
+                    alpha=alpha,
+                    cmap=cmap,
+                )
+            )
+            layer_labels.append(f"layer {layer.layer_index}")
+            rollout_images.append(
+                overlay_attention(
+                    image,
+                    rollout_for_image.maps,
+                    alpha=alpha,
+                    cmap=cmap,
+                )
+            )
+            rollout_labels.append(f"rollout {rollout_layer.layer_index}")
+
+        padding = columns - len(chunk)
+        if padding:
+            blanks = [_blank_like(image) for _ in range(padding)]
+            layer_images.extend(blanks)
+            layer_labels.extend([""] * padding)
+            rollout_images.extend(blanks)
+            rollout_labels.extend([""] * padding)
+
+        comparison_images.extend(layer_images)
+        comparison_labels.extend(layer_labels)
+        comparison_images.extend(rollout_images)
+        comparison_labels.extend(rollout_labels)
+
+    return comparison_images, comparison_labels, columns
+
+
+def _blank_like(image: Any) -> Any:
+    base_size = getattr(image, "size", (224, 224))
+    return Image.new("RGB", base_size, "white")
