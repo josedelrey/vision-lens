@@ -35,6 +35,7 @@ class AttentionConfig:
     layers: AttentionLayers
     heads: tuple[int, ...] | None = None
     head_fusion: HeadFusion = "mean"
+    rollout_discard_ratio: float = 0.9
 
 
 @dataclass(frozen=True)
@@ -162,6 +163,10 @@ def _parse_attention(
             "attention.heads",
         ),
         head_fusion=_head_fusion(section.get("head_fusion", "mean")),
+        rollout_discard_ratio=_ratio(
+            section.get("rollout_discard_ratio", 0.9),
+            "attention.rollout_discard_ratio",
+        ),
     )
 
 
@@ -267,6 +272,16 @@ def _alpha(value: Any) -> float:
         or not 0 <= value <= 1
     ):
         raise ValueError("visualization.overlay_alpha must be between 0 and 1.")
+    return float(value)
+
+
+def _ratio(value: Any, field_name: str) -> float:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int | float)
+        or not 0 <= value < 1
+    ):
+        raise ValueError(f"{field_name} must be at least 0 and less than 1.")
     return float(value)
 
 

@@ -102,6 +102,8 @@ def run_vit_rollout_comparison_from_config(
         inputs,
         loaded_model.metadata,
         layers=config.attention.layers,
+        head_fusion=config.attention.head_fusion,
+        discard_ratio=config.attention.rollout_discard_ratio,
     )
     layer_attention = _extract_attention(
         loaded_model=loaded_model,
