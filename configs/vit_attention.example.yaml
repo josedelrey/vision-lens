@@ -22,7 +22,8 @@ output:
 attention:
   layers: [2, 5, 8, 11]
   heads: null
-  head_fusion: mean
+  head_fusion: max
+  rollout_discard_ratio: 0.9
 
 runtime:
   device: auto
