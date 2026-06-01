@@ -151,55 +151,6 @@ def test_compute_attention_rollout_returns_one_map_per_layer():
     assert rollout[1].shape == (1, 5, 5)
 
 
-def test_compute_attention_rollout_uses_max_head_fusion():
-    attention = torch.tensor(
-        [
-            [
-                [
-                    [0.1, 0.2, 0.7],
-                    [0.3, 0.4, 0.3],
-                    [0.1, 0.8, 0.1],
-                ],
-                [
-                    [0.9, 0.05, 0.05],
-                    [0.1, 0.8, 0.1],
-                    [0.4, 0.2, 0.4],
-                ],
-            ]
-        ]
-    )
-
-    rollout = compute_attention_rollout(
-        [attention],
-        head_fusion="max",
-        discard_ratio=0,
-    )
-
-    expected = torch.tensor(
-        [
-            [
-                [1.9 / 2.8, 0.2 / 2.8, 0.7 / 2.8],
-                [0.3 / 2.4, 1.8 / 2.4, 0.3 / 2.4],
-                [0.4 / 2.6, 0.8 / 2.6, 1.4 / 2.6],
-            ]
-        ]
-    )
-    assert torch.allclose(rollout[0], expected)
-
-
-def test_compute_attention_rollout_discards_lowest_attention_values():
-    attention = torch.tensor([[[[0.4, 0.1], [0.2, 0.3]]]])
-
-    rollout = compute_attention_rollout(
-        [attention],
-        head_fusion="max",
-        discard_ratio=0.25,
-    )
-
-    expected = torch.tensor([[[1.0, 0.0], [0.2 / 1.5, 1.3 / 1.5]]])
-    assert torch.allclose(rollout[0], expected)
-
-
 def test_token_attention_to_map_resizes_rollout_attention():
     token_attention = torch.zeros(1, 5, 5)
     token_attention[:, 0, 1:] = torch.tensor([0.1, 0.2, 0.3, 0.4])

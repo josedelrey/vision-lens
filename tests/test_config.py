@@ -46,18 +46,6 @@ def test_parse_config_reads_visualization_cmap():
     assert config.visualization.overlay_alpha == 0.35
     assert config.visualization.cmap == "viridis"
     assert config.visualization.grid_format == "svg"
-    assert config.attention is not None
-    assert config.attention.rollout_discard_ratio == 0.9
-
-
-def test_parse_config_reads_rollout_discard_ratio():
-    raw_config = _minimal_config({"overlay_alpha": 0.35})
-    raw_config["attention"]["rollout_discard_ratio"] = 0.75
-
-    config = parse_config(raw_config)
-
-    assert config.attention is not None
-    assert config.attention.rollout_discard_ratio == 0.75
 
 
 def test_parse_config_defaults_visualization_cmap_to_viridis():

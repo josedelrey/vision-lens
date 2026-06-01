@@ -100,8 +100,6 @@ def extract_attention_rollout(
     inputs: Any,
     metadata: ModelMetadata,
     layers: LayerSelection = "all",
-    head_fusion: HeadFusion = "max",
-    discard_ratio: float = 0.9,
 ) -> AttentionExtractionResult:
     blocks = _vit_blocks(model)
     layer_indices = _select_layers(layers, total_layers=len(blocks))
@@ -124,9 +122,7 @@ def extract_attention_rollout(
             handle.remove()
 
     rollout_by_layer = compute_attention_rollout(
-        tuple(captured_attention[layer_index] for layer_index in capture_layers),
-        head_fusion=head_fusion,
-        discard_ratio=discard_ratio,
+        tuple(captured_attention[layer_index] for layer_index in capture_layers)
     )
     layer_maps = tuple(
         LayerAttentionMaps(
@@ -137,7 +133,7 @@ def extract_attention_rollout(
                 patch_size=metadata.patch_size,
             ),
             head_indices=None,
-            head_fusion=head_fusion,
+            head_fusion="mean",
             patch_grid=infer_prefix_tokens_and_patch_grid(
                 token_count=rollout_by_layer[layer_index].shape[-1],
                 image_size=metadata.image_size,
@@ -154,23 +150,12 @@ def extract_attention_rollout(
     )
 
 
-def compute_attention_rollout(
-    attentions: Iterable[Any],
-    head_fusion: HeadFusion = "max",
-    discard_ratio: float = 0.9,
-) -> tuple[Any, ...]:
-    if not 0 <= discard_ratio < 1:
-        raise ValueError("discard_ratio must be at least 0 and less than 1.")
-
+def compute_attention_rollout(attentions: Iterable[Any]) -> tuple[Any, ...]:
     rollout_layers = []
     joint_attention = None
     for attention in attentions:
         _validate_attention_tensor(attention)
-        fused_attention = _fuse_rollout_heads(attention, head_fusion)
-        fused_attention = _discard_lowest_attentions(
-            fused_attention,
-            discard_ratio=discard_ratio,
-        )
+        fused_attention = attention.mean(dim=1)
         identity = torch.eye(
             fused_attention.shape[-1],
             device=fused_attention.device,
@@ -470,39 +455,6 @@ def _fuse_heads(cls_attention: Any, head_fusion: HeadFusion) -> Any:
     if head_fusion == "none":
         return cls_attention
     raise ValueError("head_fusion must be one of: max, mean, none.")
-
-
-def _fuse_rollout_heads(attention: Any, head_fusion: HeadFusion) -> Any:
-    if head_fusion == "mean":
-        return attention.mean(dim=1)
-    if head_fusion == "max":
-        return attention.max(dim=1).values
-    if head_fusion == "none":
-        raise ValueError("attention rollout requires head_fusion to be mean or max.")
-    raise ValueError("head_fusion must be one of: max, mean, none.")
-
-
-def _discard_lowest_attentions(attention: Any, discard_ratio: float) -> Any:
-    if discard_ratio == 0:
-        return attention
-
-    discarded = attention.clone()
-    flat_attention = discarded.flatten(start_dim=1)
-    discard_count = int(flat_attention.shape[-1] * discard_ratio)
-    if discard_count == 0:
-        return discarded
-
-    lowest_indices = flat_attention.topk(
-        discard_count,
-        dim=-1,
-        largest=False,
-    ).indices
-    for batch_index in range(flat_attention.shape[0]):
-        batch_indices = lowest_indices[batch_index]
-        batch_indices = batch_indices[batch_indices != 0]
-        flat_attention[batch_index, batch_indices] = 0
-
-    return discarded
 
 
 def _validate_attention_tensor(attention: Any) -> None:
