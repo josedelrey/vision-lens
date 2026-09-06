@@ -5,16 +5,19 @@ model:
   backend: timm
   name: hf_hub:timm/vit_small_patch14_reg4_dinov2.lvd142m
   pretrained: true
-  options: {}
+  options:
+    img_size: 672
 
 images:
   paths:
-    - data/samples/cat.jpg
-    - data/samples/coffee.jpg
-    - data/samples/rocket.jpg
-    - data/samples/motorcycle.jpg
-    - data/samples/astronaut.jpg
-    - data/samples/kodim19.png
+    - data/examples/1.jpg
+    - data/examples/2.jpg
+    - data/examples/3.jpg
+    - data/examples/4.jpg
+    - data/examples/5.jpg
+    - data/examples/6.jpg
+    - data/examples/7.jpg
+    - data/examples/8.jpg
 
 output:
   directory: outputs/dinov2_vits14_reg4_attention
@@ -26,7 +29,7 @@ attention:
 
 runtime:
   device: auto
-  image_size: 518
+  image_size: 672
 
 visualization:
   overlay_alpha: 0.8

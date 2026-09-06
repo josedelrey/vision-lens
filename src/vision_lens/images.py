@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 import numpy as np
 import torch
@@ -10,8 +11,8 @@ from timm.data import create_transform, resolve_model_data_config
 from torchvision import transforms
 
 
-def sample_image_paths(sample_dir: str | Path = "data/samples") -> tuple[Path, ...]:
-    directory = Path(sample_dir)
+def example_image_paths(example_dir: str | Path = "data/examples") -> tuple[Path, ...]:
+    directory = Path(example_dir)
     return tuple(
         sorted(
             path
