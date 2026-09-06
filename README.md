@@ -47,11 +47,10 @@ If the package is installed, the console command is also available:
 vision-lens --config configs/vit_attention.example.yaml
 ```
 
-Input images live in `data/samples/`. Generated attention maps and overlays go
-in `outputs/`.
-
-The example config uses curated sample images from `scikit-image`. Extra local
-images placed in `data/samples/` are ignored by Git by default.
+The eight bundled example photographs live in `data/examples/`. They are
+center-cropped to 672 × 672 pixels, encoded as metadata-free JPEGs, and covered
+by the attribution details in `data/examples/ATTRIBUTION.md`. Generated
+attention maps and overlays go in `outputs/`.
 
 Optional helpers are also available in Python for ViT attention rollout and a
 simple torchvision CNN Grad-CAM baseline:

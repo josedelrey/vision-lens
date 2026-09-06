@@ -9,12 +9,14 @@ model:
 
 images:
   paths:
-    - data/samples/cat.jpg
-    - data/samples/coffee.jpg
-    - data/samples/rocket.jpg
-    - data/samples/motorcycle.jpg
-    - data/samples/astronaut.jpg
-    - data/samples/kodim19.png
+    - data/examples/1.jpg
+    - data/examples/2.jpg
+    - data/examples/3.jpg
+    - data/examples/4.jpg
+    - data/examples/5.jpg
+    - data/examples/6.jpg
+    - data/examples/7.jpg
+    - data/examples/8.jpg
 
 output:
   directory: outputs/dino_vits8_attention

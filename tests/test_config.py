@@ -14,7 +14,7 @@ def _minimal_config(visualization):
             "options": {},
         },
         "images": {
-            "paths": ["data/samples/cat.jpg"],
+            "paths": ["data/examples/1.jpg"],
         },
         "output": {
             "directory": "outputs",
