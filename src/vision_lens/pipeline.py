@@ -13,6 +13,7 @@ from vision_lens.attention import (
     extract_gradcam,
 )
 from vision_lens.config import VisionLensConfig, load_config
+from vision_lens.feature_pca import PatchPCAResult, extract_patch_pca
 from vision_lens.images import (
     build_preprocess,
     load_images,
@@ -21,6 +22,7 @@ from vision_lens.images import (
 )
 from vision_lens.models import LoadedModel, load_model
 from vision_lens.visualization import (
+    image_grid,
     make_image_comparison_grid,
     make_layer_comparison_grid,
     overlay_attention,
@@ -48,6 +50,14 @@ class GradCamPipelineResult:
     output_paths: tuple[Path, ...]
 
 
+@dataclass(frozen=True)
+class PatchPCAPipelineResult:
+    config: VisionLensConfig
+    loaded_model: LoadedModel
+    patch_pca: PatchPCAResult
+    output_paths: tuple[Path, ...]
+
+
 def run_vit_attention(
     config_path: str | Path = "configs/vit_attention.example.yaml",
 ) -> PipelineResult:
@@ -55,14 +65,71 @@ def run_vit_attention(
     return run_vit_attention_from_config(config)
 
 
-def run_pipeline(config_path: str | Path) -> PipelineResult | GradCamPipelineResult:
+def run_pipeline(
+    config_path: str | Path,
+) -> PipelineResult | GradCamPipelineResult | PatchPCAPipelineResult:
     config = load_config(config_path)
+    return run_pipeline_from_config(config)
+
+
+def run_pipeline_from_config(
+    config: VisionLensConfig,
+) -> PipelineResult | GradCamPipelineResult | PatchPCAPipelineResult:
     if config.task == "vit_attention":
         return run_vit_attention_from_config(config)
+    if config.task == "vit_rollout":
+        return run_vit_rollout_comparison_from_config(config)
     if config.task == "gradcam":
         return run_gradcam_from_config(config)
+    if config.task == "patch_pca":
+        return run_patch_pca_from_config(config)
 
     raise ValueError(f"Unsupported task: {config.task}")
+
+
+def run_patch_pca(
+    config_path: str | Path = "configs/patch_pca.dinov2.example.yaml",
+) -> PatchPCAPipelineResult:
+    config = load_config(config_path)
+    return run_patch_pca_from_config(config)
+
+
+def run_patch_pca_from_config(
+    config: VisionLensConfig,
+) -> PatchPCAPipelineResult:
+    if config.task != "patch_pca":
+        raise ValueError(f"Expected task='patch_pca', got {config.task!r}.")
+    if config.model.architecture != "vit":
+        raise ValueError("Patch PCA pipeline expects a ViT model config.")
+    if config.patch_pca is None:
+        raise ValueError("Patch PCA pipeline requires a patch_pca config.")
+
+    loaded_model = load_model(config)
+    images = load_images(config.images.paths)
+    transform = build_preprocess(
+        loaded_model.model,
+        backend=config.model.backend,
+        image_size=config.runtime.image_size,
+    )
+    inputs = preprocess_images(images, transform)
+    patch_pca = extract_patch_pca(
+        loaded_model.model,
+        inputs,
+        loaded_model.metadata,
+        foreground_threshold=config.patch_pca.foreground_threshold,
+        foreground_side=config.patch_pca.foreground_side,
+    )
+    output_paths = export_patch_pca_outputs(
+        patch_pca,
+        image_paths=config.images.paths,
+        output_dir=config.output.directory,
+    )
+    return PatchPCAPipelineResult(
+        config=config,
+        loaded_model=loaded_model,
+        patch_pca=patch_pca,
+        output_paths=output_paths,
+    )
 
 
 def run_vit_rollout_comparison(
@@ -79,8 +146,10 @@ def run_vit_rollout_comparison_from_config(
 ) -> PipelineResult:
     from vision_lens.attention import extract_attention_rollout
 
-    if config.task != "vit_attention":
-        raise ValueError(f"Expected task='vit_attention', got {config.task!r}.")
+    if config.task not in {"vit_attention", "vit_rollout"}:
+        raise ValueError(
+            f"Expected task='vit_attention' or task='vit_rollout', got {config.task!r}."
+        )
     if config.attention is None:
         raise ValueError("ViT rollout comparison requires an attention config.")
 
@@ -287,8 +356,7 @@ def export_attention_outputs(
         for head_index in range(_head_count(layer)):
             suffix = _head_suffix(layer, head_index)
             output_path = (
-                output_dir
-                / f"layer-{layer.layer_index}_images_{suffix}.{grid_format}"
+                output_dir / f"layer-{layer.layer_index}_images_{suffix}.{grid_format}"
             )
             make_image_comparison_grid(
                 images,
@@ -301,6 +369,30 @@ def export_attention_outputs(
             )
             output_paths.append(output_path)
 
+    return tuple(output_paths)
+
+
+def export_patch_pca_outputs(
+    patch_pca: PatchPCAResult,
+    image_paths: tuple[Path, ...],
+    output_dir: Path,
+) -> tuple[Path, ...]:
+    if len(patch_pca.images) != len(image_paths):
+        raise ValueError("Patch PCA images and image_paths must have the same length.")
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_paths = [
+        save_image(image, output_dir / f"{path.stem}_patch_pca.png")
+        for path, image in zip(image_paths, patch_pca.images, strict=True)
+    ]
+    comparison = image_grid(
+        patch_pca.images,
+        columns=min(len(patch_pca.images), 3),
+        background="white",
+        gap=16,
+        padding=16,
+    )
+    output_paths.append(save_image(comparison, output_dir / "patch_pca_comparison.png"))
     return tuple(output_paths)
 
 
@@ -319,7 +411,11 @@ def export_rollout_comparison_outputs(
     labels = [path.stem for path in image_paths]
 
     for image_index, image in enumerate(images):
-        for layer, rollout_layer in zip(layer_attention.layers, rollout.layers):
+        for _layer, rollout_layer in zip(
+            layer_attention.layers,
+            rollout.layers,
+            strict=True,
+        ):
             rollout_for_image = _layer_for_image(rollout_layer, image_index)
             stem = f"{labels[image_index]}_rollout-{rollout_layer.layer_index}"
             output_paths.append(
@@ -341,8 +437,7 @@ def export_rollout_comparison_outputs(
             )
 
         grid_path = (
-            output_dir
-            / f"{labels[image_index]}_rollout_comparison.{grid_format}"
+            output_dir / f"{labels[image_index]}_rollout_comparison.{grid_format}"
         )
         comparison_images, comparison_labels, columns = _rollout_grid_items(
             image=image,
@@ -460,7 +555,7 @@ def _rollout_grid_items(
     alpha: float,
     cmap: str,
 ) -> tuple[list[Any], list[str], int]:
-    pairs = tuple(zip(layer_attention.layers, rollout.layers))
+    pairs = tuple(zip(layer_attention.layers, rollout.layers, strict=True))
     if not pairs:
         raise ValueError("Rollout comparison requires at least one layer.")
 

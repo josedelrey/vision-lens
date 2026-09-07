@@ -6,6 +6,8 @@ from typing import Any, Literal
 
 import yaml
 
+from vision_lens.presets import get_preset
+
 HeadFusion = Literal["mean", "max", "none"]
 Device = Literal["auto", "cpu", "cuda", "mps"]
 AttentionLayers = Literal["all"] | tuple[int, ...]
@@ -51,6 +53,12 @@ class VisualizationConfig:
 
 
 @dataclass(frozen=True)
+class PatchPCAConfig:
+    foreground_threshold: float = 0.5
+    foreground_side: Literal["high", "low"] = "high"
+
+
+@dataclass(frozen=True)
 class VisionLensConfig:
     task: str
     model: ModelConfig
@@ -59,9 +67,16 @@ class VisionLensConfig:
     attention: AttentionConfig | None
     runtime: RuntimeConfig
     visualization: VisualizationConfig
+    patch_pca: PatchPCAConfig | None = None
+    preset: str | None = None
 
 
-def load_config(path: str | Path) -> VisionLensConfig:
+def load_config(
+    path: str | Path,
+    *,
+    preset: str | None = None,
+    overrides: dict[str, Any] | None = None,
+) -> VisionLensConfig:
     config_path = Path(path)
     with config_path.open("r", encoding="utf-8") as file:
         raw_config = yaml.safe_load(file) or {}
@@ -73,22 +88,50 @@ def load_config(path: str | Path) -> VisionLensConfig:
         base_dir = config_path.parent.parent
     else:
         base_dir = config_path.parent
-    return parse_config(raw_config, base_dir=base_dir)
+    return parse_config(
+        raw_config,
+        base_dir=base_dir,
+        preset=preset,
+        overrides=overrides,
+    )
+
+
+def load_preset(
+    name: str,
+    *,
+    base_dir: Path | None = None,
+    overrides: dict[str, Any] | None = None,
+) -> VisionLensConfig:
+    return parse_config(
+        {},
+        base_dir=base_dir,
+        preset=name,
+        overrides=overrides,
+    )
 
 
 def parse_config(
     raw_config: dict[str, Any],
     base_dir: Path | None = None,
+    *,
+    preset: str | None = None,
+    overrides: dict[str, Any] | None = None,
 ) -> VisionLensConfig:
     base = Path.cwd() if base_dir is None else base_dir
+    preset_name = _preset_name(raw_config, preset)
+    resolved = get_preset(preset_name) if preset_name is not None else {}
+    user_config = {key: value for key, value in raw_config.items() if key != "preset"}
+    resolved = _deep_merge(resolved, user_config)
+    resolved = _deep_merge(resolved, overrides or {})
 
-    model = _section(raw_config, "model")
-    images = _section(raw_config, "images")
-    output = _section(raw_config, "output")
-    task = _optional_str(raw_config.get("task", "vit_attention"), "task")
-    attention = _optional_section(raw_config, "attention")
-    runtime = _section(raw_config, "runtime")
-    visualization = _section(raw_config, "visualization")
+    model = _section(resolved, "model")
+    images = _section(resolved, "images")
+    output = _section(resolved, "output")
+    task = _optional_str(resolved.get("task", "vit_attention"), "task")
+    attention = _optional_section(resolved, "attention")
+    runtime = _section(resolved, "runtime")
+    visualization = _section(resolved, "visualization")
+    patch_pca = _optional_section(resolved, "patch_pca")
 
     return VisionLensConfig(
         task=task,
@@ -127,7 +170,31 @@ def parse_config(
             ),
             grid_format=_grid_format(visualization.get("grid_format", "png")),
         ),
+        patch_pca=_parse_patch_pca(patch_pca, task),
+        preset=preset_name,
     )
+
+
+def _preset_name(raw_config: dict[str, Any], selected: str | None) -> str | None:
+    configured = raw_config.get("preset")
+    if configured is not None and (
+        not isinstance(configured, str) or not configured.strip()
+    ):
+        raise ValueError("preset must be a non-empty string.")
+    if selected is not None and (not isinstance(selected, str) or not selected.strip()):
+        raise ValueError("preset must be a non-empty string.")
+    return selected if selected is not None else configured
+
+
+def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(base)
+    for key, value in override.items():
+        existing = merged.get(key)
+        if isinstance(existing, dict) and isinstance(value, dict):
+            merged[key] = _deep_merge(existing, value)
+        else:
+            merged[key] = value
+    return merged
 
 
 def _section(config: dict[str, Any], name: str) -> dict[str, Any]:
@@ -151,8 +218,8 @@ def _parse_attention(
     task: str,
 ) -> AttentionConfig | None:
     if section is None:
-        if task == "vit_attention":
-            raise ValueError("attention is required when task is vit_attention.")
+        if task in {"vit_attention", "vit_rollout"}:
+            raise ValueError(f"attention is required when task is {task}.")
         return None
 
     return AttentionConfig(
@@ -162,6 +229,22 @@ def _parse_attention(
             "attention.heads",
         ),
         head_fusion=_head_fusion(section.get("head_fusion", "mean")),
+    )
+
+
+def _parse_patch_pca(
+    section: dict[str, Any] | None,
+    task: str,
+) -> PatchPCAConfig | None:
+    if section is None:
+        return PatchPCAConfig() if task == "patch_pca" else None
+
+    return PatchPCAConfig(
+        foreground_threshold=_alpha(
+            section.get("foreground_threshold", 0.5),
+            field_name="patch_pca.foreground_threshold",
+        ),
+        foreground_side=_foreground_side(section.get("foreground_side", "high")),
     )
 
 
@@ -252,6 +335,14 @@ def _head_fusion(value: Any) -> HeadFusion:
     return value
 
 
+def _foreground_side(value: Any) -> Literal["high", "low"]:
+    allowed = {"high", "low"}
+    if value not in allowed:
+        options = ", ".join(sorted(allowed))
+        raise ValueError(f"patch_pca.foreground_side must be one of: {options}.")
+    return value
+
+
 def _device(value: Any) -> Device:
     allowed = {"auto", "cpu", "cuda", "mps"}
     if value not in allowed:
@@ -260,13 +351,16 @@ def _device(value: Any) -> Device:
     return value
 
 
-def _alpha(value: Any) -> float:
+def _alpha(
+    value: Any,
+    field_name: str = "visualization.overlay_alpha",
+) -> float:
     if (
         isinstance(value, bool)
         or not isinstance(value, int | float)
         or not 0 <= value <= 1
     ):
-        raise ValueError("visualization.overlay_alpha must be between 0 and 1.")
+        raise ValueError(f"{field_name} must be between 0 and 1.")
     return float(value)
 
 

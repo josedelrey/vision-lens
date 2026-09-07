@@ -1,0 +1,53 @@
+{
+  "description": "Pixel baselines recorded before preset support was added.",
+  "recorded_examples": {
+    "dinov2_pca": {
+      "preset": "dinov2-pca",
+      "files": {
+        "5_patch_pca.png": "55262c3cd1ee62477b8f64c320564d7a61a099a26e0584f693a42c71ab4db61d",
+        "6_patch_pca.png": "f65a26c7451d9b4ae7225a02b538ada1d27acebb3b5340acb5986ae369a37b29",
+        "patch_pca_comparison.png": "50a4b806faaa34fb65708ba7767cff48122bdd74456d905fc61960cc65ac9976"
+      },
+      "comparison": {
+        "mode": "RGB",
+        "size": [1392, 704],
+        "pixel_sha256": "61fa4bd1d43da81345fd947d11d4ae12fe9523168641e2270b18256a40add936"
+      }
+    }
+  },
+  "renderer": {
+    "heatmap": {
+      "mode": "RGB",
+      "size": [2, 2],
+      "sha256": "8e0fcdb903b3df3228a308d5b378973e335104c3c218920f814e93eab176735a"
+    },
+    "overlay": {
+      "mode": "RGB",
+      "size": [8, 8],
+      "sha256": "0f4e9b882a60b6832243f51babff34d7307de1cc8a8eaf817aa01558554bc835"
+    }
+  },
+  "pca": {
+    "foreground_mask": [
+      [false, false, false, true],
+      [false, false, true, true]
+    ],
+    "images": [
+      {
+        "mode": "RGB",
+        "size": [8, 8],
+        "sha256": "2bb0bfaf854d700f1b720644baa8a44423cbb26bdf2b42dd7496566eecd67da7"
+      },
+      {
+        "mode": "RGB",
+        "size": [8, 8],
+        "sha256": "69ef81ccc5ab1f25971bb1f89257b15f3dc400e6248306f958ad2af8e434a6f2"
+      }
+    ],
+    "comparison_grid": {
+      "mode": "RGB",
+      "size": [64, 40],
+      "sha256": "8e66c28fd763f008737a9c3694ffe9138f2728dadcfaac8fe26ac291efb66f00"
+    }
+  }
+}

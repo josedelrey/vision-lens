@@ -1,0 +1,29 @@
+preset: dinov2-pca
+
+task: patch_pca
+
+model:
+  architecture: vit
+  backend: timm
+  name: hf_hub:timm/vit_base_patch14_dinov2.lvd142m
+  pretrained: true
+  options:
+    img_size: 672
+
+images:
+  paths:
+    - data/examples/5.jpg
+    - data/examples/6.jpg
+
+output:
+  directory: outputs/dinov2_patch_pca
+
+runtime:
+  device: auto
+  image_size: 672
+
+patch_pca:
+  foreground_threshold: 0.5
+  foreground_side: low
+
+visualization: {}
