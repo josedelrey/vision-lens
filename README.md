@@ -57,6 +57,19 @@ The current workflows are available as named presets:
 - `resnet50-gradcam`
 - `dinov2-pca`
 
+Each preset also has a directly runnable script:
+
+```bash
+python scripts/run_dino_vits8_attention.py
+python scripts/run_dinov2_reg4_attention.py
+python scripts/run_dinov2_reg4_rollout.py
+python scripts/run_resnet50_gradcam.py
+python scripts/run_dinov2_pca.py
+```
+
+The scripts accept the same one-off overrides as the CLI, for example
+`python scripts/run_dinov2_pca.py --set runtime.device=cpu`.
+
 List them or run one directly:
 
 ```bash
