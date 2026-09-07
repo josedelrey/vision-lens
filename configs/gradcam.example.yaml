@@ -1,34 +1,37 @@
 preset: resnet50-gradcam
 
-task: gradcam
+input:
+  paths:
+    - ../data/examples/1.jpg
+    - ../data/examples/2.jpg
+    - ../data/examples/3.jpg
+    - ../data/examples/4.jpg
+    - ../data/examples/5.jpg
+    - ../data/examples/6.jpg
+    - ../data/examples/7.jpg
+    - ../data/examples/8.jpg
 
 model:
   architecture: cnn
   backend: torchvision
   name: resnet50
   pretrained: true
-  options:
-    gradcam_target_layer: layer4
+  options: {}
 
-images:
-  paths:
-    - data/examples/1.jpg
-    - data/examples/2.jpg
-    - data/examples/3.jpg
-    - data/examples/4.jpg
-    - data/examples/5.jpg
-    - data/examples/6.jpg
-    - data/examples/7.jpg
-    - data/examples/8.jpg
+preprocessing:
+  image_size: 672
 
-output:
-  directory: outputs/gradcam
+analysis:
+  method: gradcam
+  target_layer: layer4
 
 runtime:
   device: auto
-  image_size: 672
 
 visualization:
   overlay_alpha: 0.8
   cmap: viridis
   grid_format: pdf
+
+output:
+  directory: ../outputs/gradcam

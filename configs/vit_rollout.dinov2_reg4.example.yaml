@@ -1,1 +1,39 @@
 preset: dinov2-reg4-rollout
+
+input:
+  paths:
+    - ../data/examples/1.jpg
+    - ../data/examples/2.jpg
+    - ../data/examples/3.jpg
+    - ../data/examples/4.jpg
+    - ../data/examples/5.jpg
+    - ../data/examples/6.jpg
+    - ../data/examples/7.jpg
+    - ../data/examples/8.jpg
+
+model:
+  architecture: vit
+  backend: timm
+  name: hf_hub:timm/vit_small_patch14_reg4_dinov2.lvd142m
+  pretrained: true
+  options: {}
+
+preprocessing:
+  image_size: 672
+
+analysis:
+  method: rollout
+  layers: [2, 5, 8, 11]
+  heads: null
+  head_fusion: mean
+
+runtime:
+  device: auto
+
+visualization:
+  overlay_alpha: 0.8
+  cmap: viridis
+  grid_format: pdf
+
+output:
+  directory: ../outputs/dinov2_reg4_attention/rollout

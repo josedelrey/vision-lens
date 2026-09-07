@@ -1,6 +1,15 @@
 preset: dino-vits8-attention
 
-task: vit_attention
+input:
+  paths:
+    - ../data/examples/1.jpg
+    - ../data/examples/2.jpg
+    - ../data/examples/3.jpg
+    - ../data/examples/4.jpg
+    - ../data/examples/5.jpg
+    - ../data/examples/6.jpg
+    - ../data/examples/7.jpg
+    - ../data/examples/8.jpg
 
 model:
   architecture: vit
@@ -9,30 +18,22 @@ model:
   pretrained: true
   options: {}
 
-images:
-  paths:
-    - data/examples/1.jpg
-    - data/examples/2.jpg
-    - data/examples/3.jpg
-    - data/examples/4.jpg
-    - data/examples/5.jpg
-    - data/examples/6.jpg
-    - data/examples/7.jpg
-    - data/examples/8.jpg
+preprocessing:
+  image_size: 224
 
-output:
-  directory: outputs/dino_vits8_attention
-
-attention:
+analysis:
+  method: attention
   layers: [2, 5, 8, 11]
   heads: null
   head_fusion: mean
 
 runtime:
   device: auto
-  image_size: 672
 
 visualization:
   overlay_alpha: 0.8
   cmap: viridis
   grid_format: pdf
+
+output:
+  directory: ../outputs/dino_vits8_attention

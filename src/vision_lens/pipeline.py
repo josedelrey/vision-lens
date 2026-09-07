@@ -222,15 +222,11 @@ def run_gradcam_from_config(config: VisionLensConfig) -> GradCamPipelineResult:
         loaded_model.metadata.data_config,
     )
 
-    target_layer = None
-    if config.model.options is not None:
-        target_layer = config.model.options.get("gradcam_target_layer")
-
     gradcam = extract_gradcam(
         loaded_model.model,
         inputs,
         loaded_model.metadata,
-        target_layer=target_layer,
+        target_layer=config.analysis.target_layer,
     )
     output_paths = export_gradcam_outputs(
         images=display_images,

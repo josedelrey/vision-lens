@@ -5,7 +5,7 @@ from pathlib import Path
 
 import yaml
 
-from vision_lens.config import load_config, load_preset
+from vision_lens.config import load_config, load_preset, resolved_config_yaml
 from vision_lens.pipeline import run_pipeline_from_config
 from vision_lens.presets import available_presets
 
@@ -14,6 +14,13 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="vision-lens",
         description="Run Vision Lens model visualization pipelines.",
+    )
+    parser.add_argument(
+        "command",
+        nargs="?",
+        choices=("run", "validate", "resolve"),
+        default="run",
+        help="Run the workflow, validate configuration, or print resolved YAML.",
     )
     parser.add_argument(
         "--config",
@@ -44,26 +51,37 @@ def main(argv: list[str] | None = None) -> int:
             print(preset_name)
         return 0
 
-    overrides = _parse_overrides(args.set)
-    if args.config is None and args.preset is None:
-        config = load_config(
-            Path("configs/vit_attention.example.yaml"),
-            overrides=overrides,
-        )
-    elif args.config is None:
-        config = load_preset(args.preset, overrides=overrides)
-    else:
-        config = load_config(
-            Path(args.config),
-            preset=args.preset,
-            overrides=overrides,
-        )
+    try:
+        overrides = _parse_overrides(args.set)
+        config = _load_requested_config(args, overrides)
+    except (OSError, ValueError, yaml.YAMLError) as error:
+        parser.error(str(error))
+
+    if args.command == "validate":
+        print("configuration is valid")
+        return 0
+    if args.command == "resolve":
+        print(resolved_config_yaml(config), end="")
+        return 0
 
     result = run_pipeline_from_config(config)
     print(f"saved {len(result.output_paths)} files to {result.config.output.directory}")
-    for output_path in result.output_paths:
-        print(output_path)
     return 0
+
+
+def _load_requested_config(args, overrides: dict[str, object]):
+    if args.config is None and args.preset is None:
+        return load_config(
+            Path("configs/vit_attention.example.yaml"),
+            overrides=overrides,
+        )
+    if args.config is None:
+        return load_preset(args.preset, overrides=overrides)
+    return load_config(
+        Path(args.config),
+        preset=args.preset,
+        overrides=overrides,
+    )
 
 
 def _parse_overrides(assignments: list[str]) -> dict[str, object]:
