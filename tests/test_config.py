@@ -161,7 +161,7 @@ def test_user_config_and_cli_values_override_only_selected_preset_settings():
     assert config.attention.heads == (1, 3)
     assert config.attention.head_fusion == "none"
     assert config.runtime.device == "cpu"
-    assert config.runtime.image_size == 224
+    assert config.runtime.image_size == 672
     assert config.visualization.overlay_alpha == 0.25
     assert config.visualization.cmap == "viridis"
 

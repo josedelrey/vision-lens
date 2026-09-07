@@ -42,7 +42,7 @@ class AttentionConfig:
 @dataclass(frozen=True)
 class RuntimeConfig:
     device: Device = "auto"
-    image_size: int = 224
+    image_size: int = 672
 
 
 @dataclass(frozen=True)
@@ -158,7 +158,7 @@ def parse_config(
         runtime=RuntimeConfig(
             device=_device(runtime.get("device", "auto")),
             image_size=_positive_int(
-                runtime.get("image_size", 224),
+                runtime.get("image_size", 672),
                 "runtime.image_size",
             ),
         ),

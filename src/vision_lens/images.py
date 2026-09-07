@@ -7,7 +7,8 @@ from typing import Any
 import numpy as np
 import torch
 from PIL import Image
-from timm.data import create_transform, resolve_model_data_config
+from timm.data import resolve_model_data_config
+from timm.data.transforms import str_to_interp_mode
 from torchvision import transforms
 
 
@@ -35,15 +36,26 @@ def load_images(paths: Iterable[str | Path]) -> list:
     return [load_image(path) for path in paths]
 
 
-def build_timm_preprocess(model: Any, image_size: int | None = None):
+def build_timm_preprocess(
+    model: Any,
+    image_size: int | tuple[int, int] | None = None,
+):
     data_config = resolve_model_data_config(model)
-    if image_size is not None:
-        data_config["input_size"] = (3, image_size, image_size)
+    size = _image_size(image_size, data_config.get("input_size"), default=672)
+    interpolation = str_to_interp_mode(data_config.get("interpolation", "bilinear"))
+    return _resize_and_normalize(
+        size,
+        interpolation=interpolation,
+        mean=data_config.get("mean", (0.485, 0.456, 0.406)),
+        std=data_config.get("std", (0.229, 0.224, 0.225)),
+    )
 
-    return create_transform(**data_config, is_training=False)
 
-
-def build_preprocess(model: Any, backend: str, image_size: int | None = None):
+def build_preprocess(
+    model: Any,
+    backend: str,
+    image_size: int | tuple[int, int] | None = None,
+):
     if backend == "timm":
         return build_timm_preprocess(model, image_size=image_size)
     if backend == "torchvision":
@@ -52,19 +64,55 @@ def build_preprocess(model: Any, backend: str, image_size: int | None = None):
     raise ValueError(f"Unsupported preprocessing backend: {backend}")
 
 
-def build_torchvision_preprocess(image_size: int | None = None):
-    size = 224 if image_size is None else image_size
+def build_torchvision_preprocess(
+    image_size: int | tuple[int, int] | None = None,
+):
+    size = _image_size(image_size, default=672)
+    return _resize_and_normalize(
+        size,
+        interpolation=transforms.InterpolationMode.BILINEAR,
+        mean=(0.485, 0.456, 0.406),
+        std=(0.229, 0.224, 0.225),
+    )
+
+
+def _resize_and_normalize(
+    size: tuple[int, int],
+    *,
+    interpolation: transforms.InterpolationMode,
+    mean: Iterable[float],
+    std: Iterable[float],
+):
     return transforms.Compose(
         [
-            transforms.Resize(size),
-            transforms.CenterCrop(size),
+            transforms.Resize(size, interpolation=interpolation, antialias=True),
             transforms.ToTensor(),
-            transforms.Normalize(
-                mean=(0.485, 0.456, 0.406),
-                std=(0.229, 0.224, 0.225),
-            ),
+            transforms.Normalize(mean=tuple(mean), std=tuple(std)),
         ]
     )
+
+
+def _image_size(
+    requested: int | tuple[int, int] | None,
+    model_input_size: Any = None,
+    *,
+    default: int,
+) -> tuple[int, int]:
+    if isinstance(requested, int):
+        return (requested, requested)
+    if (
+        isinstance(requested, tuple)
+        and len(requested) == 2
+        and all(isinstance(value, int) for value in requested)
+    ):
+        return requested
+    if (
+        isinstance(model_input_size, (list, tuple))
+        and len(model_input_size) == 3
+        and all(isinstance(value, int) for value in model_input_size)
+    ):
+        return (model_input_size[1], model_input_size[2])
+    return (default, default)
 
 
 def preprocess_image(image: Any, transform: Any):

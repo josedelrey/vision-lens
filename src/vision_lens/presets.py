@@ -23,7 +23,7 @@ PRESETS: dict[str, dict[str, Any]] = {
             "heads": None,
             "head_fusion": "mean",
         },
-        "runtime": {"device": "auto", "image_size": 224},
+        "runtime": {"device": "auto", "image_size": 672},
         "visualization": {
             "overlay_alpha": 0.8,
             "cmap": "viridis",
@@ -87,7 +87,7 @@ PRESETS: dict[str, dict[str, Any]] = {
         },
         "images": {"paths": _EXAMPLE_IMAGES},
         "output": {"directory": "outputs/gradcam"},
-        "runtime": {"device": "auto", "image_size": 224},
+        "runtime": {"device": "auto", "image_size": 672},
         "visualization": {
             "overlay_alpha": 0.8,
             "cmap": "viridis",

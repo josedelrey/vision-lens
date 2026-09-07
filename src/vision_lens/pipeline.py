@@ -109,7 +109,7 @@ def run_patch_pca_from_config(
     transform = build_preprocess(
         loaded_model.model,
         backend=config.model.backend,
-        image_size=config.runtime.image_size,
+        image_size=loaded_model.metadata.image_size,
     )
     inputs = preprocess_images(images, transform)
     patch_pca = extract_patch_pca(
@@ -158,7 +158,7 @@ def run_vit_rollout_comparison_from_config(
     transform = build_preprocess(
         loaded_model.model,
         backend=config.model.backend,
-        image_size=config.runtime.image_size,
+        image_size=loaded_model.metadata.image_size,
     )
     inputs = preprocess_images(images, transform)
     display_images = tensors_to_display_images(
@@ -214,7 +214,7 @@ def run_gradcam_from_config(config: VisionLensConfig) -> GradCamPipelineResult:
     transform = build_preprocess(
         loaded_model.model,
         backend=config.model.backend,
-        image_size=config.runtime.image_size,
+        image_size=loaded_model.metadata.image_size,
     )
     inputs = preprocess_images(images, transform)
     display_images = tensors_to_display_images(
@@ -260,7 +260,7 @@ def run_vit_attention_from_config(config: VisionLensConfig) -> PipelineResult:
     transform = build_preprocess(
         loaded_model.model,
         backend=config.model.backend,
-        image_size=config.runtime.image_size,
+        image_size=loaded_model.metadata.image_size,
     )
     inputs = preprocess_images(images, transform)
     display_images = tensors_to_display_images(

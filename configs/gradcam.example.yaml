@@ -26,7 +26,7 @@ output:
 
 runtime:
   device: auto
-  image_size: 224
+  image_size: 672
 
 visualization:
   overlay_alpha: 0.8
