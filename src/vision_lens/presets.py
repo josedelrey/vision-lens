@@ -8,7 +8,6 @@ _EXAMPLE_IMAGES = [f"data/examples/{index}.jpg" for index in range(1, 9)]
 
 PRESETS: dict[str, dict[str, Any]] = {
     "dino-vits8-attention": {
-        "task": "vit_attention",
         "model": {
             "architecture": "vit",
             "backend": "timm",
@@ -16,14 +15,16 @@ PRESETS: dict[str, dict[str, Any]] = {
             "pretrained": True,
             "options": {},
         },
-        "images": {"paths": _EXAMPLE_IMAGES},
+        "input": {"paths": _EXAMPLE_IMAGES},
         "output": {"directory": "outputs/dino_vits8_attention"},
-        "attention": {
+        "analysis": {
+            "method": "attention",
             "layers": [2, 5, 8, 11],
             "heads": None,
             "head_fusion": "mean",
         },
-        "runtime": {"device": "auto", "image_size": 672},
+        "preprocessing": {"image_size": 224},
+        "runtime": {"device": "auto"},
         "visualization": {
             "overlay_alpha": 0.8,
             "cmap": "viridis",
@@ -31,22 +32,23 @@ PRESETS: dict[str, dict[str, Any]] = {
         },
     },
     "dinov2-reg4-attention": {
-        "task": "vit_attention",
         "model": {
             "architecture": "vit",
             "backend": "timm",
             "name": "hf_hub:timm/vit_small_patch14_reg4_dinov2.lvd142m",
             "pretrained": True,
-            "options": {"img_size": 672},
+            "options": {},
         },
-        "images": {"paths": _EXAMPLE_IMAGES},
+        "input": {"paths": _EXAMPLE_IMAGES},
         "output": {"directory": "outputs/dinov2_vits14_reg4_attention"},
-        "attention": {
+        "analysis": {
+            "method": "attention",
             "layers": [2, 5, 8, 11],
             "heads": None,
             "head_fusion": "mean",
         },
-        "runtime": {"device": "auto", "image_size": 672},
+        "preprocessing": {"image_size": 672},
+        "runtime": {"device": "auto"},
         "visualization": {
             "overlay_alpha": 0.8,
             "cmap": "viridis",
@@ -54,22 +56,23 @@ PRESETS: dict[str, dict[str, Any]] = {
         },
     },
     "dinov2-reg4-rollout": {
-        "task": "vit_rollout",
         "model": {
             "architecture": "vit",
             "backend": "timm",
             "name": "hf_hub:timm/vit_small_patch14_reg4_dinov2.lvd142m",
             "pretrained": True,
-            "options": {"img_size": 672},
+            "options": {},
         },
-        "images": {"paths": _EXAMPLE_IMAGES},
+        "input": {"paths": _EXAMPLE_IMAGES},
         "output": {"directory": "outputs/dinov2_reg4_attention/rollout"},
-        "attention": {
+        "analysis": {
+            "method": "rollout",
             "layers": [2, 5, 8, 11],
             "heads": None,
             "head_fusion": "mean",
         },
-        "runtime": {"device": "auto", "image_size": 672},
+        "preprocessing": {"image_size": 672},
+        "runtime": {"device": "auto"},
         "visualization": {
             "overlay_alpha": 0.8,
             "cmap": "viridis",
@@ -77,17 +80,18 @@ PRESETS: dict[str, dict[str, Any]] = {
         },
     },
     "resnet50-gradcam": {
-        "task": "gradcam",
         "model": {
             "architecture": "cnn",
             "backend": "torchvision",
             "name": "resnet50",
             "pretrained": True,
-            "options": {"gradcam_target_layer": "layer4"},
+            "options": {},
         },
-        "images": {"paths": _EXAMPLE_IMAGES},
+        "input": {"paths": _EXAMPLE_IMAGES},
         "output": {"directory": "outputs/gradcam"},
-        "runtime": {"device": "auto", "image_size": 672},
+        "preprocessing": {"image_size": 672},
+        "analysis": {"method": "gradcam", "target_layer": "layer4"},
+        "runtime": {"device": "auto"},
         "visualization": {
             "overlay_alpha": 0.8,
             "cmap": "viridis",
@@ -95,18 +99,19 @@ PRESETS: dict[str, dict[str, Any]] = {
         },
     },
     "dinov2-pca": {
-        "task": "patch_pca",
         "model": {
             "architecture": "vit",
             "backend": "timm",
             "name": "hf_hub:timm/vit_base_patch14_dinov2.lvd142m",
             "pretrained": True,
-            "options": {"img_size": 672},
+            "options": {},
         },
-        "images": {"paths": ["data/examples/5.jpg", "data/examples/6.jpg"]},
+        "input": {"paths": ["data/examples/5.jpg", "data/examples/6.jpg"]},
         "output": {"directory": "outputs/dinov2_patch_pca"},
-        "runtime": {"device": "auto", "image_size": 672},
-        "patch_pca": {
+        "preprocessing": {"image_size": 672},
+        "runtime": {"device": "auto"},
+        "analysis": {
+            "method": "patch_pca",
             "foreground_threshold": 0.5,
             "foreground_side": "low",
         },

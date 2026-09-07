@@ -20,19 +20,18 @@ python -m pip install -e ".[dev]"
 
 ## Intended usage
 
-Run the ViT exercise figures from an example script:
+Run the ViT attention example:
 
 ```bash
-python examples/run_vit_attention.py
+python scripts/run_dino_vits8_attention.py
 ```
 
-That script exports fused-head attention maps, individual-head maps, and
-attention rollout comparisons under `outputs/vit_attention/`.
+That script exports attention heatmaps, overlays, and comparison grids.
 
 Run the CNN Grad-CAM baseline separately:
 
 ```bash
-python examples/run_cnn_gradcam.py
+python scripts/run_resnet50_gradcam.py
 ```
 
 Or with the CLI:
@@ -69,6 +68,7 @@ python scripts/run_dinov2_pca.py
 
 The scripts accept the same one-off overrides as the CLI, for example
 `python scripts/run_dinov2_pca.py --set runtime.device=cpu`.
+Commands print one completion summary instead of every generated filename.
 
 List them or run one directly:
 
@@ -82,9 +82,9 @@ A config can select a preset and override only the settings that should change:
 ```yaml
 preset: dino-vits8-attention
 
-images:
+input:
   paths:
-    - data/examples/1.jpg
+    - ../data/examples/1.jpg
 
 visualization:
   overlay_alpha: 0.6
@@ -94,18 +94,28 @@ One-off CLI overrides use YAML values and may be repeated:
 
 ```bash
 vision-lens --preset dino-vits8-attention \
-  --set attention.heads='[0, 1, 2]' \
-  --set attention.head_fusion=none
+  --set analysis.heads='[0, 1, 2]' \
+  --set analysis.head_fusion=none
 ```
 
 Preset settings are applied first, followed by values from the config file and
-then `--set` overrides. Omitting a preset retains the previous config behavior.
+then `--set` overrides.
 
-Example workflows request 672 × 672 input pixels. Preprocessing never
-center-crops: an image already at the accepted size is retained, and other
-dimensions are resized directly to the model input dimensions. Vision Lens
-requests 672 × 672 for flexible or explicitly configured models; if a fixed-size
-model cannot use that resolution, its native input dimensions are used instead.
+Validate a configuration without loading its model, or inspect the fully
+resolved settings:
+
+```bash
+vision-lens validate --config configs/vit_attention.example.yaml
+vision-lens resolve --config configs/vit_attention.example.yaml
+```
+
+See [Configuration](docs/configuration.md) for the complete schema, defaults,
+examples, precedence, and validation rules.
+
+Most example workflows use 672 × 672 input pixels; the fixed patch-8 DINO
+example uses its required 224 × 224 input. Preprocessing never center-crops: an
+image already at the configured size is retained, and other dimensions are
+resized directly to the model input dimensions.
 
 The eight bundled example photographs live in `data/examples/`. They are
 center-cropped to 672 × 672 pixels, encoded as metadata-free JPEGs, and covered
@@ -134,10 +144,11 @@ next three shared PCA channels. It saves one PNG per input plus a clean,
 unlabelled comparison grid at `outputs/dinov2_patch_pca/`.
 
 The shared PCA basis is important: colors remain comparable across every image
-listed in the same config. Adjust `patch_pca.foreground_threshold` if the
+listed in the same config. Adjust `analysis.foreground_threshold` if the
 default `0.5` mask includes too much background or hides part of the subject.
-PCA component signs are arbitrary, so switch `patch_pca.foreground_side`
-between `low` and `high` if the subject and background appear reversed.
+PCA component signs are arbitrary, so switch `analysis.foreground_side`
+between `low` and `high` if the subject and
+background appear reversed.
 
 The same workflow is available from Python:
 

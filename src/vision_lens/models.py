@@ -8,7 +8,12 @@ import torch
 from timm.data import ImageNetInfo, resolve_model_data_config
 from torchvision.models import get_model, get_model_weights
 
-from vision_lens.config import ModelConfig, RuntimeConfig, VisionLensConfig
+from vision_lens.config import (
+    ModelConfig,
+    PreprocessingConfig,
+    RuntimeConfig,
+    VisionLensConfig,
+)
 
 
 @dataclass(frozen=True)
@@ -33,17 +38,26 @@ class LoadedModel:
 
 
 def load_model(config: VisionLensConfig) -> LoadedModel:
-    return load_configured_model(config.model, config.runtime)
+    return load_configured_model(
+        config.model,
+        config.preprocessing,
+        config.runtime,
+    )
 
 
 def load_configured_model(
     model_config: ModelConfig,
+    preprocessing_config: PreprocessingConfig,
     runtime_config: RuntimeConfig,
 ) -> LoadedModel:
     if model_config.architecture == "vit" and model_config.backend == "timm":
-        return load_timm_vit(model_config, runtime_config)
+        return load_timm_vit(model_config, preprocessing_config, runtime_config)
     if model_config.architecture == "cnn" and model_config.backend == "torchvision":
-        return load_torchvision_cnn(model_config, runtime_config)
+        return load_torchvision_cnn(
+            model_config,
+            preprocessing_config,
+            runtime_config,
+        )
 
     raise ValueError(
         "Unsupported model configuration: "
@@ -54,15 +68,11 @@ def load_configured_model(
 
 def load_torchvision_cnn(
     model_config: ModelConfig,
+    preprocessing_config: PreprocessingConfig,
     runtime_config: RuntimeConfig,
 ) -> LoadedModel:
     device = resolve_device(runtime_config.device)
     model_options = model_config.options or {}
-    model_options = {
-        key: value
-        for key, value in model_options.items()
-        if key != "gradcam_target_layer"
-    }
     weights = None
     class_labels = _imagenet_labels()
     if model_config.pretrained:
@@ -74,7 +84,11 @@ def load_torchvision_cnn(
     model.to(torch.device(device))
 
     data_config = {
-        "input_size": (3, runtime_config.image_size, runtime_config.image_size),
+        "input_size": (
+            3,
+            preprocessing_config.image_size,
+            preprocessing_config.image_size,
+        ),
         "interpolation": "bilinear",
         "mean": (0.485, 0.456, 0.406),
         "std": (0.229, 0.224, 0.225),
@@ -89,7 +103,10 @@ def load_torchvision_cnn(
         pretrained=model_config.pretrained,
         device=device,
         input_size=_input_size(data_config),
-        image_size=(runtime_config.image_size, runtime_config.image_size),
+        image_size=(
+            preprocessing_config.image_size,
+            preprocessing_config.image_size,
+        ),
         patch_size=None,
         num_classes=_num_classes(model),
         data_config=data_config,
@@ -100,19 +117,41 @@ def load_torchvision_cnn(
 
 def load_timm_vit(
     model_config: ModelConfig,
+    preprocessing_config: PreprocessingConfig,
     runtime_config: RuntimeConfig,
 ) -> LoadedModel:
     device = resolve_device(runtime_config.device)
     model_options = dict(model_config.options or {})
-    model = timm.create_model(
-        model_config.name,
-        pretrained=model_config.pretrained,
-        **model_options,
-    )
+    model_options["img_size"] = preprocessing_config.image_size
+    try:
+        model = timm.create_model(
+            model_config.name,
+            pretrained=model_config.pretrained,
+            **model_options,
+        )
+    except TypeError as error:
+        if "img_size" not in str(error):
+            raise
+        raise ValueError(
+            f"model {model_config.name!r} does not accept "
+            f"preprocessing.image_size={preprocessing_config.image_size}."
+        ) from error
     model.eval()
     model.to(torch.device(device))
 
-    image_size = _accepted_timm_image_size(model, runtime_config.image_size)
+    image_size = _accepted_timm_image_size(
+        model,
+        preprocessing_config.image_size,
+    )
+    expected_image_size = (
+        preprocessing_config.image_size,
+        preprocessing_config.image_size,
+    )
+    if image_size != expected_image_size:
+        raise ValueError(
+            f"model {model_config.name!r} accepted image size {image_size}, not "
+            f"configured preprocessing.image_size={preprocessing_config.image_size}."
+        )
     data_config = dict(resolve_model_data_config(model))
     data_config["input_size"] = (
         3,

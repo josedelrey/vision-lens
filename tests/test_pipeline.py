@@ -1,3 +1,4 @@
+from dataclasses import replace
 from pathlib import Path
 
 import torch
@@ -20,7 +21,6 @@ def test_vit_pipeline_exports_figures_with_mocked_model(monkeypatch, tmp_path):
 
     config = parse_config(
         {
-            "task": "vit_attention",
             "model": {
                 "architecture": "vit",
                 "backend": "timm",
@@ -28,20 +28,21 @@ def test_vit_pipeline_exports_figures_with_mocked_model(monkeypatch, tmp_path):
                 "pretrained": False,
                 "options": {},
             },
-            "images": {
+            "input": {
                 "paths": ["data/examples/1.jpg"],
             },
             "output": {
                 "directory": str(tmp_path),
             },
-            "attention": {
+            "preprocessing": {"image_size": 4},
+            "analysis": {
+                "method": "attention",
                 "layers": [0],
                 "heads": None,
                 "head_fusion": "mean",
             },
             "runtime": {
                 "device": "cpu",
-                "image_size": 4,
             },
             "visualization": {
                 "overlay_alpha": 0.35,
@@ -50,15 +51,7 @@ def test_vit_pipeline_exports_figures_with_mocked_model(monkeypatch, tmp_path):
             },
         }
     )
-    config = config.__class__(
-        task=config.task,
-        model=config.model,
-        images=config.images,
-        output=OutputConfig(tmp_path),
-        attention=config.attention,
-        runtime=config.runtime,
-        visualization=config.visualization,
-    )
+    config = replace(config, output=OutputConfig(tmp_path))
 
     loaded_model = LoadedModel(
         model=object(),
@@ -215,9 +208,12 @@ def test_gradcam_export_preserves_heatmap_overlay_and_grid_layout(tmp_path):
 def test_patch_pca_pipeline_exports_reference_style_images(monkeypatch, tmp_path):
     from vision_lens import pipeline
 
+    horse_a = tmp_path / "horse-a.jpg"
+    horse_b = tmp_path / "horse-b.jpg"
+    Image.new("RGB", (4, 4), "white").save(horse_a)
+    Image.new("RGB", (4, 4), "white").save(horse_b)
     config = parse_config(
         {
-            "task": "patch_pca",
             "model": {
                 "architecture": "vit",
                 "backend": "timm",
@@ -225,10 +221,12 @@ def test_patch_pca_pipeline_exports_reference_style_images(monkeypatch, tmp_path
                 "pretrained": False,
                 "options": {},
             },
-            "images": {"paths": ["horse-a.jpg", "horse-b.jpg"]},
+            "input": {"paths": [str(horse_a), str(horse_b)]},
             "output": {"directory": str(tmp_path)},
-            "runtime": {"device": "cpu", "image_size": 4},
-            "patch_pca": {
+            "preprocessing": {"image_size": 4},
+            "runtime": {"device": "cpu"},
+            "analysis": {
+                "method": "patch_pca",
                 "foreground_threshold": 0.5,
                 "foreground_side": "low",
             },
