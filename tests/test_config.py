@@ -48,9 +48,26 @@ def test_parse_config_applies_documented_defaults():
     assert config.analysis.heads is None
     assert config.analysis.head_fusion == "mean"
     assert config.runtime.device == "auto"
+    assert config.runtime.batch_size is None
+    assert config.runtime.workers == 0
+    assert config.runtime.precision == "float32"
+    assert config.runtime.seed is None
+    assert config.preprocessing.resize == "stretch"
+    assert config.preprocessing.crop == "none"
+    assert config.preprocessing.pad == "none"
+    assert config.preprocessing.interpolation is None
+    assert config.preprocessing.normalize is True
     assert config.visualization.overlay_alpha == 0.45
     assert config.visualization.cmap == "viridis"
     assert config.visualization.grid_format == "png"
+    assert config.visualization.columns is None
+    assert config.visualization.items_per_grid is None
+    assert config.visualization.normalization == "per_map"
+    assert config.output.heatmaps is True
+    assert config.output.overlays is True
+    assert config.output.grids is True
+    assert config.output.raw_arrays is False
+    assert config.output.overwrite == "replace"
 
 
 def test_parse_config_reads_visualization_values():
@@ -75,6 +92,7 @@ def test_patch_pca_defaults_and_overrides_are_in_analysis_section():
 
     assert config.analysis.foreground_threshold == 0.5
     assert config.analysis.foreground_side == "high"
+    assert config.output.overlays is False
 
     raw_config["analysis"].update(
         {"foreground_threshold": 0.65, "foreground_side": "low"}
@@ -160,11 +178,11 @@ def test_cli_selected_preset_replaces_config_selected_preset():
     ("section", "key"),
     [
         (None, "imagse"),
-        ("input", "recursive"),
+        ("input", "recusrive"),
         ("model", "weights"),
-        ("preprocessing", "crop"),
-        ("runtime", "workers"),
-        ("visualization", "columns"),
+        ("preprocessing", "cropping"),
+        ("runtime", "worker_count"),
+        ("visualization", "column_count"),
         ("output", "format"),
     ],
 )
@@ -253,9 +271,10 @@ def test_resolved_config_contains_defaults_and_absolute_paths():
     rendered = yaml.safe_load(resolved_config_yaml(config))
 
     assert resolved == rendered
-    assert Path(resolved["input"]["paths"][0]).is_absolute()
+    assert Path(resolved["input"]["files"][0]).is_absolute()
     assert Path(resolved["output"]["directory"]).is_absolute()
-    assert resolved["preprocessing"] == {"image_size": 672}
+    assert resolved["preprocessing"]["image_size"] == 672
+    assert resolved["preprocessing"]["resize"] == "stretch"
     assert resolved["analysis"]["head_fusion"] == "mean"
 
 
@@ -272,3 +291,138 @@ def test_unknown_preset_lists_available_choices():
         get_preset("missing")
 
     assert all(name in str(error.value) for name in available_presets())
+
+
+def test_input_folders_patterns_recursion_and_limit_are_resolved(tmp_path):
+    image_dir = tmp_path / "images"
+    nested = image_dir / "nested"
+    nested.mkdir(parents=True)
+    (image_dir / "a.jpg").touch()
+    (image_dir / "ignored.txt").touch()
+    (nested / "b.jpg").touch()
+    raw_config = _minimal_config()
+    raw_config["input"] = {
+        "folders": ["images"],
+        "patterns": ["*.jpg"],
+        "recursive": True,
+        "limit": 1,
+    }
+
+    config = parse_config(raw_config, base_dir=tmp_path)
+
+    assert config.input.paths == (image_dir / "a.jpg",)
+    assert config.input.folders == (image_dir,)
+    assert config.input.patterns == ("*.jpg",)
+    assert config.input.recursive is True
+    assert config.input.limit == 1
+
+
+def test_all_new_controls_are_parsed_and_resolved(tmp_path):
+    raw_config = _minimal_config(
+        method="gradcam",
+        architecture="cnn",
+        backend="torchvision",
+    )
+    raw_config["analysis"].update({"target_layer": "layer3", "target_class": 7})
+    raw_config["input"]["paths"] = [str(Path("data/examples/1.jpg").resolve())]
+    raw_config["preprocessing"] = {
+        "image_size": 224,
+        "resize": "longest",
+        "crop": "none",
+        "pad": "center",
+        "interpolation": "bicubic",
+        "normalize": True,
+        "mean": [0.1, 0.2, 0.3],
+        "std": [0.9, 0.8, 0.7],
+    }
+    raw_config["runtime"] = {
+        "batch_size": 2,
+        "device": "cpu",
+        "workers": 3,
+        "precision": "bfloat16",
+        "seed": 42,
+    }
+    raw_config["visualization"] = {
+        "tile_size": [320, 240],
+        "columns": 2,
+        "items_per_grid": 6,
+        "spacing": 8,
+        "padding": 10,
+        "labels": False,
+        "background": "#101010",
+        "dpi": 150,
+        "overlay_alpha": 0.25,
+        "cmap": "magma",
+        "grid_format": "svg",
+        "normalization": "fixed",
+        "normalization_range": [-1, 2],
+    }
+    raw_config["output"].update(
+        {
+            "heatmaps": False,
+            "overlays": True,
+            "grids": False,
+            "raw_arrays": True,
+            "image_format": "webp",
+            "raw_format": "npz",
+            "overwrite": "error",
+        }
+    )
+
+    config = parse_config(raw_config, base_dir=tmp_path)
+
+    assert config.analysis.target_class == 7
+    assert config.preprocessing.mean == (0.1, 0.2, 0.3)
+    assert config.runtime.batch_size == 2
+    assert config.runtime.precision == "bfloat16"
+    assert config.visualization.tile_size == (320, 240)
+    assert config.visualization.items_per_grid == 6
+    assert config.visualization.normalization_range == (-1.0, 2.0)
+    assert config.output.image_format == "webp"
+    assert config.output.raw_format == "npz"
+
+
+def test_fixed_normalization_requires_a_range():
+    raw_config = _minimal_config({"normalization": "fixed"})
+
+    with pytest.raises(ValueError, match="normalization_range is required"):
+        parse_config(raw_config)
+
+
+def test_pca_projection_paths_resolve_from_config_and_load_must_exist(tmp_path):
+    raw_config = _minimal_config(method="patch_pca")
+    raw_config["input"]["paths"] = [str(Path("data/examples/1.jpg").resolve())]
+    raw_config["analysis"].update(
+        {
+            "projection": "fit",
+            "save_projection": "artifacts/pca.npz",
+        }
+    )
+    config = parse_config(raw_config, base_dir=tmp_path)
+    assert config.analysis.save_projection == tmp_path / "artifacts" / "pca.npz"
+
+    raw_config["analysis"] = {
+        "method": "patch_pca",
+        "projection": "load",
+        "projection_path": "missing.npz",
+    }
+    with pytest.raises(ValueError, match="projection file does not exist"):
+        parse_config(raw_config, base_dir=tmp_path)
+
+
+def test_patch_pca_rejects_unsupported_overlay_output():
+    raw_config = _minimal_config(method="patch_pca")
+    raw_config["output"]["overlays"] = True
+
+    with pytest.raises(ValueError, match="overlays is not supported"):
+        parse_config(raw_config)
+
+
+def test_at_least_one_output_type_must_be_enabled():
+    raw_config = _minimal_config()
+    raw_config["output"].update(
+        {"heatmaps": False, "overlays": False, "grids": False, "raw_arrays": False}
+    )
+
+    with pytest.raises(ValueError, match="At least one output type"):
+        parse_config(raw_config)

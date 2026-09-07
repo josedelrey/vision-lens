@@ -72,16 +72,19 @@ def load_torchvision_cnn(
     runtime_config: RuntimeConfig,
 ) -> LoadedModel:
     device = resolve_device(runtime_config.device)
+    _validate_precision(runtime_config.precision, device)
     model_options = model_config.options or {}
     weights = None
     class_labels = _imagenet_labels()
+    weights_transform = None
     if model_config.pretrained:
         weights = get_model_weights(model_config.name).DEFAULT
         class_labels = tuple(weights.meta.get("categories", class_labels or ()))
+        weights_transform = weights.transforms()
 
     model = get_model(model_config.name, weights=weights, **model_options)
     model.eval()
-    model.to(torch.device(device))
+    _move_model(model, device, runtime_config.precision)
 
     data_config = {
         "input_size": (
@@ -89,12 +92,25 @@ def load_torchvision_cnn(
             preprocessing_config.image_size,
             preprocessing_config.image_size,
         ),
-        "interpolation": "bilinear",
-        "mean": (0.485, 0.456, 0.406),
-        "std": (0.229, 0.224, 0.225),
+        "interpolation": (
+            weights_transform.interpolation.value
+            if weights_transform is not None
+            else "bilinear"
+        ),
+        "mean": (
+            tuple(weights_transform.mean)
+            if weights_transform is not None
+            else (0.485, 0.456, 0.406)
+        ),
+        "std": (
+            tuple(weights_transform.std)
+            if weights_transform is not None
+            else (0.229, 0.224, 0.225)
+        ),
         "crop_pct": 1.0,
         "crop_mode": "none",
     }
+    _apply_preprocessing_overrides(data_config, preprocessing_config)
 
     metadata = ModelMetadata(
         architecture=model_config.architecture,
@@ -121,6 +137,7 @@ def load_timm_vit(
     runtime_config: RuntimeConfig,
 ) -> LoadedModel:
     device = resolve_device(runtime_config.device)
+    _validate_precision(runtime_config.precision, device)
     model_options = dict(model_config.options or {})
     model_options["img_size"] = preprocessing_config.image_size
     try:
@@ -137,7 +154,7 @@ def load_timm_vit(
             f"preprocessing.image_size={preprocessing_config.image_size}."
         ) from error
     model.eval()
-    model.to(torch.device(device))
+    _move_model(model, device, runtime_config.precision)
 
     image_size = _accepted_timm_image_size(
         model,
@@ -160,6 +177,7 @@ def load_timm_vit(
     )
     data_config["crop_pct"] = 1.0
     data_config["crop_mode"] = "none"
+    _apply_preprocessing_overrides(data_config, preprocessing_config)
 
     metadata = ModelMetadata(
         architecture=model_config.architecture,
@@ -199,6 +217,14 @@ def _accepted_timm_image_size(
 
 
 def resolve_device(requested: str) -> str:
+    if requested == "cuda" and not torch.cuda.is_available():
+        raise ValueError(
+            "runtime.device='cuda' was requested, but CUDA is unavailable."
+        )
+    if requested == "mps" and not (
+        hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
+    ):
+        raise ValueError("runtime.device='mps' was requested, but MPS is unavailable.")
     if requested != "auto":
         return requested
     if torch.cuda.is_available():
@@ -206,6 +232,43 @@ def resolve_device(requested: str) -> str:
     if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
         return "mps"
     return "cpu"
+
+
+def _move_model(model: Any, device: str, precision: str) -> None:
+    model.to(torch.device(device))
+    if precision == "float16":
+        model.to(dtype=torch.float16)
+    elif precision == "bfloat16":
+        model.to(dtype=torch.bfloat16)
+
+
+def _validate_precision(precision: str, device: str) -> None:
+    if precision == "float16" and device == "cpu":
+        raise ValueError(
+            "runtime.precision='float16' is not supported on CPU; use "
+            "float32 or bfloat16."
+        )
+    if precision == "bfloat16" and device == "mps":
+        raise ValueError(
+            "runtime.precision='bfloat16' is not supported on MPS; use "
+            "float32 or float16."
+        )
+
+
+def _apply_preprocessing_overrides(
+    data_config: dict[str, Any],
+    config: PreprocessingConfig,
+) -> None:
+    if config.interpolation is not None:
+        data_config["interpolation"] = config.interpolation
+    if not config.normalize:
+        data_config["mean"] = (0.0, 0.0, 0.0)
+        data_config["std"] = (1.0, 1.0, 1.0)
+    else:
+        if config.mean is not None:
+            data_config["mean"] = config.mean
+        if config.std is not None:
+            data_config["std"] = config.std
 
 
 def _input_size(data_config: dict[str, Any]) -> tuple[int, int, int]:

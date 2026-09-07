@@ -2,10 +2,8 @@ import numpy as np
 import torch
 from PIL import Image
 
-from vision_lens.images import (
-    build_timm_preprocess,
-    build_torchvision_preprocess,
-)
+from vision_lens.config import PreprocessingConfig
+from vision_lens.images import build_timm_preprocess, build_torchvision_preprocess
 
 
 def test_torchvision_preprocess_resizes_rectangular_images_without_cropping():
@@ -50,6 +48,36 @@ def test_timm_preprocess_uses_model_normalization_without_cropping(monkeypatch):
     assert tensor.shape == (3, 8, 8)
     assert tensor[0, :, 0].mean() < 0.1
     assert tensor[0, :, -1].mean() > 0.9
+
+
+def test_longest_resize_with_center_padding_preserves_aspect_ratio():
+    image = Image.new("RGB", (16, 8), "white")
+    config = PreprocessingConfig(
+        image_size=8,
+        resize="longest",
+        pad="center",
+        normalize=False,
+    )
+
+    tensor = build_torchvision_preprocess(image_size=8, config=config)(image)
+
+    assert tensor.shape == (3, 8, 8)
+    assert tensor[:, :2].max() == 0
+    assert tensor[:, 2:6].min() == 1
+    assert tensor[:, 6:].max() == 0
+
+
+def test_custom_normalization_overrides_model_defaults():
+    config = PreprocessingConfig(
+        image_size=4,
+        mean=(0.5, 0.5, 0.5),
+        std=(0.5, 0.5, 0.5),
+    )
+    tensor = build_torchvision_preprocess(image_size=4, config=config)(
+        Image.new("RGB", (4, 4), (128, 128, 128))
+    )
+
+    assert torch.allclose(tensor, torch.full_like(tensor, 1 / 255), atol=1e-6)
 
 
 def _horizontal_gradient(width: int, height: int) -> Image.Image:

@@ -4,7 +4,9 @@ import torch
 
 from vision_lens.feature_pca import (
     _patch_tokens_from_features,
+    load_patch_pca_projection,
     project_patch_embeddings,
+    save_patch_pca_projection,
 )
 
 
@@ -42,9 +44,7 @@ def test_patch_pca_keeps_rejected_patches_black():
 
 
 def test_patch_pca_can_select_the_low_side_as_foreground():
-    embeddings = torch.tensor(
-        [[[0.0, 0.0], [1.0, 0.0], [2.0, 0.0], [3.0, 0.0]]]
-    )
+    embeddings = torch.tensor([[[0.0, 0.0], [1.0, 0.0], [2.0, 0.0], [3.0, 0.0]]])
 
     high = project_patch_embeddings(
         embeddings,
@@ -93,3 +93,33 @@ def test_patch_token_extraction_prefers_dinov2_patch_tokens():
     )
 
     assert patches is patch_tokens
+
+
+def test_patch_pca_projection_can_be_saved_and_reused_with_frozen_scaling(tmp_path):
+    embeddings = torch.rand(2, 4, 6)
+    fitted = project_patch_embeddings(
+        embeddings,
+        patch_grid=(2, 2),
+        image_size=(8, 8),
+        foreground_threshold=0.4,
+        foreground_side="low",
+    )
+    projection_path = tmp_path / "projection.npz"
+    assert fitted.projection is not None
+    save_patch_pca_projection(fitted.projection, projection_path)
+
+    loaded = load_patch_pca_projection(projection_path)
+    reused = project_patch_embeddings(
+        embeddings,
+        patch_grid=(2, 2),
+        image_size=(8, 8),
+        foreground_threshold=0.9,
+        foreground_side="high",
+        projection=loaded,
+    )
+
+    assert torch.equal(reused.foreground_mask, fitted.foreground_mask)
+    assert all(
+        np.array_equal(np.asarray(actual), np.asarray(expected))
+        for actual, expected in zip(reused.images, fitted.images, strict=True)
+    )

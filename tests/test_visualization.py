@@ -1,12 +1,15 @@
+import numpy as np
 import torch
 from PIL import Image
 
 from vision_lens.visualization import (
+    attention_map_to_array,
     image_grid,
     make_image_comparison_grid,
     overlay_attention,
     render_heatmap,
     save_grid_figure,
+    shared_value_range,
 )
 
 
@@ -89,3 +92,48 @@ def test_save_grid_figure_uses_fixed_tile_size(tmp_path):
     svg = output_path.read_text(encoding="utf-8")
     assert 'width="331.2pt"' in svg
     assert 'height="184.32pt"' in svg
+
+
+def test_fixed_normalization_uses_the_configured_range():
+    array = attention_map_to_array(
+        torch.tensor([[0.0, 5.0, 10.0]]),
+        normalization="fixed",
+        normalization_range=(0.0, 20.0),
+    )
+
+    assert array.tolist() == [[0.0, 0.25, 0.5]]
+
+
+def test_shared_normalization_uses_one_range_for_multiple_maps():
+    value_range = shared_value_range(
+        [torch.tensor([[0.0, 1.0]]), torch.tensor([[10.0, 20.0]])]
+    )
+    first = attention_map_to_array(
+        torch.tensor([[0.0, 1.0]]),
+        normalization="shared",
+        normalization_range=value_range,
+    )
+
+    assert value_range == (0.0, 20.0)
+    assert np.allclose(first, [[0.0, 0.05]])
+
+
+def test_grid_style_controls_tile_size_spacing_padding_and_labels(tmp_path):
+    output_path = tmp_path / "custom.svg"
+    save_grid_figure(
+        images=[Image.new("RGB", (8, 8), "white")] * 2,
+        labels=["first", "second"],
+        output_path=output_path,
+        columns=1,
+        tile_size=(100, 50),
+        spacing=5,
+        padding=10,
+        show_labels=False,
+        background="#101010",
+        dpi=200,
+    )
+
+    svg = output_path.read_text(encoding="utf-8")
+    assert 'width="43.2pt"' in svg
+    assert 'height="45pt"' in svg
+    assert "first" not in svg
