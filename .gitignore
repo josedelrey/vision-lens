@@ -217,9 +217,10 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-# Local exercise planning notes
-EXERCISE_IMPLEMENTATION_PLAN.md
-
 # Generated artifacts
 outputs/*
 !outputs/.gitkeep
+.hf-cache/
+
+# Original images
+data/originals

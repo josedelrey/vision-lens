@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
 import os
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -9,6 +9,7 @@ from typing import Any
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 
 import matplotlib
+
 matplotlib.use("Agg")
 
 import numpy as np
@@ -85,7 +86,7 @@ def make_layer_comparison_grid(
     ]
     tiles = [
         labeled_image(overlay, label)
-        for overlay, label in zip(overlays, labels)
+        for overlay, label in zip(overlays, labels, strict=True)
     ]
     grid = image_grid(tiles, columns=columns)
     if output_path is not None:
@@ -121,11 +122,11 @@ def make_image_comparison_grid(
             batch_index=batch_index,
             head_index=head_index,
         )
-        for image, attention_map in zip(images, attention_maps)
+        for image, attention_map in zip(images, attention_maps, strict=True)
     ]
     tiles = [
         labeled_image(overlay, label)
-        for overlay, label in zip(overlays, labels)
+        for overlay, label in zip(overlays, labels, strict=True)
     ]
     grid = image_grid(tiles, columns=columns)
     if output_path is not None:
@@ -175,7 +176,7 @@ def save_grid_figure(
         frameon=False,
     )
 
-    for index, (image, label) in enumerate(zip(pil_images, labels)):
+    for index, (image, label) in enumerate(zip(pil_images, labels, strict=True)):
         row, column = divmod(index, columns)
         cell_x = column * (tile_width + gap)
         cell_y = row * (tile_height + label_height + gap)
@@ -203,6 +204,7 @@ def image_grid(
     columns: int | None = None,
     background: str = "white",
     gap: int = 12,
+    padding: int = 0,
 ) -> Any:
     if not images:
         raise ValueError("image_grid requires at least one image.")
@@ -213,14 +215,17 @@ def image_grid(
     tile_width = max(image.width for image in pil_images)
     tile_height = max(image.height for image in pil_images)
 
-    width = columns * tile_width + (columns - 1) * gap
-    height = rows * tile_height + (rows - 1) * gap
+    if gap < 0 or padding < 0:
+        raise ValueError("gap and padding must be non-negative.")
+
+    width = columns * tile_width + (columns - 1) * gap + 2 * padding
+    height = rows * tile_height + (rows - 1) * gap + 2 * padding
     grid = Image.new("RGB", (width, height), background)
 
     for index, image in enumerate(pil_images):
         row, column = divmod(index, columns)
-        x = column * (tile_width + gap)
-        y = row * (tile_height + gap)
+        x = padding + column * (tile_width + gap)
+        y = padding + row * (tile_height + gap)
         grid.paste(image, (x, y))
 
     return grid

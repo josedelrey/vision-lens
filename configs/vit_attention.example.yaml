@@ -1,3 +1,5 @@
+preset: dino-vits8-attention
+
 task: vit_attention
 
 model:

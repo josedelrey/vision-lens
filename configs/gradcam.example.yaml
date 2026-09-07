@@ -1,3 +1,5 @@
+preset: resnet50-gradcam
+
 task: gradcam
 
 model:

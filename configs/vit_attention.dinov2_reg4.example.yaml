@@ -1,3 +1,5 @@
+preset: dinov2-reg4-attention
+
 task: vit_attention
 
 model:
