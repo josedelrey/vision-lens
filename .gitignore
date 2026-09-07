@@ -218,9 +218,8 @@ __marimo__/
 .streamlit/secrets.toml
 
 # Generated artifacts
-outputs/*
-!outputs/.gitkeep
+outputs/
 .hf-cache/
 
 # Original images
-data/originals
+data/originals/
