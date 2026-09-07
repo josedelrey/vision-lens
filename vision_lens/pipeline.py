@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from datetime import datetime, timezone
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any
 
 import numpy as np
@@ -26,17 +28,22 @@ from vision_lens.feature_pca import (
     PatchPCAResult,
     extract_patch_embeddings,
     extract_patch_pca,
+    fit_patch_pca_projection_batches,
     load_patch_pca_projection,
     project_patch_embeddings,
     save_patch_pca_projection,
 )
-from vision_lens.images import (
-    build_preprocess,
-    load_images,
-    preprocess_images,
-    tensors_to_display_images,
+from vision_lens.manifest import (
+    check_manifest_overwrite,
+    write_run_manifest,
 )
 from vision_lens.models import LoadedModel, load_model
+from vision_lens.processing import (
+    build_batch_preprocessor,
+    iter_input_batches,
+    preprocess_batch,
+    unique_input_labels,
+)
 from vision_lens.visualization import (
     image_grid,
     make_image_comparison_grid,
@@ -55,24 +62,27 @@ ROLLOUT_GRID_MAX_COLUMNS = 4
 class PipelineResult:
     config: VisionLensConfig
     loaded_model: LoadedModel
-    attention: AttentionExtractionResult
+    attention: AttentionExtractionResult | None
     output_paths: tuple[Path, ...]
+    processed_inputs: int = 0
 
 
 @dataclass(frozen=True)
 class GradCamPipelineResult:
     config: VisionLensConfig
     loaded_model: LoadedModel
-    gradcam: GradCamResult
+    gradcam: GradCamResult | None
     output_paths: tuple[Path, ...]
+    processed_inputs: int = 0
 
 
 @dataclass(frozen=True)
 class PatchPCAPipelineResult:
     config: VisionLensConfig
     loaded_model: LoadedModel
-    patch_pca: PatchPCAResult
+    patch_pca: PatchPCAResult | None
     output_paths: tuple[Path, ...]
+    processed_inputs: int = 0
 
 
 def run_vit_attention(
@@ -121,6 +131,9 @@ def run_patch_pca_from_config(
     if config.patch_pca is None:
         raise ValueError("Patch PCA pipeline requires a patch_pca config.")
 
+    started_at = datetime.now(timezone.utc)
+    check_manifest_overwrite(config)
+    labels = unique_input_labels(config.images.paths)
     projection = (
         load_patch_pca_projection(config.analysis.projection_path)
         if config.analysis.projection == "load"
@@ -128,67 +141,173 @@ def run_patch_pca_from_config(
     )
     _apply_seed(config.runtime.seed)
     loaded_model = load_model(config)
-    images = _load_configured_images(config)
-    transform = build_preprocess(
-        loaded_model.model,
-        backend=config.model.backend,
-        image_size=loaded_model.metadata.image_size,
-        config=config.preprocessing,
-        data_config=loaded_model.metadata.data_config,
+    transform = build_batch_preprocessor(loaded_model, config.preprocessing)
+    patch_grid = _patch_grid(loaded_model)
+    page_offsets, total_grid_pages = _grid_page_plan(
+        len(config.images.paths),
+        config.runtime.batch_size,
+        config.visualization.items_per_grid,
     )
-    if config.runtime.batch_size is None:
-        inputs = preprocess_images(images, transform)
-        _validate_input_size(inputs, loaded_model)
+    output_paths: list[Path] = []
+    retained_patch_pca = None
+
+    if projection is not None:
+        for input_batch in iter_input_batches(
+            config.images.paths,
+            labels,
+            batch_size=config.runtime.batch_size,
+            workers=config.runtime.workers,
+        ):
+            batch = preprocess_batch(
+                input_batch,
+                transform,
+                loaded_model,
+                include_display_images=False,
+            )
+            patch_pca = extract_patch_pca(
+                loaded_model.model,
+                batch.inputs,
+                loaded_model.metadata,
+                projection=projection,
+            )
+            if len(config.images.paths) <= config.runtime.batch_size:
+                retained_patch_pca = patch_pca
+            output_paths.extend(
+                export_patch_pca_outputs(
+                    patch_pca,
+                    image_paths=input_batch.paths,
+                    output_dir=config.output.directory,
+                    output_config=config.output,
+                    visualization_config=config.visualization,
+                    input_labels=input_batch.labels,
+                    grid_page_offset=page_offsets[input_batch.index],
+                    total_grid_pages=total_grid_pages,
+                )
+            )
+    elif len(config.images.paths) <= config.runtime.batch_size:
+        input_batch = next(
+            iter_input_batches(
+                config.images.paths,
+                labels,
+                batch_size=config.runtime.batch_size,
+                workers=config.runtime.workers,
+            )
+        )
+        batch = preprocess_batch(
+            input_batch,
+            transform,
+            loaded_model,
+            include_display_images=False,
+        )
         patch_pca = extract_patch_pca(
             loaded_model.model,
-            inputs,
+            batch.inputs,
             loaded_model.metadata,
             foreground_threshold=config.patch_pca.foreground_threshold,
             foreground_side=config.patch_pca.foreground_side,
-            projection=projection,
+        )
+        projection = patch_pca.projection
+        retained_patch_pca = patch_pca
+        output_paths.extend(
+            export_patch_pca_outputs(
+                patch_pca,
+                image_paths=input_batch.paths,
+                output_dir=config.output.directory,
+                output_config=config.output,
+                visualization_config=config.visualization,
+                input_labels=input_batch.labels,
+                grid_page_offset=page_offsets[input_batch.index],
+                total_grid_pages=total_grid_pages,
+            )
         )
     else:
-        patch_grid = _patch_grid(loaded_model)
-        embeddings = []
-        for image_batch in _chunks(images, config.runtime.batch_size):
-            inputs = preprocess_images(image_batch, transform)
-            _validate_input_size(inputs, loaded_model)
-            embeddings.append(
-                extract_patch_embeddings(loaded_model.model, inputs, patch_grid)
+        with TemporaryDirectory(prefix="vision-lens-pca-") as temporary_directory:
+            staged_batches: list[
+                tuple[int, tuple[Path, ...], tuple[str, ...], Path]
+            ] = []
+            for input_batch in iter_input_batches(
+                config.images.paths,
+                labels,
+                batch_size=config.runtime.batch_size,
+                workers=config.runtime.workers,
+            ):
+                batch = preprocess_batch(
+                    input_batch,
+                    transform,
+                    loaded_model,
+                    include_display_images=False,
+                )
+                embeddings = extract_patch_embeddings(
+                    loaded_model.model,
+                    batch.inputs,
+                    patch_grid,
+                )
+                staged_path = (
+                    Path(temporary_directory) / f"batch-{input_batch.index}.npy"
+                )
+                _save_array(embeddings, staged_path)
+                staged_batches.append(
+                    (
+                        input_batch.index,
+                        input_batch.paths,
+                        input_batch.labels,
+                        staged_path,
+                    )
+                )
+
+            def embedding_batches() -> Any:
+                for _index, _paths, _labels, staged_path in staged_batches:
+                    yield np.load(staged_path, allow_pickle=False)
+
+            projection = fit_patch_pca_projection_batches(
+                embedding_batches,
+                foreground_threshold=config.patch_pca.foreground_threshold,
+                foreground_side=config.patch_pca.foreground_side,
             )
-        patch_pca = project_patch_embeddings(
-            torch.cat(embeddings, dim=0),
-            patch_grid=patch_grid,
-            image_size=loaded_model.metadata.image_size,
-            foreground_threshold=config.patch_pca.foreground_threshold,
-            foreground_side=config.patch_pca.foreground_side,
-            projection=projection,
-        )
-    projection_paths = []
+            for batch_index, batch_paths, batch_labels, staged_path in staged_batches:
+                embeddings = np.load(staged_path, allow_pickle=False)
+                patch_pca = project_patch_embeddings(
+                    embeddings,
+                    patch_grid=patch_grid,
+                    image_size=loaded_model.metadata.image_size,
+                    projection=projection,
+                )
+                output_paths.extend(
+                    export_patch_pca_outputs(
+                        patch_pca,
+                        image_paths=batch_paths,
+                        output_dir=config.output.directory,
+                        output_config=config.output,
+                        visualization_config=config.visualization,
+                        input_labels=batch_labels,
+                        grid_page_offset=page_offsets[batch_index],
+                        total_grid_pages=total_grid_pages,
+                    )
+                )
+
     if config.analysis.save_projection is not None:
-        assert patch_pca.projection is not None
+        assert projection is not None
         projection_path = _write_projection(
-            patch_pca.projection,
+            projection,
             config.analysis.save_projection,
             config.output.overwrite,
         )
         if projection_path is not None:
-            projection_paths.append(projection_path)
-    output_paths = (
-        *projection_paths,
-        *export_patch_pca_outputs(
-            patch_pca,
-            image_paths=config.images.paths,
-            output_dir=config.output.directory,
-            output_config=config.output,
-            visualization_config=config.visualization,
-        ),
+            output_paths.insert(0, projection_path)
+    output_paths_tuple = tuple(output_paths)
+    write_run_manifest(
+        config,
+        loaded_model,
+        labels,
+        output_paths_tuple,
+        started_at=started_at,
     )
     return PatchPCAPipelineResult(
         config=config,
         loaded_model=loaded_model,
-        patch_pca=patch_pca,
-        output_paths=output_paths,
+        patch_pca=retained_patch_pca,
+        output_paths=output_paths_tuple,
+        processed_inputs=len(config.images.paths),
     )
 
 
@@ -213,63 +332,107 @@ def run_vit_rollout_comparison_from_config(
     if config.attention is None:
         raise ValueError("ViT rollout comparison requires an attention config.")
 
+    started_at = datetime.now(timezone.utc)
+    check_manifest_overwrite(config)
+    labels = unique_input_labels(config.images.paths)
     _apply_seed(config.runtime.seed)
     loaded_model = load_model(config)
-    images = _load_configured_images(config)
-    transform = build_preprocess(
-        loaded_model.model,
-        backend=config.model.backend,
-        image_size=loaded_model.metadata.image_size,
-        config=config.preprocessing,
-        data_config=loaded_model.metadata.data_config,
-    )
-    display_images = []
-    rollout_batches = []
-    attention_batches = []
-    for image_batch in _chunks(images, config.runtime.batch_size):
-        inputs = preprocess_images(image_batch, transform)
-        _validate_input_size(inputs, loaded_model)
-        display_images.extend(
-            tensors_to_display_images(inputs, loaded_model.metadata.data_config)
-        )
-        rollout_batches.append(
-            extract_attention_rollout(
+    transform = build_batch_preprocessor(loaded_model, config.preprocessing)
+    rendering = config.visualization
+    if rendering.normalization == "shared":
+        normalization_range = None
+        for input_batch in iter_input_batches(
+            config.images.paths,
+            labels,
+            batch_size=config.runtime.batch_size,
+            workers=config.runtime.workers,
+        ):
+            batch = preprocess_batch(
+                input_batch,
+                transform,
+                loaded_model,
+                include_display_images=False,
+            )
+            fitted_rollout = extract_attention_rollout(
                 loaded_model.model,
-                inputs,
+                batch.inputs,
                 loaded_model.metadata,
                 layers=config.attention.layers,
-                normalize=config.visualization.normalization == "per_map",
+                normalize=False,
             )
-        )
-        attention_batches.append(
-            _extract_attention(
+            fitted_attention = _extract_attention(
                 loaded_model=loaded_model,
-                inputs=inputs,
+                inputs=batch.inputs,
                 config=config,
             )
+            normalization_range = _extend_value_range(
+                normalization_range,
+                [
+                    *(layer.maps for layer in fitted_attention.layers),
+                    *(layer.maps for layer in fitted_rollout.layers),
+                ],
+            )
+        rendering = replace(
+            rendering,
+            normalization="fixed",
+            normalization_range=normalization_range,
         )
-    rollout = _combine_attention_results(rollout_batches)
-    layer_attention = _combine_attention_results(attention_batches)
-
-    resolved_output_dir = Path(output_dir) if output_dir else config.output.directory
-    output_paths = export_rollout_comparison_outputs(
-        images=display_images,
-        image_paths=config.images.paths,
-        layer_attention=layer_attention,
-        rollout=rollout,
-        output_dir=resolved_output_dir,
-        alpha=config.visualization.overlay_alpha,
-        cmap=config.visualization.cmap,
-        grid_format=config.visualization.grid_format,
-        output_config=config.output,
-        visualization_config=config.visualization,
+    output_paths = []
+    retained_rollout = None
+    for input_batch in iter_input_batches(
+        config.images.paths,
+        labels,
+        batch_size=config.runtime.batch_size,
+        workers=config.runtime.workers,
+    ):
+        batch = preprocess_batch(input_batch, transform, loaded_model)
+        rollout = extract_attention_rollout(
+            loaded_model.model,
+            batch.inputs,
+            loaded_model.metadata,
+            layers=config.attention.layers,
+            normalize=config.visualization.normalization == "per_map",
+        )
+        layer_attention = _extract_attention(
+            loaded_model=loaded_model,
+            inputs=batch.inputs,
+            config=config,
+        )
+        if len(config.images.paths) <= config.runtime.batch_size:
+            retained_rollout = rollout
+        resolved_output_dir = (
+            Path(output_dir) if output_dir else config.output.directory
+        )
+        output_paths.extend(
+            export_rollout_comparison_outputs(
+                images=list(batch.display_images),
+                image_paths=input_batch.paths,
+                layer_attention=layer_attention,
+                rollout=rollout,
+                output_dir=resolved_output_dir,
+                alpha=config.visualization.overlay_alpha,
+                cmap=config.visualization.cmap,
+                grid_format=config.visualization.grid_format,
+                output_config=config.output,
+                visualization_config=rendering,
+                input_labels=input_batch.labels,
+            )
+        )
+    output_paths_tuple = tuple(output_paths)
+    write_run_manifest(
+        config,
+        loaded_model,
+        labels,
+        output_paths_tuple,
+        started_at=started_at,
     )
 
     return PipelineResult(
         config=config,
         loaded_model=loaded_model,
-        attention=rollout,
-        output_paths=output_paths,
+        attention=retained_rollout,
+        output_paths=output_paths_tuple,
+        processed_inputs=len(config.images.paths),
     )
 
 
@@ -284,6 +447,9 @@ def run_gradcam_from_config(config: VisionLensConfig) -> GradCamPipelineResult:
     if config.model.architecture != "cnn":
         raise ValueError("Grad-CAM pipeline expects a CNN model config.")
 
+    started_at = datetime.now(timezone.utc)
+    check_manifest_overwrite(config)
+    labels = unique_input_labels(config.images.paths)
     _apply_seed(config.runtime.seed)
     loaded_model = load_model(config)
     if (
@@ -295,53 +461,101 @@ def run_gradcam_from_config(config: VisionLensConfig) -> GradCamPipelineResult:
             f"analysis.target_class={config.analysis.target_class} is outside the "
             f"model's class range 0 through {loaded_model.metadata.num_classes - 1}."
         )
-    images = _load_configured_images(config)
-    transform = build_preprocess(
-        loaded_model.model,
-        backend=config.model.backend,
-        image_size=loaded_model.metadata.image_size,
-        config=config.preprocessing,
-        data_config=loaded_model.metadata.data_config,
-    )
-    display_images = []
-    gradcam_batches = []
-    for image_batch in _chunks(images, config.runtime.batch_size):
-        inputs = preprocess_images(image_batch, transform)
-        _validate_input_size(inputs, loaded_model)
-        display_images.extend(
-            tensors_to_display_images(inputs, loaded_model.metadata.data_config)
-        )
-        gradcam_batches.append(
-            extract_gradcam(
+    transform = build_batch_preprocessor(loaded_model, config.preprocessing)
+    rendering = config.visualization
+    if rendering.normalization == "shared":
+        normalization_range = None
+        for input_batch in iter_input_batches(
+            config.images.paths,
+            labels,
+            batch_size=config.runtime.batch_size,
+            workers=config.runtime.workers,
+        ):
+            batch = preprocess_batch(
+                input_batch,
+                transform,
+                loaded_model,
+                include_display_images=False,
+            )
+            fitted_gradcam = extract_gradcam(
                 loaded_model.model,
-                inputs,
+                batch.inputs,
                 loaded_model.metadata,
                 target_layer=config.analysis.target_layer,
                 target_classes=(
                     None
                     if config.analysis.target_class is None
-                    else [config.analysis.target_class] * len(image_batch)
+                    else [config.analysis.target_class] * len(input_batch.paths)
                 ),
-                normalize=config.visualization.normalization == "per_map",
+                normalize=False,
+            )
+            normalization_range = _extend_value_range(
+                normalization_range,
+                [fitted_gradcam.maps],
+            )
+        rendering = replace(
+            rendering,
+            normalization="fixed",
+            normalization_range=normalization_range,
+        )
+    page_offsets, total_grid_pages = _grid_page_plan(
+        len(config.images.paths),
+        config.runtime.batch_size,
+        config.visualization.items_per_grid,
+    )
+    output_paths = []
+    retained_gradcam = None
+    for input_batch in iter_input_batches(
+        config.images.paths,
+        labels,
+        batch_size=config.runtime.batch_size,
+        workers=config.runtime.workers,
+    ):
+        batch = preprocess_batch(input_batch, transform, loaded_model)
+        gradcam = extract_gradcam(
+            loaded_model.model,
+            batch.inputs,
+            loaded_model.metadata,
+            target_layer=config.analysis.target_layer,
+            target_classes=(
+                None
+                if config.analysis.target_class is None
+                else [config.analysis.target_class] * len(input_batch.paths)
+            ),
+            normalize=config.visualization.normalization == "per_map",
+        )
+        if len(config.images.paths) <= config.runtime.batch_size:
+            retained_gradcam = gradcam
+        output_paths.extend(
+            export_gradcam_outputs(
+                images=list(batch.display_images),
+                image_paths=input_batch.paths,
+                gradcam=gradcam,
+                output_dir=config.output.directory,
+                alpha=config.visualization.overlay_alpha,
+                cmap=config.visualization.cmap,
+                grid_format=config.visualization.grid_format,
+                output_config=config.output,
+                visualization_config=rendering,
+                input_labels=input_batch.labels,
+                grid_page_offset=page_offsets[input_batch.index],
+                total_grid_pages=total_grid_pages,
             )
         )
-    gradcam = _combine_gradcam_results(gradcam_batches)
-    output_paths = export_gradcam_outputs(
-        images=display_images,
-        image_paths=config.images.paths,
-        gradcam=gradcam,
-        output_dir=config.output.directory,
-        alpha=config.visualization.overlay_alpha,
-        cmap=config.visualization.cmap,
-        grid_format=config.visualization.grid_format,
-        output_config=config.output,
-        visualization_config=config.visualization,
+    output_paths_tuple = tuple(output_paths)
+    write_run_manifest(
+        config,
+        loaded_model,
+        labels,
+        output_paths_tuple,
+        started_at=started_at,
     )
     return GradCamPipelineResult(
         config=config,
         loaded_model=loaded_model,
-        gradcam=gradcam,
-        output_paths=output_paths,
+        gradcam=retained_gradcam,
+        output_paths=output_paths_tuple,
+        processed_inputs=len(config.images.paths),
     )
 
 
@@ -351,50 +565,93 @@ def run_vit_attention_from_config(config: VisionLensConfig) -> PipelineResult:
     if config.attention is None:
         raise ValueError("ViT attention pipeline requires an attention config.")
 
+    started_at = datetime.now(timezone.utc)
+    check_manifest_overwrite(config)
+    labels = unique_input_labels(config.images.paths)
     _apply_seed(config.runtime.seed)
     loaded_model = load_model(config)
-    images = _load_configured_images(config)
-    transform = build_preprocess(
-        loaded_model.model,
-        backend=config.model.backend,
-        image_size=loaded_model.metadata.image_size,
-        config=config.preprocessing,
-        data_config=loaded_model.metadata.data_config,
-    )
-    display_images = []
-    attention_batches = []
-    for image_batch in _chunks(images, config.runtime.batch_size):
-        inputs = preprocess_images(image_batch, transform)
-        _validate_input_size(inputs, loaded_model)
-        display_images.extend(
-            tensors_to_display_images(inputs, loaded_model.metadata.data_config)
-        )
-        attention_batches.append(
-            _extract_attention(
+    transform = build_batch_preprocessor(loaded_model, config.preprocessing)
+    rendering = config.visualization
+    if rendering.normalization == "shared":
+        normalization_range = None
+        for input_batch in iter_input_batches(
+            config.images.paths,
+            labels,
+            batch_size=config.runtime.batch_size,
+            workers=config.runtime.workers,
+        ):
+            batch = preprocess_batch(
+                input_batch,
+                transform,
+                loaded_model,
+                include_display_images=False,
+            )
+            fitted_attention = _extract_attention(
                 loaded_model=loaded_model,
-                inputs=inputs,
+                inputs=batch.inputs,
                 config=config,
             )
+            normalization_range = _extend_value_range(
+                normalization_range,
+                [layer.maps for layer in fitted_attention.layers],
+            )
+        rendering = replace(
+            rendering,
+            normalization="fixed",
+            normalization_range=normalization_range,
         )
-    attention = _combine_attention_results(attention_batches)
-
-    output_paths = export_attention_outputs(
-        images=display_images,
-        image_paths=config.images.paths,
-        attention=attention,
-        output_dir=config.output.directory,
-        alpha=config.visualization.overlay_alpha,
-        cmap=config.visualization.cmap,
-        grid_format=config.visualization.grid_format,
-        output_config=config.output,
-        visualization_config=config.visualization,
+    page_offsets, total_grid_pages = _grid_page_plan(
+        len(config.images.paths),
+        config.runtime.batch_size,
+        config.visualization.items_per_grid,
+    )
+    output_paths = []
+    retained_attention = None
+    for input_batch in iter_input_batches(
+        config.images.paths,
+        labels,
+        batch_size=config.runtime.batch_size,
+        workers=config.runtime.workers,
+    ):
+        batch = preprocess_batch(input_batch, transform, loaded_model)
+        attention = _extract_attention(
+            loaded_model=loaded_model,
+            inputs=batch.inputs,
+            config=config,
+        )
+        if len(config.images.paths) <= config.runtime.batch_size:
+            retained_attention = attention
+        output_paths.extend(
+            export_attention_outputs(
+                images=list(batch.display_images),
+                image_paths=input_batch.paths,
+                attention=attention,
+                output_dir=config.output.directory,
+                alpha=config.visualization.overlay_alpha,
+                cmap=config.visualization.cmap,
+                grid_format=config.visualization.grid_format,
+                output_config=config.output,
+                visualization_config=rendering,
+                input_labels=input_batch.labels,
+                grid_page_offset=page_offsets[input_batch.index],
+                total_grid_pages=total_grid_pages,
+            )
+        )
+    output_paths_tuple = tuple(output_paths)
+    write_run_manifest(
+        config,
+        loaded_model,
+        labels,
+        output_paths_tuple,
+        started_at=started_at,
     )
 
     return PipelineResult(
         config=config,
         loaded_model=loaded_model,
-        attention=attention,
-        output_paths=output_paths,
+        attention=retained_attention,
+        output_paths=output_paths_tuple,
+        processed_inputs=len(config.images.paths),
     )
 
 
@@ -408,6 +665,9 @@ def export_attention_outputs(
     grid_format: str,
     output_config: OutputConfig | None = None,
     visualization_config: VisualizationConfig | None = None,
+    input_labels: tuple[str, ...] | None = None,
+    grid_page_offset: int = 0,
+    total_grid_pages: int | None = None,
 ) -> tuple[Path, ...]:
     output = output_config or OutputConfig(output_dir)
     visualization = visualization_config or VisualizationConfig(
@@ -417,7 +677,7 @@ def export_attention_outputs(
     )
     output_dir.mkdir(parents=True, exist_ok=True)
     output_paths: list[Path] = []
-    labels = [path.stem for path in image_paths]
+    labels = list(input_labels or tuple(path.stem for path in image_paths))
     normalization_range = _rendering_range(
         visualization,
         [layer.maps for layer in attention.layers],
@@ -514,8 +774,8 @@ def export_attention_outputs(
                     output_dir,
                     stem,
                     grid_format,
-                    page_index,
-                    len(image_pages),
+                    grid_page_offset + page_index,
+                    total_grid_pages or len(image_pages),
                 )
                 if not _can_write(output_path, output.overwrite):
                     continue
@@ -548,25 +808,29 @@ def export_patch_pca_outputs(
     output_dir: Path,
     output_config: OutputConfig | None = None,
     visualization_config: VisualizationConfig | None = None,
+    input_labels: tuple[str, ...] | None = None,
+    grid_page_offset: int = 0,
+    total_grid_pages: int | None = None,
 ) -> tuple[Path, ...]:
     if len(patch_pca.images) != len(image_paths):
         raise ValueError("Patch PCA images and image_paths must have the same length.")
 
     output = output_config or OutputConfig(output_dir)
     visualization = visualization_config or VisualizationConfig()
+    labels = input_labels or tuple(path.stem for path in image_paths)
     output_dir.mkdir(parents=True, exist_ok=True)
     output_paths = []
     if output.heatmaps:
-        for path, image in zip(image_paths, patch_pca.images, strict=True):
-            output_path = output_dir / f"{path.stem}_patch_pca.{output.image_format}"
+        for label, image in zip(labels, patch_pca.images, strict=True):
+            output_path = output_dir / f"{label}_patch_pca.{output.image_format}"
             if _can_write(output_path, output.overwrite):
                 output_paths.append(save_image(image, output_path))
     if output.raw_arrays:
-        for index, path in enumerate(image_paths):
+        for index, label in enumerate(labels):
             embedding_path = (
-                output_dir / f"{path.stem}_patch_embeddings.{output.raw_format}"
+                output_dir / f"{label}_patch_embeddings.{output.raw_format}"
             )
-            mask_path = output_dir / f"{path.stem}_foreground_mask.{output.raw_format}"
+            mask_path = output_dir / f"{label}_foreground_mask.{output.raw_format}"
             if _can_write(embedding_path, output.overwrite):
                 output_paths.append(
                     _save_array(patch_pca.patch_embeddings[index], embedding_path)
@@ -589,7 +853,7 @@ def export_patch_pca_outputs(
             from vision_lens.visualization import labeled_image
 
             page_images = [
-                labeled_image(image, image_paths[index].stem)
+                labeled_image(image, labels[index])
                 for image, index in zip(page_images, indices, strict=True)
             ]
         comparison = image_grid(
@@ -608,8 +872,8 @@ def export_patch_pca_outputs(
             output_dir,
             "patch_pca_comparison",
             visualization.grid_format,
-            page_index,
-            len(indices_pages),
+            grid_page_offset + page_index,
+            total_grid_pages or len(indices_pages),
         )
         if _can_write(output_path, output.overwrite):
             output_paths.append(
@@ -629,6 +893,7 @@ def export_rollout_comparison_outputs(
     grid_format: str,
     output_config: OutputConfig | None = None,
     visualization_config: VisualizationConfig | None = None,
+    input_labels: tuple[str, ...] | None = None,
 ) -> tuple[Path, ...]:
     output = output_config or OutputConfig(output_dir)
     visualization = visualization_config or VisualizationConfig(
@@ -638,7 +903,7 @@ def export_rollout_comparison_outputs(
     )
     output_dir.mkdir(parents=True, exist_ok=True)
     output_paths: list[Path] = []
-    labels = [path.stem for path in image_paths]
+    labels = list(input_labels or tuple(path.stem for path in image_paths))
     normalization_range = _rendering_range(
         visualization,
         [
@@ -747,6 +1012,9 @@ def export_gradcam_outputs(
     grid_format: str,
     output_config: OutputConfig | None = None,
     visualization_config: VisualizationConfig | None = None,
+    input_labels: tuple[str, ...] | None = None,
+    grid_page_offset: int = 0,
+    total_grid_pages: int | None = None,
 ) -> tuple[Path, ...]:
     output = output_config or OutputConfig(output_dir)
     visualization = visualization_config or VisualizationConfig(
@@ -756,7 +1024,7 @@ def export_gradcam_outputs(
     )
     output_dir.mkdir(parents=True, exist_ok=True)
     output_paths: list[Path] = []
-    labels = [path.stem for path in image_paths]
+    labels = list(input_labels or tuple(path.stem for path in image_paths))
     normalization_range = _rendering_range(visualization, [gradcam.maps])
 
     for image_index, image in enumerate(images):
@@ -805,8 +1073,8 @@ def export_gradcam_outputs(
                 output_dir,
                 "gradcam_images",
                 grid_format,
-                page_index,
-                len(image_pages),
+                grid_page_offset + page_index,
+                total_grid_pages or len(image_pages),
             )
             if not _can_write(grid_path, output.overwrite):
                 continue
@@ -893,7 +1161,14 @@ def _rollout_grid_items(
     if not pairs:
         raise ValueError("Rollout comparison requires at least one layer.")
 
-    columns = columns or min(len(pairs), ROLLOUT_GRID_MAX_COLUMNS)
+    columns = (
+        min(columns, len(pairs))
+        if columns
+        else min(
+            len(pairs),
+            ROLLOUT_GRID_MAX_COLUMNS,
+        )
+    )
     comparison_images = []
     comparison_labels = []
 
@@ -957,64 +1232,11 @@ def _chunks(values: Any, size: int | None) -> tuple[Any, ...]:
     return tuple(values[start : start + size] for start in range(0, len(values), size))
 
 
-def _load_configured_images(config: VisionLensConfig) -> list[Any]:
-    if config.runtime.workers == 0:
-        return load_images(config.images.paths)
-    return load_images(config.images.paths, workers=config.runtime.workers)
-
-
-def _combine_attention_results(
-    results: list[AttentionExtractionResult],
-) -> AttentionExtractionResult:
-    first = results[0]
-    layers = tuple(
-        LayerAttentionMaps(
-            layer_index=layer.layer_index,
-            maps=torch.cat(
-                [result.layers[layer_index].maps for result in results],
-                dim=0,
-            ),
-            head_indices=layer.head_indices,
-            head_fusion=layer.head_fusion,
-            patch_grid=layer.patch_grid,
-        )
-        for layer_index, layer in enumerate(first.layers)
-    )
-    return AttentionExtractionResult(
-        logits=torch.cat([result.logits for result in results], dim=0),
-        layers=layers,
-        image_size=first.image_size,
-    )
-
-
-def _combine_gradcam_results(results: list[GradCamResult]) -> GradCamResult:
-    first = results[0]
-    return GradCamResult(
-        logits=torch.cat([result.logits for result in results], dim=0),
-        maps=torch.cat([result.maps for result in results], dim=0),
-        target_layer=first.target_layer,
-        target_classes=tuple(
-            target for result in results for target in result.target_classes
-        ),
-        image_size=first.image_size,
-    )
-
-
 def _patch_grid(loaded_model: LoadedModel) -> tuple[int, int]:
     patch_size = loaded_model.metadata.patch_size
     if patch_size is None:
         raise ValueError("Patch PCA requires a model with a known patch size.")
     return infer_patch_grid_from_image(loaded_model.metadata.image_size, patch_size)
-
-
-def _validate_input_size(inputs: Any, loaded_model: LoadedModel) -> None:
-    actual = (int(inputs.shape[-2]), int(inputs.shape[-1]))
-    expected = loaded_model.metadata.image_size
-    if actual != expected:
-        raise ValueError(
-            f"Preprocessing produced image size {actual}, but the model requires "
-            f"{expected}. Adjust preprocessing.resize, crop, or pad."
-        )
 
 
 def _apply_seed(seed: int | None) -> None:
@@ -1036,6 +1258,16 @@ def _rendering_range(
     if visualization.normalization == "fixed":
         return visualization.normalization_range
     return shared_value_range(values)
+
+
+def _extend_value_range(
+    current: tuple[float, float] | None,
+    values: list[Any],
+) -> tuple[float, float]:
+    batch_minimum, batch_maximum = shared_value_range(values)
+    if current is None:
+        return batch_minimum, batch_maximum
+    return min(current[0], batch_minimum), max(current[1], batch_maximum)
 
 
 def _can_write(path: Path, policy: str) -> bool:
@@ -1071,6 +1303,21 @@ def _page_path(
     if page_count == 1:
         return directory / f"{stem}.{extension}"
     return directory / f"{stem}_part-{page_index + 1:03d}.{extension}"
+
+
+def _grid_page_plan(
+    item_count: int,
+    batch_size: int,
+    items_per_grid: int | None,
+) -> tuple[tuple[int, ...], int]:
+    page_offsets = []
+    total_pages = 0
+    for start in range(0, item_count, batch_size):
+        batch_count = min(batch_size, item_count - start)
+        page_size = items_per_grid or batch_count
+        page_offsets.append(total_pages)
+        total_pages += (batch_count + page_size - 1) // page_size
+    return tuple(page_offsets), total_pages
 
 
 def _attention_subset(

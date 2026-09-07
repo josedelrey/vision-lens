@@ -4,10 +4,52 @@ import torch
 
 from vision_lens.feature_pca import (
     _patch_tokens_from_features,
+    fit_patch_pca_projection_batches,
     load_patch_pca_projection,
     project_patch_embeddings,
     save_patch_pca_projection,
 )
+
+
+def test_streaming_pca_projection_is_independent_of_embedding_batch_size():
+    generator = torch.Generator().manual_seed(12)
+    embeddings = torch.rand(7, 4, 6, generator=generator)
+
+    def batches(size):
+        return lambda: (
+            embeddings[start : start + size]
+            for start in range(0, len(embeddings), size)
+        )
+
+    fitted_two = fit_patch_pca_projection_batches(
+        batches(2),
+        foreground_threshold=0.4,
+        foreground_side="low",
+    )
+    fitted_three = fit_patch_pca_projection_batches(
+        batches(3),
+        foreground_threshold=0.4,
+        foreground_side="low",
+    )
+
+    result_two = project_patch_embeddings(
+        embeddings,
+        patch_grid=(2, 2),
+        image_size=(8, 8),
+        projection=fitted_two,
+    )
+    result_three = project_patch_embeddings(
+        embeddings,
+        patch_grid=(2, 2),
+        image_size=(8, 8),
+        projection=fitted_three,
+    )
+
+    assert torch.equal(result_two.foreground_mask, result_three.foreground_mask)
+    assert all(
+        np.array_equal(np.asarray(first), np.asarray(second))
+        for first, second in zip(result_two.images, result_three.images, strict=True)
+    )
 
 
 def test_patch_pca_returns_rgb_images_and_a_shared_mask():

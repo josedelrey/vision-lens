@@ -45,7 +45,9 @@ def test_cli_hides_individual_output_paths_by_default(monkeypatch, capsys):
     assert main(["--preset", "dinov2-pca"]) == 0
 
     output_dir = Path("outputs/example")
-    assert capsys.readouterr().out.splitlines() == [f"saved 2 files to {output_dir}"]
+    assert capsys.readouterr().out.splitlines() == [
+        f"saved 2 outputs plus run manifest to {output_dir}"
+    ]
 
 
 def test_cli_validates_without_running_a_model(monkeypatch, capsys):

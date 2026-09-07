@@ -129,7 +129,7 @@ class OutputConfig:
     raw_arrays: bool = False
     image_format: str = "png"
     raw_format: str = "npy"
-    overwrite: Literal["replace", "error", "skip"] = "replace"
+    overwrite: Literal["replace", "error", "skip"] = "error"
 
 
 @dataclass(frozen=True)
@@ -175,7 +175,7 @@ class PreprocessingConfig:
 @dataclass(frozen=True)
 class RuntimeConfig:
     device: Device = "auto"
-    batch_size: int | None = None
+    batch_size: int = 8
     workers: int = 0
     precision: Precision = "float32"
     seed: int | None = None
@@ -359,8 +359,8 @@ def parse_config(
         analysis=_parse_analysis(analysis_section, method, base),
         runtime=RuntimeConfig(
             device=_device(runtime_section.get("device", "auto")),
-            batch_size=_optional_positive_int(
-                runtime_section.get("batch_size"),
+            batch_size=_positive_int(
+                runtime_section.get("batch_size", 8),
                 "runtime.batch_size",
             ),
             workers=_non_negative_int_value(
@@ -447,7 +447,7 @@ def parse_config(
             image_format=_image_format(output_section.get("image_format", "png")),
             raw_format=_raw_format(output_section.get("raw_format", "npy")),
             overwrite=_choice(
-                output_section.get("overwrite", "replace"),
+                output_section.get("overwrite", "error"),
                 "output.overwrite",
                 {"replace", "error", "skip"},
             ),

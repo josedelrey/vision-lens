@@ -1,12 +1,8 @@
 from __future__ import annotations
 
-import os
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
-
-# Prevent a Windows OpenMP runtime abort when torch is imported before matplotlib.
-os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 
 import matplotlib
 
@@ -424,6 +420,6 @@ def _grid_columns(item_count: int, columns: int | None) -> int:
     if columns is not None:
         if columns <= 0:
             raise ValueError("columns must be positive.")
-        return columns
+        return min(columns, item_count)
 
     return min(item_count, 3)

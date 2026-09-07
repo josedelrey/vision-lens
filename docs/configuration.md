@@ -165,15 +165,24 @@ runtime:
 
 | Setting | Default | Description | Example |
 |---|---|---|---|
-| `batch_size` | `null` | Images analyzed per batch; `null` uses all selected inputs. | `4` |
+| `batch_size` | `8` | Maximum images read, preprocessed, and analyzed together. | `4` |
 | `device` | `auto` | `auto`, `cpu`, `cuda`, or `mps`. | `cuda` |
 | `workers` | `0` | Threads used to read images; `0` reads sequentially. | `4` |
 | `precision` | `float32` | `float32`, `float16`, or `bfloat16`. | `float16` |
 | `seed` | `null` | Seed Python, NumPy, and PyTorch; `null` leaves RNG state unchanged. | `42` |
 
-The model is loaded once. Attention, rollout, and Grad-CAM results are joined
-across batches. PCA extracts batches separately and fits one shared projection
-over the complete selected input set. CPU runs reject `float16` (use
+The model and preprocessing transform are created once per run. Vision Lens
+then reads, preprocesses, analyzes, renders, and exports no more than
+`batch_size` images at a time. Detailed tensors remain available on the Python
+result object for single-batch runs; multi-batch runs report `processed_inputs`
+without retaining the entire collection in memory.
+
+PCA keeps the historical calculation for a single batch. Larger PCA runs stage
+one embedding batch at a time, fit one projection and one set of normalization
+bounds over the complete input set, then transform each staged batch. This
+keeps colors comparable without holding every image or embedding in memory.
+`shared` attention, rollout, and Grad-CAM normalization similarly uses a
+bounded fitting pass before rendering. CPU runs reject `float16` (use
 `bfloat16` instead), and MPS runs reject `bfloat16`.
 
 ## Visualization
@@ -237,9 +246,17 @@ output:
 | `raw_arrays` | `false` | Export analysis arrays without rendering. | `true` |
 | `image_format` | `png` | `png`, `jpeg`, `tiff`, or `webp`. | `webp` |
 | `raw_format` | `npy` | `npy` or compressed `npz`. | `npz` |
-| `overwrite` | `replace` | `replace`, `error`, or `skip` existing files. | `error` |
+| `overwrite` | `error` | `replace`, `error`, or `skip` existing files. Presets explicitly retain `replace`. | `error` |
 
 At least one output type must be enabled.
+
+Every completed run also writes `run-manifest.json` in the output directory.
+It records the fully resolved configuration, model identity and input size,
+runtime and package versions, input paths with stable collision-safe IDs and
+file metadata, output paths, and UTC start/completion times. Custom
+configurations default to `overwrite: error`, so an existing manifest stops the
+run before the model is loaded. The compatibility presets explicitly use
+`overwrite: replace` to retain their earlier rerun behavior.
 
 ## Validate, resolve, and override
 

@@ -65,7 +65,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     result = run_pipeline_from_config(config)
-    print(f"saved {len(result.output_paths)} files to {result.config.output.directory}")
+    print(
+        f"saved {len(result.output_paths)} outputs plus run manifest to "
+        f"{result.config.output.directory}"
+    )
     return 0
 
 
