@@ -48,7 +48,7 @@ def test_parse_config_applies_documented_defaults():
     assert config.analysis.heads is None
     assert config.analysis.head_fusion == "mean"
     assert config.runtime.device == "auto"
-    assert config.runtime.batch_size is None
+    assert config.runtime.batch_size == 8
     assert config.runtime.workers == 0
     assert config.runtime.precision == "float32"
     assert config.runtime.seed is None
@@ -67,7 +67,7 @@ def test_parse_config_applies_documented_defaults():
     assert config.output.overlays is True
     assert config.output.grids is True
     assert config.output.raw_arrays is False
-    assert config.output.overwrite == "replace"
+    assert config.output.overwrite == "error"
 
 
 def test_parse_config_reads_visualization_values():

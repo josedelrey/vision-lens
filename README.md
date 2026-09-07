@@ -122,6 +122,10 @@ Folders, glob patterns, input limits, batches, Grad-CAM classes, grids, raw
 arrays, formats, normalization, and overwrite behavior are configurable in
 YAML. For example, `visualization.items_per_grid: 4` creates additional PDF
 parts instead of placing more than four images or layers in one grid file.
+Image collections are read and processed in bounded batches (eight images by
+default), while each model is loaded only once. Every completed run writes a
+`run-manifest.json` beside its outputs with the resolved settings, model and
+package versions, input information, and generated output paths.
 
 The eight bundled example photographs live in `data/examples/`. They are
 center-cropped to 672 × 672 pixels, encoded as metadata-free JPEGs, and covered

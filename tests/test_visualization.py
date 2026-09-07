@@ -1,3 +1,7 @@
+import os
+import subprocess
+import sys
+
 import numpy as np
 import torch
 from PIL import Image
@@ -39,6 +43,16 @@ def test_image_grid_uses_largest_tile_dimensions():
     )
 
     assert grid.size == (28, 10)
+
+
+def test_image_grid_caps_columns_to_the_number_of_items():
+    grid = image_grid(
+        [Image.new("RGB", (10, 10), "white")] * 2,
+        columns=5,
+        gap=4,
+    )
+
+    assert grid.size == (24, 10)
 
 
 def test_image_comparison_grid_keeps_expected_output_dimensions(tmp_path):
@@ -116,6 +130,28 @@ def test_shared_normalization_uses_one_range_for_multiple_maps():
 
     assert value_range == (0.0, 20.0)
     assert np.allclose(first, [[0.0, 0.05]])
+
+
+def test_torch_then_matplotlib_import_needs_no_global_openmp_workaround():
+    environment = os.environ.copy()
+    environment.pop("KMP_DUPLICATE_LIB_OK", None)
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import os, torch; "
+                "import vision_lens.visualization; "
+                "assert 'KMP_DUPLICATE_LIB_OK' not in os.environ"
+            ),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 def test_grid_style_controls_tile_size_spacing_padding_and_labels(tmp_path):

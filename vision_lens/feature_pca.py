@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -174,6 +175,73 @@ def project_patch_embeddings(
     )
 
 
+def fit_patch_pca_projection_batches(
+    batch_factory: Callable[[], Iterable[Any]],
+    *,
+    foreground_threshold: float = 0.5,
+    foreground_side: Literal["high", "low"] = "high",
+) -> PatchPCAProjection:
+    """Fit one PCA projection without retaining every embedding batch in memory."""
+    if not 0 <= foreground_threshold <= 1:
+        raise ValueError("foreground_threshold must be between 0 and 1.")
+    if foreground_side not in {"high", "low"}:
+        raise ValueError("foreground_side must be one of: high, low.")
+
+    foreground_components = _fit_streaming_components(batch_factory, components=1)
+    foreground_minimum, foreground_maximum = _streaming_projected_bounds(
+        batch_factory,
+        foreground_components,
+    )
+
+    def foreground_batches() -> Iterable[Any]:
+        for embeddings in batch_factory():
+            flattened = _flatten_embedding_batch(embeddings)
+            first_component = _apply_projection(
+                flattened,
+                foreground_components,
+                foreground_minimum,
+                foreground_maximum,
+            )
+            if foreground_side == "high":
+                mask = first_component[:, 0] > foreground_threshold
+            else:
+                mask = first_component[:, 0] < foreground_threshold
+            if mask.any():
+                yield flattened[mask]
+
+    rgb_components = _fit_streaming_components(
+        foreground_batches,
+        components=3,
+        allow_empty=True,
+        feature_count=int(foreground_components.shape[0]),
+    )
+    if rgb_components.shape[1] < 3:
+        rgb_components = functional.pad(
+            rgb_components,
+            (0, 3 - rgb_components.shape[1]),
+        )
+    if rgb_components.numel():
+        rgb_minimum, rgb_maximum = _streaming_projected_bounds(
+            foreground_batches,
+            rgb_components,
+            allow_empty=True,
+        )
+    else:
+        rgb_minimum = torch.zeros(3)
+        rgb_maximum = torch.zeros(3)
+
+    return PatchPCAProjection(
+        foreground_components=foreground_components,
+        foreground_minimum=foreground_minimum,
+        foreground_maximum=foreground_maximum,
+        rgb_components=rgb_components,
+        rgb_minimum=rgb_minimum,
+        rgb_maximum=rgb_maximum,
+        foreground_threshold=foreground_threshold,
+        foreground_side=foreground_side,
+    )
+
+
 def save_patch_pca_projection(
     projection: PatchPCAProjection,
     path: str | Path,
@@ -322,6 +390,87 @@ def _fit_pca_projection(values: Any, components: int) -> tuple[Any, Any]:
         )
     components_matrix = vectors[:, :component_count]
     return values @ components_matrix, components_matrix
+
+
+def _fit_streaming_components(
+    batch_factory: Callable[[], Iterable[Any]],
+    *,
+    components: int,
+    allow_empty: bool = False,
+    feature_count: int | None = None,
+) -> Any:
+    count = 0
+    value_sum = None
+    for batch in batch_factory():
+        values = _flatten_embedding_batch(batch).double()
+        if feature_count is None:
+            feature_count = int(values.shape[1])
+        elif int(values.shape[1]) != feature_count:
+            raise ValueError("PCA embedding batches have inconsistent feature counts.")
+        count += int(values.shape[0])
+        batch_sum = values.sum(dim=0)
+        value_sum = batch_sum if value_sum is None else value_sum + batch_sum
+
+    if count == 0 or feature_count is None:
+        if allow_empty and feature_count is not None:
+            return torch.zeros((feature_count, components), dtype=torch.float32)
+        raise ValueError("Cannot fit PCA from empty embedding batches.")
+
+    component_count = min(components, count, feature_count)
+    if count == 1:
+        result = torch.zeros((feature_count, component_count), dtype=torch.float32)
+        indices = torch.arange(component_count)
+        result[indices, indices] = 1
+        return result
+
+    mean = value_sum / count
+    covariance = torch.zeros((feature_count, feature_count), dtype=torch.float64)
+    for batch in batch_factory():
+        centered = _flatten_embedding_batch(batch).double() - mean
+        covariance += centered.transpose(0, 1) @ centered
+
+    _eigenvalues, eigenvectors = torch.linalg.eigh(covariance)
+    result = eigenvectors[:, -component_count:].flip(dims=(1,))
+    for index in range(component_count):
+        column = result[:, index]
+        pivot = int(column.abs().argmax())
+        if column[pivot] < 0:
+            result[:, index] = -column
+    return result.float()
+
+
+def _streaming_projected_bounds(
+    batch_factory: Callable[[], Iterable[Any]],
+    components: Any,
+    *,
+    allow_empty: bool = False,
+) -> tuple[Any, Any]:
+    minimum = None
+    maximum = None
+    for batch in batch_factory():
+        projected = _flatten_embedding_batch(batch) @ components
+        batch_minimum, batch_maximum = _value_bounds(projected)
+        minimum = (
+            batch_minimum if minimum is None else torch.minimum(minimum, batch_minimum)
+        )
+        maximum = (
+            batch_maximum if maximum is None else torch.maximum(maximum, batch_maximum)
+        )
+    if minimum is None or maximum is None:
+        if allow_empty:
+            zeros = torch.zeros(int(components.shape[1]), dtype=torch.float32)
+            return zeros, zeros.clone()
+        raise ValueError("Cannot calculate PCA bounds from empty embedding batches.")
+    return minimum, maximum
+
+
+def _flatten_embedding_batch(values: Any) -> Any:
+    tensor = torch.as_tensor(values).detach().float().cpu()
+    if tensor.ndim == 3:
+        return tensor.reshape(-1, tensor.shape[-1])
+    if tensor.ndim == 2:
+        return tensor
+    raise ValueError("PCA embedding batches must have two or three dimensions.")
 
 
 def _minmax_normalize(values: Any) -> Any:

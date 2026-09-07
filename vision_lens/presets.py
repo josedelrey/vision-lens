@@ -49,7 +49,7 @@ PRESETS: dict[str, dict[str, Any]] = {
             "std": None,
         },
         "runtime": {
-            "batch_size": None,
+            "batch_size": 8,
             "device": "auto",
             "workers": 0,
             "precision": "float32",
@@ -113,7 +113,7 @@ PRESETS: dict[str, dict[str, Any]] = {
             "std": None,
         },
         "runtime": {
-            "batch_size": None,
+            "batch_size": 8,
             "device": "auto",
             "workers": 0,
             "precision": "float32",
@@ -177,7 +177,7 @@ PRESETS: dict[str, dict[str, Any]] = {
             "std": None,
         },
         "runtime": {
-            "batch_size": None,
+            "batch_size": 8,
             "device": "auto",
             "workers": 0,
             "precision": "float32",
@@ -240,7 +240,7 @@ PRESETS: dict[str, dict[str, Any]] = {
             "target_class": None,
         },
         "runtime": {
-            "batch_size": None,
+            "batch_size": 8,
             "device": "auto",
             "workers": 0,
             "precision": "float32",
@@ -298,7 +298,7 @@ PRESETS: dict[str, dict[str, Any]] = {
             "std": None,
         },
         "runtime": {
-            "batch_size": None,
+            "batch_size": 8,
             "device": "auto",
             "workers": 0,
             "precision": "float32",
