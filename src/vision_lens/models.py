@@ -79,7 +79,7 @@ def load_torchvision_cnn(
         "mean": (0.485, 0.456, 0.406),
         "std": (0.229, 0.224, 0.225),
         "crop_pct": 1.0,
-        "crop_mode": "center",
+        "crop_mode": "none",
     }
 
     metadata = ModelMetadata(
@@ -103,7 +103,7 @@ def load_timm_vit(
     runtime_config: RuntimeConfig,
 ) -> LoadedModel:
     device = resolve_device(runtime_config.device)
-    model_options = model_config.options or {}
+    model_options = dict(model_config.options or {})
     model = timm.create_model(
         model_config.name,
         pretrained=model_config.pretrained,
@@ -112,12 +112,15 @@ def load_timm_vit(
     model.eval()
     model.to(torch.device(device))
 
+    image_size = _accepted_timm_image_size(model, runtime_config.image_size)
     data_config = dict(resolve_model_data_config(model))
     data_config["input_size"] = (
         3,
-        runtime_config.image_size,
-        runtime_config.image_size,
+        image_size[0],
+        image_size[1],
     )
+    data_config["crop_pct"] = 1.0
+    data_config["crop_mode"] = "none"
 
     metadata = ModelMetadata(
         architecture=model_config.architecture,
@@ -126,13 +129,34 @@ def load_timm_vit(
         pretrained=model_config.pretrained,
         device=device,
         input_size=_input_size(data_config),
-        image_size=(runtime_config.image_size, runtime_config.image_size),
+        image_size=image_size,
         patch_size=_patch_size(model),
         num_classes=_num_classes(model),
         data_config=data_config,
         class_labels=_imagenet_labels(),
     )
     return LoadedModel(model=model, metadata=metadata)
+
+
+def _accepted_timm_image_size(
+    model: Any,
+    requested_image_size: int,
+) -> tuple[int, int]:
+    requested = (requested_image_size, requested_image_size)
+    patch_embed = getattr(model, "patch_embed", None)
+    if patch_embed is None or not getattr(patch_embed, "strict_img_size", False):
+        return requested
+
+    fixed_size = getattr(patch_embed, "img_size", None)
+    if isinstance(fixed_size, int):
+        return (fixed_size, fixed_size)
+    if (
+        isinstance(fixed_size, (list, tuple))
+        and len(fixed_size) == 2
+        and all(isinstance(value, int) for value in fixed_size)
+    ):
+        return (fixed_size[0], fixed_size[1])
+    return requested
 
 
 def resolve_device(requested: str) -> str:

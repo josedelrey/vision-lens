@@ -101,6 +101,12 @@ vision-lens --preset dino-vits8-attention \
 Preset settings are applied first, followed by values from the config file and
 then `--set` overrides. Omitting a preset retains the previous config behavior.
 
+Example workflows request 672 × 672 input pixels. Preprocessing never
+center-crops: an image already at the accepted size is retained, and other
+dimensions are resized directly to the model input dimensions. Vision Lens
+requests 672 × 672 for flexible or explicitly configured models; if a fixed-size
+model cannot use that resolution, its native input dimensions are used instead.
+
 The eight bundled example photographs live in `data/examples/`. They are
 center-cropped to 672 × 672 pixels, encoded as metadata-free JPEGs, and covered
 by the attribution details in `data/examples/ATTRIBUTION.md`. Generated
