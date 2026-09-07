@@ -1,7 +1,7 @@
 preset: resnet50-gradcam
 
 input:
-  paths:
+  files:
     - ../data/examples/1.jpg
     - ../data/examples/2.jpg
     - ../data/examples/3.jpg
@@ -10,6 +10,10 @@ input:
     - ../data/examples/6.jpg
     - ../data/examples/7.jpg
     - ../data/examples/8.jpg
+  folders: []
+  patterns: ["*.jpg", "*.jpeg", "*.png", "*.webp"]
+  recursive: false
+  limit: null
 
 model:
   architecture: cnn
@@ -20,18 +24,47 @@ model:
 
 preprocessing:
   image_size: 672
+  resize: stretch
+  crop: none
+  pad: none
+  interpolation: null
+  normalize: true
+  mean: null
+  std: null
 
 analysis:
   method: gradcam
   target_layer: layer4
+  target_class: null
 
 runtime:
+  batch_size: null
   device: auto
+  workers: 0
+  precision: float32
+  seed: null
 
 visualization:
+  tile_size: null
+  columns: null
+  items_per_grid: null
+  spacing: null
+  padding: null
+  labels: null
+  background: null
+  dpi: null
   overlay_alpha: 0.8
   cmap: viridis
   grid_format: pdf
+  normalization: per_map
+  normalization_range: null
 
 output:
   directory: ../outputs/gradcam
+  heatmaps: true
+  overlays: true
+  grids: true
+  raw_arrays: false
+  image_format: png
+  raw_format: npy
+  overwrite: replace

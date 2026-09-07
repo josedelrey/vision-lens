@@ -83,7 +83,7 @@ A config can select a preset and override only the settings that should change:
 preset: dino-vits8-attention
 
 input:
-  paths:
+  files:
     - ../data/examples/1.jpg
 
 visualization:
@@ -95,7 +95,8 @@ One-off CLI overrides use YAML values and may be repeated:
 ```bash
 vision-lens --preset dino-vits8-attention \
   --set analysis.heads='[0, 1, 2]' \
-  --set analysis.head_fusion=none
+  --set analysis.head_fusion=none \
+  --set visualization.items_per_grid=4
 ```
 
 Preset settings are applied first, followed by values from the config file and
@@ -113,9 +114,14 @@ See [Configuration](docs/configuration.md) for the complete schema, defaults,
 examples, precedence, and validation rules.
 
 Most example workflows use 672 × 672 input pixels; the fixed patch-8 DINO
-example uses its required 224 × 224 input. Preprocessing never center-crops: an
-image already at the configured size is retained, and other dimensions are
-resized directly to the model input dimensions.
+example uses its required 224 × 224 input. Presets retain the current no-crop
+stretch behavior. Custom configurations can preserve aspect ratio by resizing
+the longest side and padding, or resizing the shortest side and center-cropping.
+
+Folders, glob patterns, input limits, batches, Grad-CAM classes, grids, raw
+arrays, formats, normalization, and overwrite behavior are configurable in
+YAML. For example, `visualization.items_per_grid: 4` creates additional PDF
+parts instead of placing more than four images or layers in one grid file.
 
 The eight bundled example photographs live in `data/examples/`. They are
 center-cropped to 672 × 672 pixels, encoded as metadata-free JPEGs, and covered

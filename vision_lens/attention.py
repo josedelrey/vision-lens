@@ -46,6 +46,7 @@ def extract_attention_maps(
     layers: LayerSelection = "all",
     heads: Iterable[int] | None = None,
     head_fusion: HeadFusion = "mean",
+    normalize: bool = True,
 ) -> AttentionExtractionResult:
     blocks = _vit_blocks(model)
     layer_indices = _select_layers(layers, total_layers=len(blocks))
@@ -61,7 +62,7 @@ def extract_attention_maps(
 
     try:
         with torch.no_grad():
-            model_inputs = inputs.to(_model_device(model))
+            model_inputs = _prepare_inputs(model, inputs)
             logits = model(model_inputs)
     finally:
         for handle in handles:
@@ -76,6 +77,7 @@ def extract_attention_maps(
                 patch_size=metadata.patch_size,
                 heads=head_indices,
                 head_fusion=head_fusion,
+                normalize=normalize,
             ),
             head_indices=head_indices,
             head_fusion=head_fusion,
@@ -100,6 +102,7 @@ def extract_attention_rollout(
     inputs: Any,
     metadata: ModelMetadata,
     layers: LayerSelection = "all",
+    normalize: bool = True,
 ) -> AttentionExtractionResult:
     blocks = _vit_blocks(model)
     layer_indices = _select_layers(layers, total_layers=len(blocks))
@@ -115,7 +118,7 @@ def extract_attention_rollout(
 
     try:
         with torch.no_grad():
-            model_inputs = inputs.to(_model_device(model))
+            model_inputs = _prepare_inputs(model, inputs)
             logits = model(model_inputs)
     finally:
         for handle in handles:
@@ -131,6 +134,7 @@ def extract_attention_rollout(
                 rollout_by_layer[layer_index],
                 image_size=metadata.image_size,
                 patch_size=metadata.patch_size,
+                normalize=normalize,
             ),
             head_indices=None,
             head_fusion="mean",
@@ -215,6 +219,7 @@ def extract_gradcam(
     metadata: ModelMetadata,
     target_layer: str | None = None,
     target_classes: Iterable[int] | None = None,
+    normalize: bool = True,
 ) -> GradCamResult:
     resolved_layer_name, layer_module = _resolve_gradcam_layer(model, target_layer)
     activations = None
@@ -233,7 +238,7 @@ def extract_gradcam(
 
     try:
         model.zero_grad(set_to_none=True)
-        model_inputs = inputs.to(_model_device(model))
+        model_inputs = _prepare_inputs(model, inputs)
         logits = model(model_inputs)
         if target_classes is None:
             class_tensor = logits.argmax(dim=1)
@@ -264,7 +269,9 @@ def extract_gradcam(
 
     return GradCamResult(
         logits=logits.detach().cpu(),
-        maps=normalize_maps(maps.detach().cpu()),
+        maps=(
+            normalize_maps(maps.detach().cpu()) if normalize else maps.detach().cpu()
+        ),
         target_layer=resolved_layer_name,
         target_classes=tuple(class_tensor.detach().cpu().tolist()),
         image_size=metadata.image_size,
@@ -460,8 +467,7 @@ def _fuse_heads(cls_attention: Any, head_fusion: HeadFusion) -> Any:
 def _validate_attention_tensor(attention: Any) -> None:
     if len(attention.shape) != 4:
         raise ValueError(
-            "Attention tensor must have shape "
-            "(batch, heads, query_tokens, key_tokens)."
+            "Attention tensor must have shape (batch, heads, query_tokens, key_tokens)."
         )
     if attention.shape[-1] < 2:
         raise ValueError("Attention tensor must include class and patch tokens.")
@@ -488,5 +494,6 @@ def _resolve_gradcam_layer(model: Any, target_layer: str | None) -> tuple[str, A
     return last_conv_name, last_conv
 
 
-def _model_device(model: Any) -> Any:
-    return next(model.parameters()).device
+def _prepare_inputs(model: Any, inputs: Any) -> Any:
+    parameter = next(model.parameters())
+    return inputs.to(device=parameter.device, dtype=parameter.dtype)

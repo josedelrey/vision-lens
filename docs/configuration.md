@@ -1,165 +1,267 @@
 # Configuration
 
-Vision Lens configuration uses seven sections: `input`, `model`,
-`preprocessing`, `analysis`, `runtime`, `visualization`, and `output`. A
-top-level `preset` is optional. Unknown keys and settings belonging to a
-different analysis method are rejected before a model is loaded.
+Vision Lens uses seven YAML sections: `input`, `model`, `preprocessing`,
+`analysis`, `runtime`, `visualization`, and `output`. A top-level `preset` is
+optional. Unknown keys and incompatible settings are rejected before model
+weights are loaded.
 
-## Complete example
+All relative paths are resolved from the YAML file's directory. Settings are
+merged in this order, with later values winning:
 
-Paths are relative to the YAML file, not the current working directory.
+1. Built-in defaults.
+2. The selected preset.
+3. Values in the YAML file.
+4. Repeated CLI `--set` overrides.
+
+## Input
 
 ```yaml
-preset: dinov2-reg4-attention
-
 input:
-  paths:
-    - ../data/examples/1.jpg
+  files: [../data/examples/1.jpg]
+  folders: [../photos]
+  patterns: ["*.jpg", "*.png"]
+  recursive: true
+  limit: 100
+```
 
+| Setting | Default | Description | Example |
+|---|---|---|---|
+| `files` | `[]` | Explicit image files, kept in the listed order. | `[cat.jpg]` |
+| `folders` | `[]` | Folders searched for matching files. | `[../photos]` |
+| `patterns` | `['*.jpg', '*.jpeg', '*.png', '*.webp']` | Glob patterns applied to every folder. | `["*.jpg"]` |
+| `recursive` | `false` | Search inside nested folders. | `true` |
+| `limit` | `null` | Maximum inputs after expansion; `null` means all. | `50` |
+
+At least one file must be selected. Duplicate paths are removed. The legacy
+`input.paths` spelling remains accepted as an alias for `input.files`, but the
+two cannot be used together.
+
+## Model
+
+```yaml
 model:
   architecture: vit
   backend: timm
   name: hf_hub:timm/vit_small_patch14_reg4_dinov2.lvd142m
   pretrained: true
   options: {}
+```
 
+| Setting | Default | Description | Example |
+|---|---|---|---|
+| `architecture` | required | Model family: `vit` or `cnn`. | `vit` |
+| `backend` | required | Loader: `timm` or `torchvision`. | `timm` |
+| `name` | required | Backend model identifier. | `resnet50` |
+| `pretrained` | `true` | Load pretrained weights. | `false` |
+| `options` | `null` | Additional backend loader arguments. | `{drop_rate: 0.1}` |
+
+`model.options.img_size` is forbidden. `preprocessing.image_size` is the one
+authoritative input size.
+
+## Preprocessing
+
+```yaml
 preprocessing:
   image_size: 672
+  resize: longest
+  crop: none
+  pad: center
+  interpolation: bicubic
+  normalize: true
+  mean: null
+  std: null
+```
 
+| Setting | Default | Description | Example |
+|---|---|---|---|
+| `image_size` | `672` | Square model input width and height. | `224` |
+| `resize` | `stretch` | `stretch`, `shortest`, `longest`, or `none`. | `longest` |
+| `crop` | `none` | `none` or a `center` crop to `image_size`. | `center` |
+| `pad` | `none` | `none` or `center` padding to `image_size`. | `center` |
+| `interpolation` | `null` | Model-derived by default; override with `nearest`, `bilinear`, `bicubic`, or `lanczos`. | `bicubic` |
+| `normalize` | `true` | Apply channel normalization. | `false` |
+| `mean` | `null` | Model-derived RGB means, or three custom values. | `[0.5, 0.5, 0.5]` |
+| `std` | `null` | Model-derived positive RGB standard deviations. | `[0.5, 0.5, 0.5]` |
+
+`stretch` preserves the existing no-crop behavior. To retain aspect ratio, use
+`longest` with `pad: center`, or `shortest` with `crop: center`. A transformed
+image must end at the model's required size. Known fixed models reject invalid
+sizes during configuration validation.
+
+## Analysis
+
+All four analyses run through the same command:
+
+```bash
+vision-lens run --config configs/gradcam.example.yaml
+```
+
+### Attention and rollout
+
+```yaml
 analysis:
   method: attention
   layers: [2, 5, 8, 11]
   heads: null
   head_fusion: mean
+```
 
+| Setting | Default | Description | Example |
+|---|---|---|---|
+| `method` | `attention` | `attention` or `rollout`. | `rollout` |
+| `layers` | required | Layer indices or `all`. | `[2, 5, 8, 11]` |
+| `heads` | `null` | Head indices; `null` selects all. | `[0, 1]` |
+| `head_fusion` | `mean` | `mean`, `max`, or `none`. | `none` |
+
+### Grad-CAM
+
+```yaml
+analysis:
+  method: gradcam
+  target_layer: layer4
+  target_class: 207
+```
+
+| Setting | Default | Description | Example |
+|---|---|---|---|
+| `method` | required | Must be `gradcam`. | `gradcam` |
+| `target_layer` | `null` | Module path; `null` chooses the last convolution. | `layer4` |
+| `target_class` | `null` | Fixed non-negative class index; `null` uses each image's prediction. | `207` |
+
+### Patch PCA
+
+```yaml
+analysis:
+  method: patch_pca
+  foreground_threshold: 0.5
+  foreground_side: low
+  projection: fit
+  projection_path: null
+  save_projection: ../outputs/pca-projection.npz
+```
+
+| Setting | Default | Description | Example |
+|---|---|---|---|
+| `method` | required | Must be `patch_pca`. | `patch_pca` |
+| `foreground_threshold` | `0.5` | Normalized first-component cutoff. | `0.6` |
+| `foreground_side` | `high` | Keep the `high` or `low` side. | `low` |
+| `projection` | `fit` | Fit a shared projection or `load` one. | `load` |
+| `projection_path` | `null` | Saved `.npz` loaded when `projection: load`. | `pca.npz` |
+| `save_projection` | `null` | Save the fitted basis and normalization ranges. | `pca.npz` |
+
+A loaded projection reuses its fitted foreground rule and color ranges, so new
+images remain in the same PCA color space.
+
+## Runtime
+
+```yaml
 runtime:
+  batch_size: 4
   device: auto
+  workers: 2
+  precision: float32
+  seed: 42
+```
 
+| Setting | Default | Description | Example |
+|---|---|---|---|
+| `batch_size` | `null` | Images analyzed per batch; `null` uses all selected inputs. | `4` |
+| `device` | `auto` | `auto`, `cpu`, `cuda`, or `mps`. | `cuda` |
+| `workers` | `0` | Threads used to read images; `0` reads sequentially. | `4` |
+| `precision` | `float32` | `float32`, `float16`, or `bfloat16`. | `float16` |
+| `seed` | `null` | Seed Python, NumPy, and PyTorch; `null` leaves RNG state unchanged. | `42` |
+
+The model is loaded once. Attention, rollout, and Grad-CAM results are joined
+across batches. PCA extracts batches separately and fits one shared projection
+over the complete selected input set. CPU runs reject `float16` (use
+`bfloat16` instead), and MPS runs reject `bfloat16`.
+
+## Visualization
+
+```yaml
 visualization:
-  overlay_alpha: 0.8
-  cmap: viridis
+  tile_size: [320, 240]
+  columns: 2
+  items_per_grid: 6
+  spacing: 8
+  padding: 12
+  labels: true
+  background: white
+  dpi: 150
+  overlay_alpha: 0.6
+  cmap: magma
   grid_format: pdf
-
-output:
-  directory: ../outputs/custom_attention
+  normalization: shared
+  normalization_range: null
 ```
 
-## Settings
-
-### Top level
-
 | Setting | Default | Description | Example |
 |---|---|---|---|
-| `preset` | none | Named settings applied before this file. | `dinov2-pca` |
-
-### `input`
-
-| Setting | Default | Description | Example |
-|---|---|---|---|
-| `paths` | required | Non-empty list of input image files. | `[../data/examples/1.jpg]` |
-
-Every path must identify an existing file. Relative paths are resolved from the
-directory containing the YAML file and normalized to absolute paths.
-
-### `model`
-
-| Setting | Default | Description | Example |
-|---|---|---|---|
-| `architecture` | required | Model family: currently `vit` or `cnn`. | `vit` |
-| `backend` | required | Loader: currently `timm` or `torchvision`. | `timm` |
-| `name` | required | Backend model identifier. | `resnet50` |
-| `pretrained` | `true` | Load pretrained weights. | `false` |
-| `options` | `null` | Extra backend model-loader keywords. | `{drop_rate: 0.1}` |
-
-`model.options.img_size` is forbidden. Use `preprocessing.image_size`, which is
-the single authoritative model-input size.
-
-### `preprocessing`
-
-| Setting | Default | Description | Example |
-|---|---|---|---|
-| `image_size` | `672` | Square model-input width and height. | `224` |
-
-Images are resized directly to this size without cropping. Known fixed-size
-models reject incompatible values. For example, `vit_small_patch8_224.dino`
-requires `224`.
-
-### `analysis`
-
-| Setting | Default | Applies to | Description | Example |
-|---|---|---|---|---|
-| `method` | `attention` | all | Analysis to run. | `rollout` |
-| `layers` | required | attention, rollout | Layer indices or `all`. | `[2, 5, 8, 11]` |
-| `heads` | `null` | attention, rollout | Head indices; `null` selects all before fusion. | `[0, 1]` |
-| `head_fusion` | `mean` | attention, rollout | `mean`, `max`, or `none`. | `none` |
-| `target_layer` | `null` | Grad-CAM | Module path; `null` selects automatically. | `layer4` |
-| `foreground_threshold` | `0.5` | patch PCA | First-component foreground cutoff. | `0.6` |
-| `foreground_side` | `high` | patch PCA | Keep the `high` or `low` side. | `low` |
-
-Allowed methods are `attention`, `rollout`, `gradcam`, and `patch_pca`.
-Attention, rollout, and patch PCA require a `vit` model with the `timm`
-backend. Grad-CAM requires a `cnn` model with the `torchvision` backend. Known
-layer and head limits are validated before model loading.
-
-### `runtime`
-
-| Setting | Default | Description | Example |
-|---|---|---|---|
-| `device` | `auto` | `auto`, `cpu`, `cuda`, or `mps`. | `cpu` |
-
-### `visualization`
-
-| Setting | Default | Description | Example |
-|---|---|---|---|
+| `tile_size` | `null` | `[width, height]`; `null` retains each workflow's historical size. | `[320, 240]` |
+| `columns` | `null` | Grid columns; `null` retains the workflow layout. | `2` |
+| `items_per_grid` | `null` | Maximum images/layers per grid file; extra pages receive `_part-001` names. | `6` |
+| `spacing` | `null` | Pixels between tiles; `null` retains workflow spacing. | `8` |
+| `padding` | `null` | Outer padding in pixels. | `12` |
+| `labels` | `null` | Show labels; `null` keeps workflow behavior. | `false` |
+| `background` | `null` | Pillow/Matplotlib color. | `"#101010"` |
+| `dpi` | `null` | Output DPI; `null` retains workflow behavior. | `150` |
 | `overlay_alpha` | `0.45` | Heatmap opacity from 0 to 1. | `0.8` |
-| `cmap` | `viridis` | Matplotlib color-map name. | `magma` |
-| `grid_format` | `png` | Grid format: `png`, `pdf`, or `svg`. | `pdf` |
+| `cmap` | `viridis` | Matplotlib colormap. | `magma` |
+| `grid_format` | `png` | `png`, `pdf`, or `svg`. | `pdf` |
+| `normalization` | `per_map` | `per_map`, `shared`, or `fixed`. | `shared` |
+| `normalization_range` | `null` | Required `[min, max]` for `fixed`; otherwise must be `null`. | `[0, 1]` |
 
-These settings currently affect attention, rollout, and Grad-CAM rendering.
-Patch PCA retains its appearance-preserving rendering until the additional
-rendering controls are introduced.
+`per_map` is the historical attention and Grad-CAM behavior. `shared` computes
+one range across the run. `fixed` clips to an explicit range.
 
-### `output`
+## Output
+
+```yaml
+output:
+  directory: ../outputs/custom
+  heatmaps: true
+  overlays: true
+  grids: true
+  raw_arrays: false
+  image_format: png
+  raw_format: npy
+  overwrite: replace
+```
 
 | Setting | Default | Description | Example |
 |---|---|---|---|
-| `directory` | required | Destination for generated files. | `../outputs/run-1` |
+| `directory` | required | Output folder. | `../outputs/run-1` |
+| `heatmaps` | `true` | Export heatmaps or PCA color maps. | `false` |
+| `overlays` | `true` (`false` for PCA) | Export overlays where supported. | `false` |
+| `grids` | `true` | Export comparison grids. | `false` |
+| `raw_arrays` | `false` | Export analysis arrays without rendering. | `true` |
+| `image_format` | `png` | `png`, `jpeg`, `tiff`, or `webp`. | `webp` |
+| `raw_format` | `npy` | `npy` or compressed `npz`. | `npz` |
+| `overwrite` | `replace` | `replace`, `error`, or `skip` existing files. | `error` |
 
-## Precedence and overrides
+At least one output type must be enabled.
 
-Settings are merged in this order, with later values winning:
+## Validate, resolve, and override
 
-1. Built-in field defaults.
-2. The selected preset.
-3. Values in the user YAML file.
-4. Repeated CLI `--set` overrides.
-
-CLI override values use YAML syntax:
-
-```bash
-vision-lens --config configs/vit_attention.example.yaml \
-  --set runtime.device=cpu \
-  --set analysis.heads='[0, 1]' \
-  --set analysis.head_fusion=none
-```
-
-## Validation and resolved configuration
-
-Validate without loading weights or processing images:
+Validate without loading a model:
 
 ```bash
 vision-lens validate --config configs/vit_attention.example.yaml
 ```
 
-Print the final merged configuration, including defaults and absolute paths:
+Print final values, expanded inputs, and absolute paths:
 
 ```bash
 vision-lens resolve --config configs/vit_attention.example.yaml
 ```
 
-Both commands accept `--preset` and repeated `--set` options. Normal `run`
-execution performs the same validation before loading a model:
+Override any leaf setting from the command line using YAML values:
 
 ```bash
-vision-lens run --preset dinov2-pca --set runtime.device=cpu
+vision-lens run --config configs/gradcam.example.yaml \
+  --set input.limit=4 \
+  --set runtime.batch_size=2 \
+  --set analysis.target_class=207 \
+  --set visualization.items_per_grid=2 \
+  --set output.raw_arrays=true
 ```

@@ -1,15 +1,22 @@
 from dataclasses import replace
 from pathlib import Path
 
+import pytest
 import torch
 from PIL import Image
 
 from vision_lens.attention import AttentionExtractionResult, LayerAttentionMaps
-from vision_lens.config import OutputConfig, load_preset, parse_config
+from vision_lens.config import (
+    OutputConfig,
+    VisualizationConfig,
+    load_preset,
+    parse_config,
+)
 from vision_lens.feature_pca import PatchPCAResult
 from vision_lens.models import LoadedModel, ModelMetadata
 from vision_lens.pipeline import (
     export_gradcam_outputs,
+    run_gradcam_from_config,
     run_patch_pca_from_config,
     run_pipeline_from_config,
     run_vit_attention_from_config,
@@ -287,6 +294,262 @@ def test_patch_pca_pipeline_exports_reference_style_images(monkeypatch, tmp_path
     assert all(path.is_file() for path in result.output_paths)
     with Image.open(tmp_path / "patch_pca_comparison.png") as comparison:
         assert comparison.size == (56, 36)
+
+
+def test_items_per_grid_splits_gradcam_comparison_files(tmp_path):
+    from vision_lens.attention import GradCamResult
+
+    images = [Image.new("RGB", (4, 4), "white")] * 5
+    gradcam = GradCamResult(
+        logits=torch.zeros(5, 2),
+        maps=torch.rand(5, 1, 4, 4),
+        target_classes=(0, 0, 0, 0, 0),
+        target_layer="layer4",
+        image_size=(4, 4),
+    )
+
+    paths = export_gradcam_outputs(
+        images=images,
+        image_paths=tuple(Path(f"image-{index}.jpg") for index in range(5)),
+        gradcam=gradcam,
+        output_dir=tmp_path,
+        alpha=0.8,
+        cmap="viridis",
+        grid_format="pdf",
+        output_config=OutputConfig(
+            tmp_path,
+            heatmaps=False,
+            overlays=False,
+            grids=True,
+        ),
+        visualization_config=VisualizationConfig(
+            columns=2,
+            items_per_grid=2,
+            grid_format="pdf",
+        ),
+    )
+
+    assert [path.name for path in paths] == [
+        "gradcam_images_part-001.pdf",
+        "gradcam_images_part-002.pdf",
+        "gradcam_images_part-003.pdf",
+    ]
+
+
+def test_attention_pipeline_honors_batch_size_and_raw_only_output(
+    monkeypatch,
+    tmp_path,
+):
+    from vision_lens import pipeline
+
+    config = parse_config(
+        {
+            "model": {
+                "architecture": "vit",
+                "backend": "timm",
+                "name": "mock_vit",
+                "pretrained": False,
+            },
+            "input": {
+                "files": [
+                    "data/examples/1.jpg",
+                    "data/examples/2.jpg",
+                    "data/examples/3.jpg",
+                ]
+            },
+            "output": {
+                "directory": str(tmp_path),
+                "heatmaps": False,
+                "overlays": False,
+                "grids": False,
+                "raw_arrays": True,
+            },
+            "preprocessing": {"image_size": 4},
+            "analysis": {"method": "attention", "layers": [0]},
+            "runtime": {"device": "cpu", "batch_size": 2},
+        }
+    )
+    loaded_model = LoadedModel(
+        model=object(),
+        metadata=ModelMetadata(
+            architecture="vit",
+            backend="timm",
+            name="mock_vit",
+            pretrained=False,
+            device="cpu",
+            input_size=(3, 4, 4),
+            image_size=(4, 4),
+            patch_size=(2, 2),
+            num_classes=2,
+            data_config={"mean": (0.0, 0.0, 0.0), "std": (1.0, 1.0, 1.0)},
+        ),
+    )
+    batch_sizes = []
+
+    def extract_batch(*, inputs, **_kwargs):
+        batch_sizes.append(len(inputs))
+        return AttentionExtractionResult(
+            logits=torch.zeros(len(inputs), 2),
+            layers=(
+                LayerAttentionMaps(
+                    layer_index=0,
+                    maps=torch.rand(len(inputs), 1, 4, 4),
+                    head_indices=None,
+                    head_fusion="mean",
+                    patch_grid=(2, 2),
+                ),
+            ),
+            image_size=(4, 4),
+        )
+
+    monkeypatch.setattr(pipeline, "load_model", lambda _config: loaded_model)
+    monkeypatch.setattr(
+        pipeline,
+        "load_images",
+        lambda paths: [Image.new("RGB", (4, 4), "white") for _ in paths],
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "build_preprocess",
+        lambda *_args, **_kwargs: lambda _image: torch.ones(3, 4, 4),
+    )
+    monkeypatch.setattr(pipeline, "_extract_attention", extract_batch)
+
+    result = run_vit_attention_from_config(config)
+
+    assert batch_sizes == [2, 1]
+    assert result.attention.logits.shape == (3, 2)
+    assert len(result.output_paths) == 3
+    assert all(path.suffix == ".npy" for path in result.output_paths)
+
+
+def test_output_overwrite_error_and_skip_policies(tmp_path):
+    from vision_lens.attention import GradCamResult
+
+    existing = tmp_path / "first_gradcam_heatmap.png"
+    existing.touch()
+    gradcam = GradCamResult(
+        logits=torch.zeros(1, 2),
+        maps=torch.rand(1, 1, 4, 4),
+        target_classes=(0,),
+        target_layer="layer4",
+        image_size=(4, 4),
+    )
+    common = {
+        "images": [Image.new("RGB", (4, 4), "white")],
+        "image_paths": (Path("first.jpg"),),
+        "gradcam": gradcam,
+        "output_dir": tmp_path,
+        "alpha": 0.8,
+        "cmap": "viridis",
+        "grid_format": "png",
+    }
+
+    with pytest.raises(FileExistsError, match="Output already exists"):
+        export_gradcam_outputs(
+            **common,
+            output_config=OutputConfig(
+                tmp_path,
+                overlays=False,
+                grids=False,
+                overwrite="error",
+            ),
+        )
+
+    paths = export_gradcam_outputs(
+        **common,
+        output_config=OutputConfig(
+            tmp_path,
+            overlays=False,
+            grids=False,
+            overwrite="skip",
+        ),
+    )
+    assert paths == ()
+
+
+def test_gradcam_pipeline_passes_fixed_class_workers_and_batch_size(
+    monkeypatch,
+    tmp_path,
+):
+    from vision_lens import pipeline
+    from vision_lens.attention import GradCamResult
+
+    config = parse_config(
+        {
+            "model": {
+                "architecture": "cnn",
+                "backend": "torchvision",
+                "name": "mock_cnn",
+                "pretrained": False,
+            },
+            "input": {"files": ["data/examples/1.jpg", "data/examples/2.jpg"]},
+            "output": {
+                "directory": str(tmp_path),
+                "heatmaps": False,
+                "overlays": False,
+                "grids": False,
+                "raw_arrays": True,
+            },
+            "preprocessing": {"image_size": 4},
+            "analysis": {
+                "method": "gradcam",
+                "target_layer": "features.0",
+                "target_class": 1,
+            },
+            "runtime": {"device": "cpu", "workers": 2, "batch_size": 1},
+        }
+    )
+    loaded_model = LoadedModel(
+        model=object(),
+        metadata=ModelMetadata(
+            architecture="cnn",
+            backend="torchvision",
+            name="mock_cnn",
+            pretrained=False,
+            device="cpu",
+            input_size=(3, 4, 4),
+            image_size=(4, 4),
+            patch_size=None,
+            num_classes=2,
+            data_config={"mean": (0.0, 0.0, 0.0), "std": (1.0, 1.0, 1.0)},
+        ),
+    )
+    received = []
+    worker_counts = []
+
+    def fake_gradcam(_model, inputs, _metadata, **kwargs):
+        received.append(kwargs)
+        return GradCamResult(
+            logits=torch.zeros(len(inputs), 2),
+            maps=torch.rand(len(inputs), 1, 4, 4),
+            target_classes=tuple(kwargs["target_classes"]),
+            target_layer=kwargs["target_layer"],
+            image_size=(4, 4),
+        )
+
+    monkeypatch.setattr(pipeline, "load_model", lambda _config: loaded_model)
+    monkeypatch.setattr(
+        pipeline,
+        "load_images",
+        lambda paths, workers: (
+            worker_counts.append(workers)
+            or [Image.new("RGB", (4, 4), "white") for _ in paths]
+        ),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "build_preprocess",
+        lambda *_args, **_kwargs: lambda _image: torch.ones(3, 4, 4),
+    )
+    monkeypatch.setattr(pipeline, "extract_gradcam", fake_gradcam)
+
+    result = run_gradcam_from_config(config)
+
+    assert worker_counts == [2]
+    assert [call["target_classes"] for call in received] == [[1], [1]]
+    assert all(call["target_layer"] == "features.0" for call in received)
+    assert len(result.output_paths) == 2
 
 
 def _attention_result(layer_indices: tuple[int, ...]) -> AttentionExtractionResult:

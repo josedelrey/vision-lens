@@ -1,7 +1,13 @@
 from types import SimpleNamespace
 
+import pytest
+
 from vision_lens.config import ModelConfig, PreprocessingConfig, RuntimeConfig
-from vision_lens.models import _accepted_timm_image_size, load_timm_vit
+from vision_lens.models import (
+    _accepted_timm_image_size,
+    _validate_precision,
+    load_timm_vit,
+)
 
 
 def test_fixed_timm_model_uses_the_size_it_actually_accepts():
@@ -63,3 +69,8 @@ def test_timm_loader_uses_authoritative_preprocessing_size(monkeypatch):
     assert loaded.metadata.input_size == (3, 672, 672)
     assert loaded.metadata.image_size == (672, 672)
     assert loaded.metadata.data_config["crop_mode"] == "none"
+
+
+def test_unsupported_precision_device_pair_fails_before_model_creation():
+    with pytest.raises(ValueError, match="float16.*CPU"):
+        _validate_precision("float16", "cpu")

@@ -30,11 +30,15 @@ def render_heatmap(
     cmap: str = "viridis",
     batch_index: int = 0,
     head_index: int = 0,
+    normalization: str = "per_map",
+    normalization_range: tuple[float, float] | None = None,
 ) -> Any:
     array = attention_map_to_array(
         attention_map,
         batch_index=batch_index,
         head_index=head_index,
+        normalization=normalization,
+        normalization_range=normalization_range,
     )
     colorized = _colormap(array, cmap)
     return _image_from_array(colorized)
@@ -47,6 +51,8 @@ def overlay_attention(
     cmap: str = "viridis",
     batch_index: int = 0,
     head_index: int = 0,
+    normalization: str = "per_map",
+    normalization_range: tuple[float, float] | None = None,
 ) -> Any:
     if not 0 <= alpha <= 1:
         raise ValueError("alpha must be between 0 and 1.")
@@ -57,6 +63,8 @@ def overlay_attention(
         cmap=cmap,
         batch_index=batch_index,
         head_index=head_index,
+        normalization=normalization,
+        normalization_range=normalization_range,
     ).resize(base_image.size)
 
     return Image.blend(base_image, heatmap, alpha=alpha)
@@ -71,6 +79,14 @@ def make_layer_comparison_grid(
     batch_index: int = 0,
     head_index: int = 0,
     columns: int | None = None,
+    tile_size: tuple[int, int] | None = None,
+    spacing: int | None = None,
+    padding: int | None = None,
+    show_labels: bool | None = None,
+    background: str | None = None,
+    dpi: int | None = None,
+    normalization: str = "per_map",
+    normalization_range: tuple[float, float] | None = None,
 ) -> Any:
     labels = [f"layer {layer.layer_index}" for layer in layers]
     overlays = [
@@ -81,16 +97,37 @@ def make_layer_comparison_grid(
             cmap=cmap,
             batch_index=batch_index,
             head_index=head_index,
+            normalization=normalization,
+            normalization_range=normalization_range,
         )
         for layer in layers
     ]
+    resolved_labels = True if show_labels is None else show_labels
     tiles = [
-        labeled_image(overlay, label)
+        labeled_image(overlay, label) if resolved_labels else overlay
         for overlay, label in zip(overlays, labels, strict=True)
     ]
-    grid = image_grid(tiles, columns=columns)
+    grid = image_grid(
+        tiles,
+        columns=columns,
+        background=background or "white",
+        gap=12 if spacing is None else spacing,
+        padding=0 if padding is None else padding,
+        tile_size=tile_size,
+    )
     if output_path is not None:
-        save_grid(overlays, labels, output_path, columns=columns)
+        save_grid(
+            overlays,
+            labels,
+            output_path,
+            columns=columns,
+            tile_size=tile_size,
+            spacing=spacing,
+            padding=padding,
+            show_labels=resolved_labels,
+            background=background,
+            dpi=dpi,
+        )
     return grid
 
 
@@ -104,6 +141,14 @@ def make_image_comparison_grid(
     batch_index: int = 0,
     head_index: int = 0,
     columns: int | None = None,
+    tile_size: tuple[int, int] | None = None,
+    spacing: int | None = None,
+    padding: int | None = None,
+    show_labels: bool | None = None,
+    background: str | None = None,
+    dpi: int | None = None,
+    normalization: str = "per_map",
+    normalization_range: tuple[float, float] | None = None,
 ) -> Any:
     if len(images) != len(attention_maps):
         raise ValueError("images and attention_maps must have the same length.")
@@ -121,16 +166,37 @@ def make_image_comparison_grid(
             cmap=cmap,
             batch_index=batch_index,
             head_index=head_index,
+            normalization=normalization,
+            normalization_range=normalization_range,
         )
         for image, attention_map in zip(images, attention_maps, strict=True)
     ]
+    resolved_labels = True if show_labels is None else show_labels
     tiles = [
-        labeled_image(overlay, label)
+        labeled_image(overlay, label) if resolved_labels else overlay
         for overlay, label in zip(overlays, labels, strict=True)
     ]
-    grid = image_grid(tiles, columns=columns)
+    grid = image_grid(
+        tiles,
+        columns=columns,
+        background=background or "white",
+        gap=12 if spacing is None else spacing,
+        padding=0 if padding is None else padding,
+        tile_size=tile_size,
+    )
     if output_path is not None:
-        save_grid(overlays, labels, output_path, columns=columns)
+        save_grid(
+            overlays,
+            labels,
+            output_path,
+            columns=columns,
+            tile_size=tile_size,
+            spacing=spacing,
+            padding=padding,
+            show_labels=resolved_labels,
+            background=background,
+            dpi=dpi,
+        )
     return grid
 
 
@@ -139,12 +205,24 @@ def save_grid(
     labels: Sequence[str],
     output_path: str | Path,
     columns: int | None = None,
+    tile_size: tuple[int, int] | None = None,
+    spacing: int | None = None,
+    padding: int | None = None,
+    show_labels: bool = True,
+    background: str | None = None,
+    dpi: int | None = None,
 ) -> Path:
     return save_grid_figure(
         images,
         labels=labels,
         output_path=output_path,
         columns=columns,
+        tile_size=tile_size,
+        spacing=spacing,
+        padding=padding,
+        show_labels=show_labels,
+        background=background,
+        dpi=dpi,
     )
 
 
@@ -153,45 +231,56 @@ def save_grid_figure(
     labels: Sequence[str],
     output_path: str | Path,
     columns: int | None = None,
+    tile_size: tuple[int, int] | None = None,
+    spacing: int | None = None,
+    padding: int | None = None,
+    show_labels: bool = True,
+    background: str | None = None,
+    dpi: int | None = None,
 ) -> Path:
     if len(images) != len(labels):
         raise ValueError("images and labels must have the same length.")
     if not images:
         raise ValueError("save_grid_figure requires at least one image.")
 
+    resolved_tile_size = tile_size or GRID_TILE_SIZE
     pil_images = [
-        _fit_image_to_tile(_as_rgb_image(image), GRID_TILE_SIZE)
-        for image in images
+        _fit_image_to_tile(_as_rgb_image(image), resolved_tile_size) for image in images
     ]
     columns = _grid_columns(len(pil_images), columns)
     rows = (len(pil_images) + columns - 1) // columns
-    tile_width, tile_height = GRID_TILE_SIZE
-    label_height = GRID_LABEL_HEIGHT
-    gap = GRID_GAP
-    width = columns * tile_width + (columns - 1) * gap
-    height = rows * (tile_height + label_height) + (rows - 1) * gap
+    tile_width, tile_height = resolved_tile_size
+    label_height = GRID_LABEL_HEIGHT if show_labels else 0
+    gap = GRID_GAP if spacing is None else spacing
+    margin = 0 if padding is None else padding
+    resolved_dpi = GRID_DPI if dpi is None else dpi
+    width = columns * tile_width + (columns - 1) * gap + 2 * margin
+    height = rows * (tile_height + label_height) + (rows - 1) * gap + 2 * margin
     figure = Figure(
-        figsize=(width / GRID_DPI, height / GRID_DPI),
-        dpi=GRID_DPI,
+        figsize=(width / resolved_dpi, height / resolved_dpi),
+        dpi=resolved_dpi,
         frameon=False,
     )
+    if background is not None:
+        figure.patch.set_facecolor(background)
 
     for index, (image, label) in enumerate(zip(pil_images, labels, strict=True)):
         row, column = divmod(index, columns)
-        cell_x = column * (tile_width + gap)
-        cell_y = row * (tile_height + label_height + gap)
+        cell_x = margin + column * (tile_width + gap)
+        cell_y = margin + row * (tile_height + label_height + gap)
         image_x = cell_x
         image_y_top = cell_y + label_height
         image_y = height - image_y_top - image.height
         figure.figimage(np.asarray(image), xo=image_x, yo=image_y)
-        figure.text(
-            (cell_x + tile_width / 2) / width,
-            1 - (cell_y + label_height / 2) / height,
-            label,
-            ha="center",
-            va="center",
-            fontsize=GRID_LABEL_FONT_SIZE,
-        )
+        if show_labels:
+            figure.text(
+                (cell_x + tile_width / 2) / width,
+                1 - (cell_y + label_height / 2) / height,
+                label,
+                ha="center",
+                va="center",
+                fontsize=GRID_LABEL_FONT_SIZE,
+            )
 
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -205,11 +294,14 @@ def image_grid(
     background: str = "white",
     gap: int = 12,
     padding: int = 0,
+    tile_size: tuple[int, int] | None = None,
 ) -> Any:
     if not images:
         raise ValueError("image_grid requires at least one image.")
 
     pil_images = [_as_rgb_image(image) for image in images]
+    if tile_size is not None:
+        pil_images = [_fit_image_to_tile(image, tile_size) for image in pil_images]
     columns = _grid_columns(len(pil_images), columns)
     rows = (len(pil_images) + columns - 1) // columns
     tile_width = max(image.width for image in pil_images)
@@ -245,10 +337,11 @@ def labeled_image(image: Any, label: str, label_height: int = 28) -> Any:
     return labeled
 
 
-def save_image(image: Any, path: str | Path) -> Path:
+def save_image(image: Any, path: str | Path, dpi: int | None = None) -> Path:
     output_path = Path(path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    _as_rgb_image(image).save(output_path)
+    options = {} if dpi is None else {"dpi": (dpi, dpi)}
+    _as_rgb_image(image).save(output_path, **options)
     return output_path
 
 
@@ -256,6 +349,8 @@ def attention_map_to_array(
     attention_map: Any,
     batch_index: int = 0,
     head_index: int = 0,
+    normalization: str = "per_map",
+    normalization_range: tuple[float, float] | None = None,
 ) -> Any:
     array = _to_numpy(attention_map)
     if array.ndim == 4:
@@ -266,11 +361,30 @@ def attention_map_to_array(
         raise ValueError("attention_map must be a 2D, 3D, or 4D array/tensor.")
 
     array = array.astype("float32", copy=False)
-    minimum = float(np.min(array))
-    maximum = float(np.max(array))
+    if normalization == "per_map":
+        minimum = float(np.min(array))
+        maximum = float(np.max(array))
+    elif normalization in {"shared", "fixed"}:
+        if normalization_range is None:
+            raise ValueError(
+                f"normalization_range is required for normalization={normalization!r}."
+            )
+        minimum, maximum = normalization_range
+    else:
+        raise ValueError("normalization must be one of: per_map, shared, fixed.")
     if maximum > minimum:
-        return (array - minimum) / (maximum - minimum)
+        return np.clip((array - minimum) / (maximum - minimum), 0, 1)
     return np.zeros_like(array)
+
+
+def shared_value_range(values: Sequence[Any]) -> tuple[float, float]:
+    if not values:
+        raise ValueError("shared normalization requires at least one array.")
+    arrays = [_to_numpy(value).astype("float32", copy=False) for value in values]
+    return (
+        min(float(np.min(array)) for array in arrays),
+        max(float(np.max(array)) for array in arrays),
+    )
 
 
 def _to_numpy(value: Any) -> Any:
