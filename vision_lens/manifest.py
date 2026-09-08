@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import platform
 import sys
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
@@ -34,6 +34,7 @@ def write_run_manifest(
     output_paths: Sequence[Path],
     *,
     started_at: datetime,
+    run_details: Mapping[str, object] | None = None,
 ) -> Path | None:
     path = manifest_path(config)
     if path.exists() and config.output.overwrite == "skip":
@@ -75,6 +76,8 @@ def write_run_manifest(
         ],
         "outputs": [str(output_path.resolve()) for output_path in output_paths],
     }
+    if run_details is not None:
+        payload["run"] = dict(run_details)
     temporary_path = path.with_suffix(".json.tmp")
     with temporary_path.open("w", encoding="utf-8") as file:
         json.dump(payload, file, indent=2, sort_keys=True)
@@ -95,6 +98,7 @@ def _versions() -> dict[str, str | None]:
         "pillow": _package_version("pillow"),
         "matplotlib": _package_version("matplotlib"),
         "pyyaml": _package_version("pyyaml"),
+        "av": _package_version("av"),
         "executable": sys.executable,
     }
 

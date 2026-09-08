@@ -68,6 +68,72 @@ def test_parse_config_applies_documented_defaults():
     assert config.output.grids is True
     assert config.output.raw_arrays is False
     assert config.output.overwrite == "error"
+    assert config.video is None
+
+
+def test_video_settings_are_strict_and_resolved(tmp_path):
+    source = tmp_path / "clip.mp4"
+    source.touch()
+    raw = _minimal_config()
+    raw["input"] = {"files": [str(source)]}
+    raw["video"] = {
+        "start_time": 1.5,
+        "end_time": 4,
+        "sampling_rate": 2.5,
+        "frame_limit": 7,
+        "output_resolution": [640, 360],
+        "pca_fit_frames": 5,
+        "temporal_smoothing": 0.25,
+        "codec": "libx264",
+    }
+
+    config = parse_config(raw)
+    resolved = config_to_dict(config)["video"]
+
+    assert config.video is not None
+    assert config.video.start_time == 1.5
+    assert config.video.end_time == 4
+    assert config.video.sampling_rate == 2.5
+    assert config.video.output_resolution == (640, 360)
+    assert resolved["temporal_smoothing"] == 0.25
+
+    raw["video"]["unknown"] = True
+    with pytest.raises(ValueError, match="Unknown key.*video"):
+        parse_config(raw)
+
+
+def test_video_settings_apply_documented_defaults(tmp_path):
+    source = tmp_path / "clip.mp4"
+    source.touch()
+    raw = _minimal_config()
+    raw["input"] = {"files": [str(source)]}
+    raw["video"] = {}
+
+    config = parse_config(raw)
+
+    assert config.video is not None
+    assert config.video.start_time == 0
+    assert config.video.end_time is None
+    assert config.video.sampling_rate == 5
+    assert config.video.frame_limit is None
+    assert config.video.output_resolution is None
+    assert config.video.pca_fit_frames == 32
+    assert config.video.temporal_smoothing == 0
+    assert config.video.codec == "libx264"
+
+
+def test_video_rejects_invalid_time_range_and_odd_resolution(tmp_path):
+    source = tmp_path / "clip.mp4"
+    source.touch()
+    raw = _minimal_config()
+    raw["input"] = {"files": [str(source)]}
+    raw["video"] = {"start_time": 2, "end_time": 1}
+    with pytest.raises(ValueError, match="end_time must be greater"):
+        parse_config(raw)
+
+    raw["video"] = {"output_resolution": [641, 360]}
+    with pytest.raises(ValueError, match="must be even"):
+        parse_config(raw)
 
 
 def test_parse_config_reads_visualization_values():

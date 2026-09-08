@@ -64,7 +64,10 @@ def main(argv: list[str] | None = None) -> int:
         print(resolved_config_yaml(config), end="")
         return 0
 
-    result = run_pipeline_from_config(config)
+    try:
+        result = run_pipeline_from_config(config)
+    except (OSError, RuntimeError, ValueError) as error:
+        parser.error(str(error))
     print(
         f"saved {len(result.output_paths)} outputs plus run manifest to "
         f"{result.config.output.directory}"
