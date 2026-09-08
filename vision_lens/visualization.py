@@ -19,6 +19,16 @@ GRID_LABEL_HEIGHT = 32
 GRID_GAP = 12
 GRID_DPI = 100
 GRID_LABEL_FONT_SIZE = 10
+RASTER_GRID_FORMATS = {
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".raw",
+    ".rgba",
+    ".tif",
+    ".tiff",
+    ".webp",
+}
 
 
 def render_heatmap(
@@ -252,8 +262,13 @@ def save_grid_figure(
     resolved_dpi = GRID_DPI if dpi is None else dpi
     width = columns * tile_width + (columns - 1) * gap + 2 * margin
     height = rows * (tile_height + label_height) + (rows - 1) * gap + 2 * margin
+    output = Path(output_path)
+    pixel_bias = 1e-6 if output.suffix.lower() in RASTER_GRID_FORMATS else 0
     figure = Figure(
-        figsize=(width / resolved_dpi, height / resolved_dpi),
+        figsize=(
+            (width + pixel_bias) / resolved_dpi,
+            (height + pixel_bias) / resolved_dpi,
+        ),
         dpi=resolved_dpi,
         frameon=False,
     )
@@ -278,7 +293,6 @@ def save_grid_figure(
                 fontsize=GRID_LABEL_FONT_SIZE,
             )
 
-    output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
     figure.savefig(output)
     return output

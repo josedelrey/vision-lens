@@ -108,6 +108,20 @@ def test_save_grid_figure_uses_fixed_tile_size(tmp_path):
     assert 'height="184.32pt"' in svg
 
 
+def test_save_grid_figure_preserves_exact_raster_dimensions(tmp_path):
+    output_path = tmp_path / "grid.png"
+
+    save_grid_figure(
+        images=[Image.new("RGB", (4, 4), "white")] * 2,
+        labels=["first", "second"],
+        output_path=output_path,
+        columns=2,
+    )
+
+    with Image.open(output_path) as grid:
+        assert grid.size == (460, 256)
+
+
 def test_fixed_normalization_uses_the_configured_range():
     array = attention_map_to_array(
         torch.tensor([[0.0, 5.0, 10.0]]),
