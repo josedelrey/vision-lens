@@ -1,21 +1,30 @@
 [build-system]
-requires = ["setuptools>=69", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "vision-lens"
 version = "0.1.0"
-description = "Visualize and compare attention maps from vision transformer models."
+description = "Visualize attention, Grad-CAM, and patch features for images and video."
 readme = "README.md"
 requires-python = ">=3.10"
-license = { file = "LICENSE" }
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
   { name = "vision-lens contributors" }
 ]
-keywords = ["computer-vision", "vision-transformer", "attention", "visualization"]
+keywords = [
+  "computer-vision",
+  "vision-transformer",
+  "attention",
+  "grad-cam",
+  "visualization",
+  "video",
+]
 classifiers = [
-  "Development Status :: 2 - Pre-Alpha",
-  "Intended Audience :: Education",
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Science/Research",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
@@ -32,6 +41,12 @@ dependencies = [
   "torchvision>=0.17",
 ]
 
+[project.urls]
+Homepage = "https://github.com/josedelrey/vision-lens"
+Documentation = "https://github.com/josedelrey/vision-lens#readme"
+Issues = "https://github.com/josedelrey/vision-lens/issues"
+Source = "https://github.com/josedelrey/vision-lens"
+
 [project.scripts]
 vision-lens = "vision_lens.cli:main"
 
@@ -40,6 +55,7 @@ video = [
   "av>=13.1,<17",
 ]
 dev = [
+  "build>=1.2",
   "pytest>=8.0",
   "ruff>=0.4",
 ]
@@ -51,6 +67,9 @@ include = ["vision_lens*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = [
+  "real_model: downloads and runs a supported pretrained model",
+]
 
 [tool.ruff]
 line-length = 88
