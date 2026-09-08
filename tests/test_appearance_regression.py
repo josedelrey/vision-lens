@@ -71,10 +71,12 @@ def test_dinov2_pca_projection_and_clean_grid_match_recorded_pixels():
         _assert_image_matches(image, expected)
     _assert_image_matches(comparison, baseline["comparison_grid"])
 
-    for image in result.images:
+    for image, mask in zip(result.images, result.foreground_mask, strict=True):
         array = np.asarray(image)
-        assert np.all(array[0, 0] == 0)
-        assert np.all(array[0, -1] == 0)
+        for row, column in np.argwhere(~mask.reshape(2, 2).numpy()):
+            y = row * (array.shape[0] - 1)
+            x = column * (array.shape[1] - 1)
+            assert np.all(array[y, x] == 0)
 
 
 def _baseline():
