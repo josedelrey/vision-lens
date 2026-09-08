@@ -369,27 +369,21 @@ def _fit_projection(
 
 
 def _fit_pca_projection(values: Any, components: int) -> tuple[Any, Any]:
-    component_count = min(components, int(values.shape[0]), int(values.shape[1]))
-    if component_count == 0:
-        return (
-            values.new_zeros((values.shape[0], 0)),
-            values.new_zeros((values.shape[1], 0)),
-        )
-    if values.shape[0] == 1:
-        components_matrix = values.new_zeros((values.shape[1], component_count))
-        indices = torch.arange(component_count)
-        components_matrix[indices, indices] = 1
-        return values[:, :component_count], components_matrix
-
-    with torch.random.fork_rng():
-        torch.manual_seed(0)
-        _u, _s, vectors = torch.pca_lowrank(
-            values,
-            q=component_count,
-            center=True,
-        )
-    components_matrix = vectors[:, :component_count]
+    components_matrix = _fit_streaming_components(
+        lambda: (values,),
+        components=components,
+    )
     return values @ components_matrix, components_matrix
+
+
+def _canonicalize_component_signs(components: Any) -> Any:
+    result = components.clone()
+    for index in range(int(result.shape[1])):
+        column = result[:, index]
+        pivot = int(column.abs().argmax())
+        if column[pivot] < 0:
+            result[:, index] = -column
+    return result
 
 
 def _fit_streaming_components(
@@ -418,10 +412,9 @@ def _fit_streaming_components(
 
     component_count = min(components, count, feature_count)
     if count == 1:
-        result = torch.zeros((feature_count, component_count), dtype=torch.float32)
-        indices = torch.arange(component_count)
-        result[indices, indices] = 1
-        return result
+        return torch.zeros((feature_count, component_count), dtype=torch.float32)
+
+    component_count = min(component_count, count - 1)
 
     mean = value_sum / count
     covariance = torch.zeros((feature_count, feature_count), dtype=torch.float64)
@@ -431,12 +424,7 @@ def _fit_streaming_components(
 
     _eigenvalues, eigenvectors = torch.linalg.eigh(covariance)
     result = eigenvectors[:, -component_count:].flip(dims=(1,))
-    for index in range(component_count):
-        column = result[:, index]
-        pivot = int(column.abs().argmax())
-        if column[pivot] < 0:
-            result[:, index] = -column
-    return result.float()
+    return _canonicalize_component_signs(result).float()
 
 
 def _streaming_projected_bounds(

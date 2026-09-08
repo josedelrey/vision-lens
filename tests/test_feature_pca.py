@@ -3,12 +3,45 @@ import pytest
 import torch
 
 from vision_lens.feature_pca import (
+    _fit_pca_projection,
     _patch_tokens_from_features,
     fit_patch_pca_projection_batches,
     load_patch_pca_projection,
     project_patch_embeddings,
     save_patch_pca_projection,
 )
+
+
+def test_centered_pca_omits_undefined_components_and_canonicalizes_signs():
+    values = torch.tensor(
+        [
+            [3.0, 1.0, 0.2, 0.4],
+            [2.2, 0.0, 0.7, 0.1],
+            [4.0, 1.1, 0.4, 0.8],
+        ]
+    )
+
+    projected, components = _fit_pca_projection(values, components=3)
+
+    assert projected.shape == (3, 2)
+    assert components.shape == (4, 2)
+    pivots = components.abs().argmax(dim=0)
+    assert torch.all(components[pivots, torch.arange(2)] >= 0)
+
+
+def test_patch_pca_zero_pads_rgb_components_without_centered_variance():
+    embeddings = torch.tensor([[[0.0, 0.0], [1.0, 0.0], [2.0, 0.0], [3.0, 0.0]]])
+
+    result = project_patch_embeddings(
+        embeddings,
+        patch_grid=(2, 2),
+        image_size=(2, 2),
+        foreground_threshold=0.5,
+    )
+
+    assert result.projection is not None
+    assert result.projection.rgb_components.shape == (2, 3)
+    assert torch.count_nonzero(result.projection.rgb_components[:, 1:]) == 0
 
 
 def test_streaming_pca_projection_is_independent_of_embedding_batch_size():

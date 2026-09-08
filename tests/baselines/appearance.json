@@ -29,25 +29,25 @@
   },
   "pca": {
     "foreground_mask": [
-      [false, false, false, true],
-      [false, false, true, true]
+      [true, true, true, false],
+      [true, true, false, false]
     ],
     "images": [
       {
         "mode": "RGB",
         "size": [8, 8],
-        "sha256": "2bb0bfaf854d700f1b720644baa8a44423cbb26bdf2b42dd7496566eecd67da7"
+        "sha256": "34fd8afa95af82866c78b1053a8a95b48fa4fa9fb2f2250b75cddc97a7305ece"
       },
       {
         "mode": "RGB",
         "size": [8, 8],
-        "sha256": "69ef81ccc5ab1f25971bb1f89257b15f3dc400e6248306f958ad2af8e434a6f2"
+        "sha256": "c195e5c4630af2b7e68c13c47da01f2c3e48c5311c09b7774c094f9aed0af85b"
       }
     ],
     "comparison_grid": {
       "mode": "RGB",
       "size": [64, 40],
-      "sha256": "8e66c28fd763f008737a9c3694ffe9138f2728dadcfaac8fe26ac291efb66f00"
+      "sha256": "8846c3a024c3fdc39782bf49d1d79498ffeab9f6ad09bf070790e7fe3a23d8b5"
     }
   }
 }
