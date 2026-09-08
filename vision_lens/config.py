@@ -26,6 +26,7 @@ TOP_LEVEL_KEYS = {
     "runtime",
     "visualization",
     "output",
+    "video",
 }
 SECTION_KEYS = {
     "input": {"paths", "files", "folders", "patterns", "recursive", "limit"},
@@ -65,6 +66,16 @@ SECTION_KEYS = {
         "image_format",
         "raw_format",
         "overwrite",
+    },
+    "video": {
+        "start_time",
+        "end_time",
+        "sampling_rate",
+        "frame_limit",
+        "output_resolution",
+        "pca_fit_frames",
+        "temporal_smoothing",
+        "codec",
     },
 }
 ANALYSIS_KEYS = {
@@ -199,6 +210,18 @@ class VisualizationConfig:
 
 
 @dataclass(frozen=True)
+class VideoConfig:
+    start_time: float = 0.0
+    end_time: float | None = None
+    sampling_rate: float = 5.0
+    frame_limit: int | None = None
+    output_resolution: tuple[int, int] | None = None
+    pca_fit_frames: int = 32
+    temporal_smoothing: float = 0.0
+    codec: str = "libx264"
+
+
+@dataclass(frozen=True)
 class VisionLensConfig:
     input: InputConfig
     model: ModelConfig
@@ -208,6 +231,7 @@ class VisionLensConfig:
     visualization: VisualizationConfig
     output: OutputConfig
     preset: str | None = None
+    video: VideoConfig | None = None
 
     @property
     def task(self) -> str:
@@ -299,6 +323,7 @@ def parse_config(
     runtime_section = _section(resolved, "runtime")
     visualization_section = _section(resolved, "visualization")
     output_section = _section(resolved, "output")
+    video_section = _section(resolved, "video")
     method = _analysis_method(analysis_section.get("method", "attention"))
     _reject_unknown_keys("analysis", analysis_section, ANALYSIS_KEYS[method])
 
@@ -452,6 +477,44 @@ def parse_config(
                 {"replace", "error", "skip"},
             ),
         ),
+        video=(
+            None
+            if "video" not in resolved
+            else VideoConfig(
+                start_time=_non_negative_number(
+                    video_section.get("start_time", 0.0),
+                    "video.start_time",
+                ),
+                end_time=_optional_non_negative_number(
+                    video_section.get("end_time"),
+                    "video.end_time",
+                ),
+                sampling_rate=_positive_number(
+                    video_section.get("sampling_rate", 5.0),
+                    "video.sampling_rate",
+                ),
+                frame_limit=_optional_positive_int(
+                    video_section.get("frame_limit"),
+                    "video.frame_limit",
+                ),
+                output_resolution=_optional_size(
+                    video_section.get("output_resolution"),
+                    "video.output_resolution",
+                ),
+                pca_fit_frames=_positive_int(
+                    video_section.get("pca_fit_frames", 32),
+                    "video.pca_fit_frames",
+                ),
+                temporal_smoothing=_unit_interval(
+                    video_section.get("temporal_smoothing", 0.0),
+                    "video.temporal_smoothing",
+                ),
+                codec=_optional_str(
+                    video_section.get("codec", "libx264"),
+                    "video.codec",
+                ),
+            )
+        ),
         preset=preset_name,
     )
     validate_config(config)
@@ -465,6 +528,18 @@ def validate_config(config: VisionLensConfig) -> None:
         raise ValueError(f"Input file(s) do not exist: {paths}.")
 
     method = config.analysis.method
+    if config.video is not None:
+        if len(config.input.paths) != 1:
+            raise ValueError("Video workflows require exactly one input file.")
+        if (
+            config.video.end_time is not None
+            and config.video.end_time <= config.video.start_time
+        ):
+            raise ValueError("video.end_time must be greater than video.start_time.")
+        if config.video.output_resolution is not None and any(
+            value % 2 for value in config.video.output_resolution
+        ):
+            raise ValueError("video.output_resolution values must be even numbers.")
     actual_pair = (config.model.architecture, config.model.backend)
     expected_pair = ("cnn", "torchvision") if method == "gradcam" else ("vit", "timm")
     if actual_pair != expected_pair:
@@ -621,6 +696,21 @@ def config_to_dict(config: VisionLensConfig) -> dict[str, Any]:
         "raw_format": config.output.raw_format,
         "overwrite": config.output.overwrite,
     }
+    if config.video is not None:
+        resolved["video"] = {
+            "start_time": config.video.start_time,
+            "end_time": config.video.end_time,
+            "sampling_rate": config.video.sampling_rate,
+            "frame_limit": config.video.frame_limit,
+            "output_resolution": (
+                None
+                if config.video.output_resolution is None
+                else list(config.video.output_resolution)
+            ),
+            "pca_fit_frames": config.video.pca_fit_frames,
+            "temporal_smoothing": config.video.temporal_smoothing,
+            "codec": config.video.codec,
+        }
     return resolved
 
 
@@ -1066,6 +1156,24 @@ def _unit_interval(value: Any, field_name: str) -> float:
         or not 0 <= value <= 1
     ):
         raise ValueError(f"{field_name} must be between 0 and 1.")
+    return float(value)
+
+
+def _non_negative_number(value: Any, field_name: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, int | float) or value < 0:
+        raise ValueError(f"{field_name} must be a non-negative number.")
+    return float(value)
+
+
+def _optional_non_negative_number(value: Any, field_name: str) -> float | None:
+    if value is None:
+        return None
+    return _non_negative_number(value, field_name)
+
+
+def _positive_number(value: Any, field_name: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, int | float) or value <= 0:
+        raise ValueError(f"{field_name} must be a positive number.")
     return float(value)
 
 

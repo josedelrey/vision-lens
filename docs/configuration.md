@@ -258,6 +258,70 @@ configurations default to `overwrite: error`, so an existing manifest stops the
 run before the model is loaded. The compatibility presets explicitly use
 `overwrite: replace` to retain their earlier rerun behavior.
 
+## Video
+
+Install the optional dependencies before running a video configuration:
+
+```bash
+# The repository's Conda development environment includes video support.
+conda env create --file environment.yml
+conda activate vision-lens
+
+# For an existing non-Conda installation:
+python -m pip install ".[video]"
+```
+
+The presence of a `video` section switches the selected image analysis to
+timestamp-sampled frame processing. `input` must select exactly one video file;
+`runtime.batch_size` remains the maximum number of decoded frames held and
+analyzed together.
+
+```yaml
+video:
+  start_time: 0.0
+  end_time: null
+  sampling_rate: 5.0
+  frame_limit: null
+  output_resolution: [1280, 720]
+  pca_fit_frames: 32
+  temporal_smoothing: 0.0
+  codec: libx264
+```
+
+| Setting | Default | Description | Example |
+|---|---|---|---|
+| `start_time` | `0.0` | First source timestamp in seconds. | `2.5` |
+| `end_time` | `null` | Exclusive ending timestamp in seconds; `null` reads to the end. | `12.0` |
+| `sampling_rate` | `5.0` | Frames sampled per second and exact output playback FPS. | `10.0` |
+| `frame_limit` | `null` | Maximum sampled frames after applying the time range. | `120` |
+| `output_resolution` | `null` | Even `[width, height]` for every output video; `null` uses the source size, rounded down to even dimensions when needed. | `[1280, 720]` |
+| `pca_fit_frames` | `32` | Maximum evenly distributed representative frames used to fit video PCA. | `64` |
+| `temporal_smoothing` | `0.0` | Previous-frame blend strength from `0` (off) to `1` (strongest). | `0.35` |
+| `codec` | `libx264` | PyAV/FFmpeg encoder name for MP4 outputs. | `libx264` |
+
+Sampling follows decoded presentation timestamps rather than assuming the
+source has a constant frame rate. Output frames receive consecutive timestamps
+spaced at exactly `1 / sampling_rate`, making the playback duration explicitly
+`sampled_frames / sampling_rate`. The run manifest records both values.
+
+For attention and rollout, Vision Lens writes one stream per selected
+layer/head map. `output.heatmaps`, `output.overlays`, and `output.grids` select
+heatmap, overlay, and original/visualization comparison videos. Grad-CAM uses
+the same controls; set `analysis.target_class` to an integer to freeze its
+target across the clip. Patch PCA uses `output.heatmaps` for its RGB PCA video
+and `output.grids` for the side-by-side comparison.
+
+Video PCA fits one projection from representative sampled frames, then freezes
+the projection, foreground threshold/side, and RGB normalization bounds before
+processing the complete clip. A loaded projection remains frozen in the same
+way. Temporal smoothing is applied only when its strength is greater than zero
+and operates sequentially across batch boundaries.
+
+Generated videos are silent. Source audio is deliberately omitted rather than
+copied or time-stretched; this is recorded in `run-manifest.json`. Raw arrays,
+when enabled, are written in bounded per-batch files. NPZ batches include their
+sample timestamps.
+
 ## Validate, resolve, and override
 
 Validate without loading a model:

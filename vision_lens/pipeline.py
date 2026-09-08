@@ -44,6 +44,7 @@ from vision_lens.processing import (
     preprocess_batch,
     unique_input_labels,
 )
+from vision_lens.video_pipeline import VideoPipelineResult, run_video_from_config
 from vision_lens.visualization import (
     image_grid,
     make_image_comparison_grid,
@@ -94,14 +95,26 @@ def run_vit_attention(
 
 def run_pipeline(
     config_path: str | Path,
-) -> PipelineResult | GradCamPipelineResult | PatchPCAPipelineResult:
+) -> (
+    PipelineResult
+    | GradCamPipelineResult
+    | PatchPCAPipelineResult
+    | VideoPipelineResult
+):
     config = load_config(config_path)
     return run_pipeline_from_config(config)
 
 
 def run_pipeline_from_config(
     config: VisionLensConfig,
-) -> PipelineResult | GradCamPipelineResult | PatchPCAPipelineResult:
+) -> (
+    PipelineResult
+    | GradCamPipelineResult
+    | PatchPCAPipelineResult
+    | VideoPipelineResult
+):
+    if config.video is not None:
+        return run_video_from_config(config)
     if config.task == "vit_attention":
         return run_vit_attention_from_config(config)
     if config.task == "vit_rollout":
@@ -112,6 +125,11 @@ def run_pipeline_from_config(
         return run_patch_pca_from_config(config)
 
     raise ValueError(f"Unsupported task: {config.task}")
+
+
+def run_video(config_path: str | Path) -> VideoPipelineResult:
+    config = load_config(config_path)
+    return run_video_from_config(config)
 
 
 def run_patch_pca(

@@ -36,6 +36,9 @@ dependencies = [
 vision-lens = "vision_lens.cli:main"
 
 [project.optional-dependencies]
+video = [
+  "av>=13.1,<17",
+]
 dev = [
   "pytest>=8.0",
   "ruff>=0.4",

@@ -12,11 +12,26 @@ The first target workflow is:
 
 ## Installation
 
-From the repository root:
+For development, create the supported Conda environment from the repository
+root:
 
 ```bash
-python -m pip install -e ".[dev]"
+conda env create --file environment.yml
+conda activate vision-lens
 ```
+
+This installs the project in editable mode with its development tools and
+optional video support. To update an existing environment after dependency
+changes:
+
+```bash
+conda env update --file environment.yml --prune
+```
+
+For a regular non-development installation, use `python -m pip install .`.
+Add the video extra with `python -m pip install ".[video]"` when video support
+is needed. Dependency requirements remain authoritative in `pyproject.toml`;
+the project does not maintain a duplicate `requirements.txt`.
 
 ## Intended usage
 
@@ -167,3 +182,45 @@ from vision_lens.pipeline import run_patch_pca
 
 result = run_patch_pca("configs/patch_pca.dinov2.example.yaml")
 ```
+
+## Frame-based video
+
+Install the `video` extra, then add a `video` section to any attention,
+rollout, Grad-CAM, or patch-PCA configuration. The input must select one video:
+
+```yaml
+input:
+  files: [my-video.mp4]
+
+runtime:
+  batch_size: 4
+
+video:
+  start_time: 2.0
+  end_time: 8.0
+  sampling_rate: 5.0
+  frame_limit: null
+  output_resolution: [1280, 720]
+  pca_fit_frames: 32
+  temporal_smoothing: 0.0
+  codec: libx264
+```
+
+Run it through the same command:
+
+```bash
+vision-lens --config path/to/video.yaml
+```
+
+The equivalent Python entry point is `vision_lens.pipeline.run_video`.
+
+Attention, rollout, and Grad-CAM can export heatmap, overlay, and side-by-side
+MP4 files. Patch PCA exports a PCA video and a side-by-side comparison. PCA is
+fitted on evenly distributed representative frames and then frozen for the
+clip, including its foreground rule and color scaling. Set a single
+`analysis.target_class` to keep the same Grad-CAM class across every frame.
+
+Frames are sampled from source timestamps and encoded at exactly
+`video.sampling_rate`, so playback duration is `sampled_frames / sampling_rate`.
+Exports are silent: source audio is not copied, stretched, or re-encoded.
+Temporal smoothing is disabled by default.
