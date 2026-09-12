@@ -15,7 +15,7 @@ from torchvision import transforms
 from vision_lens.config import PreprocessingConfig
 
 
-def example_image_paths(example_dir: str | Path = "data/examples") -> tuple[Path, ...]:
+def example_image_paths(example_dir: str | Path = "data/images") -> tuple[Path, ...]:
     directory = Path(example_dir)
     return tuple(
         sorted(

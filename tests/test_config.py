@@ -24,7 +24,7 @@ def _minimal_config(
     if method in {"attention", "rollout"}:
         analysis["layers"] = [0]
     return {
-        "input": {"paths": ["data/examples/1.jpg"]},
+        "input": {"paths": ["data/images/1.jpg"]},
         "model": {
             "architecture": architecture,
             "backend": backend,
@@ -390,7 +390,7 @@ def test_all_new_controls_are_parsed_and_resolved(tmp_path):
         backend="torchvision",
     )
     raw_config["analysis"].update({"target_layer": "layer3", "target_class": 7})
-    raw_config["input"]["paths"] = [str(Path("data/examples/1.jpg").resolve())]
+    raw_config["input"]["paths"] = [str(Path("data/images/1.jpg").resolve())]
     raw_config["preprocessing"] = {
         "image_size": 224,
         "resize": "longest",
@@ -457,7 +457,7 @@ def test_fixed_normalization_requires_a_range():
 
 def test_pca_projection_paths_resolve_from_config_and_load_must_exist(tmp_path):
     raw_config = _minimal_config(method="patch_pca")
-    raw_config["input"]["paths"] = [str(Path("data/examples/1.jpg").resolve())]
+    raw_config["input"]["paths"] = [str(Path("data/images/1.jpg").resolve())]
     raw_config["analysis"].update(
         {
             "projection": "fit",

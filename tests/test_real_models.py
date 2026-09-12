@@ -64,7 +64,7 @@ def test_pretrained_model_pipeline_smoke(
         preset,
         base_dir=REPO_ROOT,
         overrides={
-            "input": {"files": ["data/examples/1.jpg"], "limit": 1},
+            "input": {"files": ["data/images/1.jpg"], "limit": 1},
             "preprocessing": {"image_size": 224},
             "analysis": analysis_overrides,
             "runtime": {"batch_size": 1, "device": "cpu"},
