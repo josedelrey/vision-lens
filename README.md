@@ -13,34 +13,41 @@ and video frames.
 
 ## Install
 
-Clone the repository, then create the supported development environment:
+Vision Lens targets Linux and uses [uv](https://docs.astral.sh/uv/) for Python,
+dependency, and virtual-environment management. Clone the repository, install
+uv, then create the complete development environment from the committed lock:
 
 ```bash
-conda env create --file environment.yml
-conda activate vision-lens
+uv sync --locked --all-extras
 ```
 
-For a smaller installation without development tools:
+`uv` creates `.venv` automatically. Run project commands through `uv run`, so
+shell activation is not required. For a smaller runtime-only environment:
 
 ```bash
-python -m pip install .
+uv sync --locked --no-dev
 ```
 
-Video support is included in the Conda environment. With pip, install it as an
-extra: `python -m pip install ".[video]"`.
+Add `--extra video` to include video support. The development command above
+uses `--all-extras`, so it already includes video support.
+
+Dependency declarations and development tools live in `pyproject.toml`; exact
+versions are recorded in `uv.lock`. After intentionally changing dependency
+constraints, refresh the lock with `uv lock` (or `uv lock --upgrade` to upgrade
+all dependencies), then commit both files.
 
 ## Quick starts
 
 Run one image through the DINO attention preset:
 
 ```bash
-vision-lens --preset dino-vits8-attention --set input.limit=1
+uv run vision-lens --preset dino-vits8-attention --set input.limit=1
 ```
 
 Reproduce the DINOv2 PCA example:
 
 ```bash
-python scripts/run_dinov2_pca.py
+uv run python scripts/run_dinov2_pca.py
 ```
 
 The DINOv2 PCA preset fits one shared projection across both example images,
@@ -82,9 +89,9 @@ output:
 Validate or inspect the resolved configuration before loading a model:
 
 ```bash
-vision-lens validate --config workflow.yaml
-vision-lens resolve --config workflow.yaml
-vision-lens run --config workflow.yaml
+uv run vision-lens validate --config workflow.yaml
+uv run vision-lens resolve --config workflow.yaml
+uv run vision-lens run --config workflow.yaml
 ```
 
 Resolution order is **defaults → preset → YAML → CLI overrides**. Relative

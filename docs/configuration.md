@@ -93,7 +93,7 @@ sizes during configuration validation.
 All four analyses run through the same command:
 
 ```bash
-vision-lens run --config configs/gradcam.example.yaml
+uv run vision-lens run --config configs/gradcam.example.yaml
 ```
 
 ### Attention and rollout
@@ -263,12 +263,8 @@ run before the model is loaded. The compatibility presets explicitly use
 Install the optional dependencies before running a video configuration:
 
 ```bash
-# The repository's Conda development environment includes video support.
-conda env create --file environment.yml
-conda activate vision-lens
-
-# For an existing non-Conda installation:
-python -m pip install ".[video]"
+# From a clean clone, create the locked runtime environment with video support.
+uv sync --locked --no-dev --extra video
 ```
 
 The presence of a `video` section switches the selected image analysis to
@@ -327,19 +323,19 @@ sample timestamps.
 Validate without loading a model:
 
 ```bash
-vision-lens validate --config configs/vit_attention.example.yaml
+uv run vision-lens validate --config configs/vit_attention.example.yaml
 ```
 
 Print final values, expanded inputs, and absolute paths:
 
 ```bash
-vision-lens resolve --config configs/vit_attention.example.yaml
+uv run vision-lens resolve --config configs/vit_attention.example.yaml
 ```
 
 Override any leaf setting from the command line using YAML values:
 
 ```bash
-vision-lens run --config configs/gradcam.example.yaml \
+uv run vision-lens run --config configs/gradcam.example.yaml \
   --set input.limit=4 \
   --set runtime.batch_size=2 \
   --set analysis.target_class=207 \
