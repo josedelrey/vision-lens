@@ -25,6 +25,7 @@ classifiers = [
   "Development Status :: 4 - Beta",
   "Intended Audience :: Developers",
   "Intended Audience :: Science/Research",
+  "Operating System :: POSIX :: Linux",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
@@ -54,11 +55,16 @@ vision-lens = "vision_lens.cli:main"
 video = [
   "av>=13.1,<17",
 ]
+
+[dependency-groups]
 dev = [
-  "build>=1.2",
   "pytest>=8.0",
   "ruff>=0.4",
 ]
+
+[tool.uv]
+environments = ["sys_platform == 'linux'"]
+required-version = ">=0.12.0,<0.13"
 
 [tool.setuptools.packages.find]
 where = ["."]

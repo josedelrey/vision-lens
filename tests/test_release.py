@@ -1,7 +1,5 @@
 from pathlib import Path
 
-import yaml
-
 from vision_lens.config import load_config
 
 REPO_ROOT = Path(__file__).parents[1]
@@ -22,11 +20,11 @@ def test_readme_has_result_placeholders_without_committed_gallery_media():
     assert not (REPO_ROOT / "docs/assets/gallery").exists()
 
 
-def test_conda_environment_installs_project_extras_from_pyproject():
-    environment = yaml.safe_load(
-        (REPO_ROOT / "environment.yml").read_text(encoding="utf-8")
-    )
+def test_uv_is_the_only_repository_environment_manager():
+    pyproject = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    lock = (REPO_ROOT / "uv.lock").read_text(encoding="utf-8")
 
-    assert environment["name"] == "vision-lens"
-    assert "conda-forge" in environment["channels"]
-    assert "-e .[dev,video]" in environment["dependencies"][-1]["pip"]
+    assert "[dependency-groups]" in pyproject
+    assert "environments = [\"sys_platform == 'linux'\"]" in pyproject
+    assert 'name = "vision-lens"' in lock
+    assert not (REPO_ROOT / "environment.yml").exists()
