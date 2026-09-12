@@ -41,8 +41,7 @@ def require_video_dependencies() -> Any:
     except ImportError as error:
         raise RuntimeError(
             "Video support requires the optional dependencies. Install them with "
-            "`pip install 'vision-lens[video]'` or use the repository's Conda "
-            "environment."
+            "`uv sync --extra video` from the repository."
         ) from error
     return av
 
