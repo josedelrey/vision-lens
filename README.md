@@ -124,4 +124,4 @@ internals required by each analysis.
 
 Vision Lens is released under the [MIT License](https://github.com/josedelrey/vision-lens/blob/main/LICENSE).
 Bundled example-image provenance is recorded in the
-[attribution file](https://github.com/josedelrey/vision-lens/blob/main/data/examples/ATTRIBUTION.md).
+[attribution file](https://github.com/josedelrey/vision-lens/blob/main/data/images/ATTRIBUTION.md).

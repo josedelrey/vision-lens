@@ -1,9 +1,0 @@
-* text=auto eol=lf
-
-*.jpg binary
-*.jpeg binary
-*.png binary
-*.gif binary
-*.webp binary
-*.mp4 binary
-*.npz binary

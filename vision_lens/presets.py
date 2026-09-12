@@ -3,7 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
-_EXAMPLE_IMAGES = [f"data/examples/{index}.jpg" for index in range(1, 9)]
+_EXAMPLE_IMAGES = [f"data/images/{index}.jpg" for index in range(1, 9)]
 
 
 PRESETS: dict[str, dict[str, Any]] = {
@@ -271,7 +271,7 @@ PRESETS: dict[str, dict[str, Any]] = {
             "options": {},
         },
         "input": {
-            "files": ["data/examples/5.jpg", "data/examples/6.jpg"],
+            "files": ["data/images/5.jpg", "data/images/6.jpg"],
             "folders": [],
             "patterns": ["*.jpg", "*.jpeg", "*.png", "*.webp"],
             "recursive": False,
