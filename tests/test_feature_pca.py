@@ -12,7 +12,7 @@ from vision_lens.feature_pca import (
 )
 
 
-def test_centered_pca_omits_undefined_components_and_canonicalizes_signs():
+def test_pca_uses_seeded_approximate_components():
     values = torch.tensor(
         [
             [3.0, 1.0, 0.2, 0.4],
@@ -23,13 +23,17 @@ def test_centered_pca_omits_undefined_components_and_canonicalizes_signs():
 
     projected, components = _fit_pca_projection(values, components=3)
 
-    assert projected.shape == (3, 2)
-    assert components.shape == (4, 2)
-    pivots = components.abs().argmax(dim=0)
-    assert torch.all(components[pivots, torch.arange(2)] >= 0)
+    with torch.random.fork_rng(devices=[]):
+        torch.manual_seed(0)
+        _u, _s, expected = torch.pca_lowrank(values, q=3, center=True)
+
+    assert projected.shape == (3, 3)
+    assert components.shape == (4, 3)
+    assert torch.allclose(components, expected)
+    assert torch.allclose(projected, values @ expected)
 
 
-def test_patch_pca_zero_pads_rgb_components_without_centered_variance():
+def test_patch_pca_zero_pads_missing_rgb_components():
     embeddings = torch.tensor([[[0.0, 0.0], [1.0, 0.0], [2.0, 0.0], [3.0, 0.0]]])
 
     result = project_patch_embeddings(
@@ -41,10 +45,10 @@ def test_patch_pca_zero_pads_rgb_components_without_centered_variance():
 
     assert result.projection is not None
     assert result.projection.rgb_components.shape == (2, 3)
-    assert torch.count_nonzero(result.projection.rgb_components[:, 1:]) == 0
+    assert torch.count_nonzero(result.projection.rgb_components[:, 2:]) == 0
 
 
-def test_streaming_pca_projection_is_independent_of_embedding_batch_size():
+def test_batched_pca_uses_the_same_approximate_fit_for_every_batch_size():
     generator = torch.Generator().manual_seed(12)
     embeddings = torch.rand(7, 4, 6, generator=generator)
 
@@ -77,11 +81,23 @@ def test_streaming_pca_projection_is_independent_of_embedding_batch_size():
         image_size=(8, 8),
         projection=fitted_three,
     )
+    direct = project_patch_embeddings(
+        embeddings,
+        patch_grid=(2, 2),
+        image_size=(8, 8),
+        foreground_threshold=0.4,
+        foreground_side="low",
+    )
 
     assert torch.equal(result_two.foreground_mask, result_three.foreground_mask)
+    assert torch.equal(result_two.foreground_mask, direct.foreground_mask)
     assert all(
         np.array_equal(np.asarray(first), np.asarray(second))
         for first, second in zip(result_two.images, result_three.images, strict=True)
+    )
+    assert all(
+        np.array_equal(np.asarray(first), np.asarray(second))
+        for first, second in zip(result_two.images, direct.images, strict=True)
     )
 
 

@@ -142,7 +142,9 @@ analysis:
   foreground_side: low
   projection: fit
   projection_path: null
-  save_projection: outputs/pca-projection.npz
+  save_projection: null
+  shared_groups:
+    - [examples/5.jpg, examples/6.jpg]
 ```
 
 | Setting | Default | Description | Example |
@@ -153,9 +155,18 @@ analysis:
 | `projection` | `fit` | Fit a shared projection or `load` one. | `load` |
 | `projection_path` | `null` | Saved `.npz` loaded when `projection: load`. | `pca.npz` |
 | `save_projection` | `null` | Save the fitted basis and normalization ranges. | `pca.npz` |
+| `shared_groups` | `null` | Groups of image paths that share a PCA fit. Unlisted images are fitted individually; without this setting, all images share one fit. | `[[examples/5.jpg, examples/6.jpg]]` |
 
 A loaded projection reuses its fitted foreground rule and color ranges, so new
 images remain in the same PCA color space.
+PCA components use the approximate low-rank method. The `dinov2-pca` image
+example groups the two horses so they share colors while other images get their
+own fit; it uses `low` to reproduce the earlier horse colors. The ungrouped
+`dinov2-pca` preset uses `high` for its shared eight-image fit. `shared_groups`
+is for image inputs with `projection: fit` and
+`save_projection: null`.
+Approximate PCA fitting holds each fit group's patch embeddings in memory; large
+groups or long video fit windows may need more memory.
 
 ## Runtime
 

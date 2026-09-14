@@ -31,6 +31,8 @@ analysis:
   projection: fit
   projection_path: null
   save_projection: null
+  shared_groups:
+    - [examples/5.jpg, examples/6.jpg]
 
 runtime:
   batch_size: 8
