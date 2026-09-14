@@ -35,7 +35,7 @@ def test_video_example_config_selects_one_input_and_video_mode(
     assert config.input.paths == (source,)
     assert config.analysis.method == method
     assert config.video is not None
-    assert config.video.sampling_rate == 10
+    assert config.video.sampling_rate == "auto"
     assert config.runtime.batch_size == 1
     assert config.output.directory == output
     assert config.output.grids

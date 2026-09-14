@@ -213,7 +213,7 @@ class VisualizationConfig:
 class VideoConfig:
     start_time: float = 0.0
     end_time: float | None = None
-    sampling_rate: float = 5.0
+    sampling_rate: float | Literal["auto"] = 5.0
     frame_limit: int | None = None
     output_resolution: tuple[int, int] | None = None
     pca_fit_frames: int = 32
@@ -489,9 +489,8 @@ def parse_config(
                     video_section.get("end_time"),
                     "video.end_time",
                 ),
-                sampling_rate=_positive_number(
+                sampling_rate=_video_sampling_rate(
                     video_section.get("sampling_rate", 5.0),
-                    "video.sampling_rate",
                 ),
                 frame_limit=_optional_positive_int(
                     video_section.get("frame_limit"),
@@ -1175,6 +1174,12 @@ def _positive_number(value: Any, field_name: str) -> float:
     if isinstance(value, bool) or not isinstance(value, int | float) or value <= 0:
         raise ValueError(f"{field_name} must be a positive number.")
     return float(value)
+
+
+def _video_sampling_rate(value: Any) -> float | Literal["auto"]:
+    if value == "auto":
+        return "auto"
+    return _positive_number(value, "video.sampling_rate")
 
 
 def _grid_format(value: Any) -> str:

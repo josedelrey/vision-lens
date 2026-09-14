@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -10,10 +11,13 @@ from vision_lens.config import VideoConfig, parse_config
 from vision_lens.models import LoadedModel, ModelMetadata
 from vision_lens.pipeline import run_pipeline_from_config
 from vision_lens.video import (
+    VideoMetadata,
     VideoWriter,
+    estimated_sample_count,
     iter_sampled_frames,
     iter_video_batches,
     probe_video,
+    resolve_sampling_rate,
 )
 
 av = pytest.importorskip("av")
@@ -34,6 +38,36 @@ def test_timestamp_sampling_and_batching_use_requested_times(tmp_path):
     assert [frame.timestamp for frame in frames] == pytest.approx([0.2, 0.45, 0.7])
     assert all(frame.source_timestamp + 1e-9 >= frame.timestamp for frame in frames)
     assert [len(batch.frames) for batch in batches] == [2, 1]
+
+
+def test_auto_sampling_rate_matches_source_fps(tmp_path):
+    source = tmp_path / "source.mp4"
+    _make_video(source, frame_count=6, frame_rate=6)
+    metadata = probe_video(source)
+    settings = VideoConfig(sampling_rate="auto")
+
+    frames = tuple(iter_sampled_frames(source, settings))
+
+    assert metadata.source_frame_rate == pytest.approx(6)
+    assert estimated_sample_count(metadata, settings) == 6
+    assert [frame.timestamp for frame in frames] == pytest.approx(
+        [index / 6 for index in range(6)]
+    )
+
+
+def test_auto_sampling_rate_requires_source_fps():
+    metadata = VideoMetadata(
+        path=Path("missing.mp4"),
+        width=64,
+        height=48,
+        duration=1.0,
+        source_frame_rate=None,
+    )
+
+    with pytest.raises(ValueError, match="requires a valid source video FPS"):
+        resolve_sampling_rate("auto", metadata.source_frame_rate)
+    with pytest.raises(ValueError, match="requires a valid source video FPS"):
+        estimated_sample_count(metadata, VideoConfig(sampling_rate="auto"))
 
 
 def test_video_writer_assigns_explicit_constant_playback_timing(tmp_path):
@@ -183,9 +217,12 @@ def test_short_pca_video_uses_frozen_projection_and_bounded_batches(
     assert manifest["run"]["audio"] == "omitted"
 
 
+@pytest.mark.parametrize(("sampling_rate", "expected_frames"), [(2, 2), ("auto", 4)])
 def test_gradcam_video_exports_overlays_with_one_fixed_class(
     monkeypatch,
     tmp_path,
+    sampling_rate,
+    expected_frames,
 ):
     from vision_lens import video_pipeline
 
@@ -216,7 +253,7 @@ def test_gradcam_video_exports_overlays_with_one_fixed_class(
                 "grids": True,
             },
             "video": {
-                "sampling_rate": 2,
+                "sampling_rate": sampling_rate,
                 "output_resolution": [64, 48],
                 "temporal_smoothing": 0.5,
             },
@@ -261,8 +298,9 @@ def test_gradcam_video_exports_overlays_with_one_fixed_class(
 
     result = run_pipeline_from_config(config)
 
-    assert target_classes == [[1], [1]]
-    assert result.processed_frames == 2
+    assert target_classes == [[1]] * expected_frames
+    assert result.processed_frames == expected_frames
+    assert result.frame_rate == (4 if sampling_rate == "auto" else 2)
     assert {path.name for path in result.output_paths} == {
         "clip_gradcam_overlay.mp4",
         "clip_gradcam_comparison.mp4",
@@ -271,6 +309,9 @@ def test_gradcam_video_exports_overlays_with_one_fixed_class(
         probe_video(path).duration == pytest.approx(1.0, abs=0.05)
         for path in result.output_paths
     )
+    manifest = json.loads((output_dir / "run-manifest.json").read_text())
+    assert manifest["configuration"]["video"]["sampling_rate"] == sampling_rate
+    assert manifest["run"]["sampling_rate"] == result.frame_rate
 
 
 def _make_video(path, *, frame_count, frame_rate):

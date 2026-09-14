@@ -276,7 +276,7 @@ analyzed together.
 video:
   start_time: 0.0
   end_time: null
-  sampling_rate: 5.0
+  sampling_rate: auto
   frame_limit: null
   output_resolution: [1280, 720]
   pca_fit_frames: 32
@@ -288,7 +288,7 @@ video:
 |---|---|---|---|
 | `start_time` | `0.0` | First source timestamp in seconds. | `2.5` |
 | `end_time` | `null` | Exclusive ending timestamp in seconds; `null` reads to the end. | `12.0` |
-| `sampling_rate` | `5.0` | Frames sampled per second and exact output playback FPS. | `10.0` |
+| `sampling_rate` | `5.0` | Frames sampled per second and output playback FPS. Set `auto` to match the source video's reported average FPS. | `auto` |
 | `frame_limit` | `null` | Maximum sampled frames after applying the time range. | `120` |
 | `output_resolution` | `null` | Even `[width, height]` for every output video; `null` uses the source size, rounded down to even dimensions when needed. | `[1280, 720]` |
 | `pca_fit_frames` | `32` | Maximum evenly distributed representative frames used to fit video PCA. | `64` |
@@ -299,6 +299,10 @@ Sampling follows decoded presentation timestamps rather than assuming the
 source has a constant frame rate. Output frames receive consecutive timestamps
 spaced at exactly `1 / sampling_rate`, making the playback duration explicitly
 `sampled_frames / sampling_rate`. The run manifest records both values.
+If `sampling_rate` is `auto` and the source has no valid reported FPS, the run
+stops with an error; set a numeric FPS for that video. For variable-frame-rate
+sources, `auto` uses the reported average FPS and still exports constant-FPS
+video.
 
 For attention and rollout, Vision Lens writes one stream per selected
 layer/head map. `output.heatmaps`, `output.overlays`, and `output.grids` select
