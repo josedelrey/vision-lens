@@ -45,7 +45,7 @@ pytestmark = [
             "dinov2-pca",
             {
                 "foreground_threshold": 0.5,
-                "foreground_side": "low",
+                "foreground_side": "high",
                 "projection": "fit",
                 "projection_path": None,
                 "save_projection": None,

@@ -304,7 +304,7 @@ PRESETS: dict[str, dict[str, Any]] = {
         "analysis": {
             "method": "patch_pca",
             "foreground_threshold": 0.5,
-            "foreground_side": "low",
+            "foreground_side": "high",
             "projection": "fit",
             "projection_path": None,
             "save_projection": None,

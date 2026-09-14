@@ -89,6 +89,7 @@ ANALYSIS_KEYS = {
         "projection",
         "projection_path",
         "save_projection",
+        "shared_groups",
     },
 }
 METHOD_TASKS = {
@@ -169,6 +170,7 @@ class AnalysisConfig:
     projection: Literal["fit", "load"] | None = None
     projection_path: Path | None = None
     save_projection: Path | None = None
+    shared_groups: tuple[tuple[Path, ...], ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -605,6 +607,24 @@ def validate_config(config: VisionLensConfig) -> None:
     ):
         raise ValueError("At least one output type must be enabled.")
     if method == "patch_pca":
+        groups = config.analysis.shared_groups
+        if groups is not None:
+            if config.video is not None:
+                raise ValueError("analysis.shared_groups is only supported for images.")
+            if config.analysis.projection == "load" or config.analysis.save_projection:
+                raise ValueError(
+                    "analysis.shared_groups requires projection='fit' and "
+                    "save_projection=null."
+                )
+            grouped_paths = [path for group in groups for path in group]
+            if len(grouped_paths) != len(set(grouped_paths)):
+                raise ValueError("analysis.shared_groups cannot repeat an image.")
+            unknown = set(grouped_paths) - set(config.input.paths)
+            if unknown:
+                raise ValueError(
+                    "analysis.shared_groups contains an image outside input: "
+                    f"{sorted(unknown)[0]}."
+                )
         if config.output.overlays:
             raise ValueError("output.overlays is not supported for patch PCA.")
         if (
@@ -827,6 +847,7 @@ def _parse_analysis(
             base_dir,
             "analysis.save_projection",
         ),
+        shared_groups=_shared_groups(section.get("shared_groups"), base_dir),
     )
 
 
@@ -851,6 +872,10 @@ def _analysis_to_dict(analysis: AnalysisConfig) -> dict[str, Any]:
         resolved["save_projection"] = (
             None if analysis.save_projection is None else str(analysis.save_projection)
         )
+        if analysis.shared_groups is not None:
+            resolved["shared_groups"] = [
+                [str(path) for path in group] for group in analysis.shared_groups
+            ]
     return resolved
 
 
@@ -1004,6 +1029,21 @@ def _optional_path(value: Any, base_dir: Path, field_name: str) -> Path | None:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{field_name} must be a non-empty path or null.")
     return _resolve_path(value, base_dir)
+
+
+def _shared_groups(value: Any, base_dir: Path) -> tuple[tuple[Path, ...], ...] | None:
+    if value is None:
+        return None
+    groups = _list(value, "analysis.shared_groups")
+    parsed = []
+    for group in groups:
+        paths = _list(group, "analysis.shared_groups entry")
+        if len(paths) < 2:
+            raise ValueError(
+                "Each analysis.shared_groups entry must contain at least two images."
+            )
+        parsed.append(tuple(_resolve_path(path, base_dir) for path in paths))
+    return tuple(parsed)
 
 
 def _non_negative_ints(values: list[Any], field_name: str) -> list[int]:

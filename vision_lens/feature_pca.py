@@ -181,13 +181,13 @@ def fit_patch_pca_projection_batches(
     foreground_threshold: float = 0.5,
     foreground_side: Literal["high", "low"] = "high",
 ) -> PatchPCAProjection:
-    """Fit one PCA projection without retaining every embedding batch in memory."""
+    """Fit one approximate PCA projection from all embedding batches."""
     if not 0 <= foreground_threshold <= 1:
         raise ValueError("foreground_threshold must be between 0 and 1.")
     if foreground_side not in {"high", "low"}:
         raise ValueError("foreground_side must be one of: high, low.")
 
-    foreground_components = _fit_streaming_components(batch_factory, components=1)
+    foreground_components = _fit_batched_components(batch_factory, components=1)
     foreground_minimum, foreground_maximum = _streaming_projected_bounds(
         batch_factory,
         foreground_components,
@@ -209,7 +209,7 @@ def fit_patch_pca_projection_batches(
             if mask.any():
                 yield flattened[mask]
 
-    rgb_components = _fit_streaming_components(
+    rgb_components = _fit_batched_components(
         foreground_batches,
         components=3,
         allow_empty=True,
@@ -369,62 +369,53 @@ def _fit_projection(
 
 
 def _fit_pca_projection(values: Any, components: int) -> tuple[Any, Any]:
-    components_matrix = _fit_streaming_components(
-        lambda: (values,),
-        components=components,
-    )
+    component_count = min(components, int(values.shape[0]), int(values.shape[1]))
+    if component_count == 0:
+        return (
+            values.new_zeros((values.shape[0], 0)),
+            values.new_zeros((values.shape[1], 0)),
+        )
+    if values.shape[0] == 1:
+        components_matrix = values.new_zeros((values.shape[1], component_count))
+        indices = torch.arange(component_count)
+        components_matrix[indices, indices] = 1
+        return values[:, :component_count], components_matrix
+
+    with torch.random.fork_rng(devices=[]):
+        torch.manual_seed(0)
+        _u, _s, vectors = torch.pca_lowrank(
+            values,
+            q=component_count,
+            center=True,
+        )
+    components_matrix = vectors[:, :component_count]
     return values @ components_matrix, components_matrix
 
 
-def _canonicalize_component_signs(components: Any) -> Any:
-    result = components.clone()
-    for index in range(int(result.shape[1])):
-        column = result[:, index]
-        pivot = int(column.abs().argmax())
-        if column[pivot] < 0:
-            result[:, index] = -column
-    return result
-
-
-def _fit_streaming_components(
+def _fit_batched_components(
     batch_factory: Callable[[], Iterable[Any]],
     *,
     components: int,
     allow_empty: bool = False,
     feature_count: int | None = None,
 ) -> Any:
-    count = 0
-    value_sum = None
+    batches = []
     for batch in batch_factory():
-        values = _flatten_embedding_batch(batch).double()
+        values = _flatten_embedding_batch(batch)
         if feature_count is None:
             feature_count = int(values.shape[1])
         elif int(values.shape[1]) != feature_count:
             raise ValueError("PCA embedding batches have inconsistent feature counts.")
-        count += int(values.shape[0])
-        batch_sum = values.sum(dim=0)
-        value_sum = batch_sum if value_sum is None else value_sum + batch_sum
+        batches.append(values)
 
-    if count == 0 or feature_count is None:
+    if not batches or feature_count is None or not any(len(batch) for batch in batches):
         if allow_empty and feature_count is not None:
             return torch.zeros((feature_count, components), dtype=torch.float32)
         raise ValueError("Cannot fit PCA from empty embedding batches.")
-
-    component_count = min(components, count, feature_count)
-    if count == 1:
-        return torch.zeros((feature_count, component_count), dtype=torch.float32)
-
-    component_count = min(component_count, count - 1)
-
-    mean = value_sum / count
-    covariance = torch.zeros((feature_count, feature_count), dtype=torch.float64)
-    for batch in batch_factory():
-        centered = _flatten_embedding_batch(batch).double() - mean
-        covariance += centered.transpose(0, 1) @ centered
-
-    _eigenvalues, eigenvectors = torch.linalg.eigh(covariance)
-    result = eigenvectors[:, -component_count:].flip(dims=(1,))
-    return _canonicalize_component_signs(result).float()
+    values = torch.cat(batches)
+    batches.clear()
+    _, result = _fit_pca_projection(values, components)
+    return result
 
 
 def _streaming_projected_bounds(

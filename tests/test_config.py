@@ -1,3 +1,4 @@
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -200,6 +201,61 @@ def test_patch_pca_defaults_and_overrides_are_in_analysis_section():
     assert overridden.analysis.foreground_side == "low"
 
 
+def test_patch_pca_shared_groups_resolve_paths_and_round_trip(tmp_path):
+    paths = [tmp_path / f"image-{index}.jpg" for index in range(3)]
+    for path in paths:
+        path.touch()
+    raw = _minimal_config(method="patch_pca")
+    raw["input"] = {"files": [path.name for path in paths]}
+    raw["analysis"]["shared_groups"] = [[paths[0].name, paths[2].name]]
+
+    config = parse_config(raw, base_dir=tmp_path)
+
+    assert config.analysis.shared_groups == ((paths[0], paths[2]),)
+    assert config_to_dict(config)["analysis"]["shared_groups"] == [
+        [str(paths[0]), str(paths[2])]
+    ]
+    assert parse_config(config_to_dict(config), base_dir=tmp_path) == config
+
+
+@pytest.mark.parametrize(
+    ("groups", "message"),
+    [
+        ([["one.jpg"]], "at least two"),
+        ([["one.jpg", "one.jpg"]], "cannot repeat"),
+        ([["one.jpg", "missing.jpg"]], "outside input"),
+        ("one.jpg", "must be a list"),
+    ],
+)
+def test_patch_pca_shared_groups_reject_invalid_members(tmp_path, groups, message):
+    source = tmp_path / "one.jpg"
+    source.touch()
+    raw = _minimal_config(method="patch_pca")
+    raw["input"] = {"files": [source.name]}
+    raw["analysis"]["shared_groups"] = groups
+
+    with pytest.raises(ValueError, match=message):
+        parse_config(raw, base_dir=tmp_path)
+
+
+def test_patch_pca_shared_groups_require_an_image_fit(tmp_path):
+    paths = [tmp_path / f"image-{index}.jpg" for index in range(2)]
+    for path in paths:
+        path.touch()
+    raw = _minimal_config(method="patch_pca")
+    raw["input"] = {"files": [str(path) for path in paths]}
+    raw["analysis"]["shared_groups"] = [[str(path) for path in paths]]
+
+    raw["analysis"]["save_projection"] = str(tmp_path / "projection.npz")
+    with pytest.raises(ValueError, match="requires projection='fit'"):
+        parse_config(raw)
+
+    raw["analysis"]["save_projection"] = None
+    raw["video"] = {}
+    with pytest.raises(ValueError, match="only supported for images"):
+        parse_config(raw)
+
+
 def test_load_config_resolves_yaml_and_overrides_from_project_root(
     tmp_path, monkeypatch
 ):
@@ -282,6 +338,18 @@ def test_presets_resolve_to_the_existing_example_workflows(preset_name, config_n
     preset_config = load_preset(preset_name, base_dir=repo_root)
     example_config = load_config(repo_root / "configs" / config_name)
 
+    if preset_name == "dinov2-pca":
+        assert preset_config.analysis.foreground_side == "high"
+        assert example_config.analysis.foreground_side == "low"
+        assert example_config.analysis.shared_groups == (
+            (repo_root / "examples/5.jpg", repo_root / "examples/6.jpg"),
+        )
+        example_config = replace(
+            example_config,
+            analysis=replace(
+                example_config.analysis, foreground_side="high", shared_groups=None
+            ),
+        )
     assert preset_config == example_config
 
 
