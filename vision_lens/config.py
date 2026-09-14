@@ -6,8 +6,6 @@ from typing import Any, Literal
 
 import yaml
 
-from vision_lens.presets import get_preset
-
 HeadFusion = Literal["mean", "max", "none"]
 Device = Literal["auto", "cpu", "cuda", "mps"]
 AttentionLayers = Literal["all"] | tuple[int, ...]
@@ -18,7 +16,6 @@ NormalizationMode = Literal["per_map", "shared", "fixed"]
 DEFAULT_INPUT_PATTERNS = ("*.jpg", "*.jpeg", "*.png", "*.webp")
 
 TOP_LEVEL_KEYS = {
-    "preset",
     "input",
     "model",
     "preprocessing",
@@ -89,7 +86,6 @@ ANALYSIS_KEYS = {
         "projection",
         "projection_path",
         "save_projection",
-        "shared_groups",
     },
 }
 METHOD_TASKS = {
@@ -170,7 +166,6 @@ class AnalysisConfig:
     projection: Literal["fit", "load"] | None = None
     projection_path: Path | None = None
     save_projection: Path | None = None
-    shared_groups: tuple[tuple[Path, ...], ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -232,7 +227,6 @@ class VisionLensConfig:
     runtime: RuntimeConfig
     visualization: VisualizationConfig
     output: OutputConfig
-    preset: str | None = None
     video: VideoConfig | None = None
 
     @property
@@ -271,7 +265,6 @@ class VisionLensConfig:
 def load_config(
     path: str | Path,
     *,
-    preset: str | None = None,
     overrides: dict[str, Any] | None = None,
 ) -> VisionLensConfig:
     config_path = Path(path).resolve()
@@ -280,25 +273,12 @@ def load_config(
 
     if not isinstance(raw_config, dict):
         raise ValueError("Config file must contain a YAML mapping at the top level.")
+    _validate_keys(raw_config)
+    _require_complete_config(raw_config)
 
     return parse_config(
         raw_config,
         base_dir=_project_root(config_path.parent),
-        preset=preset,
-        overrides=overrides,
-    )
-
-
-def load_preset(
-    name: str,
-    *,
-    base_dir: Path | None = None,
-    overrides: dict[str, Any] | None = None,
-) -> VisionLensConfig:
-    return parse_config(
-        {},
-        base_dir=base_dir,
-        preset=name,
         overrides=overrides,
     )
 
@@ -307,15 +287,10 @@ def parse_config(
     raw_config: dict[str, Any],
     base_dir: Path | None = None,
     *,
-    preset: str | None = None,
     overrides: dict[str, Any] | None = None,
 ) -> VisionLensConfig:
     base = _project_root(Path.cwd()) if base_dir is None else Path(base_dir).resolve()
-    preset_name = _preset_name(raw_config, preset)
-    resolved = get_preset(preset_name) if preset_name is not None else {}
-    user_config = {key: value for key, value in raw_config.items() if key != "preset"}
-    resolved = _deep_merge(resolved, user_config)
-    resolved = _deep_merge(resolved, overrides or {})
+    resolved = _deep_merge(raw_config, overrides or {})
     _validate_keys(resolved)
 
     input_section = _section(resolved, "input")
@@ -516,7 +491,6 @@ def parse_config(
                 ),
             )
         ),
-        preset=preset_name,
     )
     validate_config(config)
     return config
@@ -607,24 +581,6 @@ def validate_config(config: VisionLensConfig) -> None:
     ):
         raise ValueError("At least one output type must be enabled.")
     if method == "patch_pca":
-        groups = config.analysis.shared_groups
-        if groups is not None:
-            if config.video is not None:
-                raise ValueError("analysis.shared_groups is only supported for images.")
-            if config.analysis.projection == "load" or config.analysis.save_projection:
-                raise ValueError(
-                    "analysis.shared_groups requires projection='fit' and "
-                    "save_projection=null."
-                )
-            grouped_paths = [path for group in groups for path in group]
-            if len(grouped_paths) != len(set(grouped_paths)):
-                raise ValueError("analysis.shared_groups cannot repeat an image.")
-            unknown = set(grouped_paths) - set(config.input.paths)
-            if unknown:
-                raise ValueError(
-                    "analysis.shared_groups contains an image outside input: "
-                    f"{sorted(unknown)[0]}."
-                )
         if config.output.overlays:
             raise ValueError("output.overlays is not supported for patch PCA.")
         if (
@@ -647,8 +603,6 @@ def validate_config(config: VisionLensConfig) -> None:
 
 def config_to_dict(config: VisionLensConfig) -> dict[str, Any]:
     resolved: dict[str, Any] = {}
-    if config.preset is not None:
-        resolved["preset"] = config.preset
     resolved["input"] = {
         "files": [str(path) for path in config.input.paths],
         "folders": [],
@@ -847,7 +801,6 @@ def _parse_analysis(
             base_dir,
             "analysis.save_projection",
         ),
-        shared_groups=_shared_groups(section.get("shared_groups"), base_dir),
     )
 
 
@@ -872,10 +825,6 @@ def _analysis_to_dict(analysis: AnalysisConfig) -> dict[str, Any]:
         resolved["save_projection"] = (
             None if analysis.save_projection is None else str(analysis.save_projection)
         )
-        if analysis.shared_groups is not None:
-            resolved["shared_groups"] = [
-                [str(path) for path in group] for group in analysis.shared_groups
-            ]
     return resolved
 
 
@@ -883,6 +832,32 @@ def _validate_keys(config: dict[str, Any]) -> None:
     _reject_unknown_keys("top level", config, TOP_LEVEL_KEYS)
     for section_name, allowed in SECTION_KEYS.items():
         _reject_unknown_keys(section_name, _section(config, section_name), allowed)
+
+
+def _require_complete_config(config: dict[str, Any]) -> None:
+    required_sections = TOP_LEVEL_KEYS - {"video"}
+    missing_sections = sorted(required_sections - config.keys())
+    if missing_sections:
+        raise ValueError(f"Missing config section(s): {', '.join(missing_sections)}.")
+
+    sections = required_sections | ({"video"} if "video" in config else set())
+    for section_name in sorted(sections):
+        section = _section(config, section_name)
+        if section_name == "analysis":
+            method = _analysis_method(section.get("method"))
+            required_keys = ANALYSIS_KEYS[method]
+        elif section_name == "input":
+            required_keys = SECTION_KEYS[section_name] - {"paths"}
+            if "paths" in section and "files" not in section:
+                required_keys = required_keys - {"files"} | {"paths"}
+        else:
+            required_keys = SECTION_KEYS[section_name]
+        missing = sorted(required_keys - section.keys())
+        if missing:
+            raise ValueError(
+                f"Missing setting(s) in {section_name}: {', '.join(missing)}. "
+                "Specify every setting explicitly in the YAML file."
+            )
 
 
 def _reject_unknown_keys(
@@ -919,17 +894,6 @@ def _validate_known_attention_constraints(config: VisionLensConfig) -> None:
                 f"analysis.heads contains {invalid_heads}; model "
                 f"{config.model.name!r} has heads 0 through {head_count - 1}."
             )
-
-
-def _preset_name(raw_config: dict[str, Any], selected: str | None) -> str | None:
-    configured = raw_config.get("preset")
-    if configured is not None and (
-        not isinstance(configured, str) or not configured.strip()
-    ):
-        raise ValueError("preset must be a non-empty string.")
-    if selected is not None and (not isinstance(selected, str) or not selected.strip()):
-        raise ValueError("preset must be a non-empty string.")
-    return selected if selected is not None else configured
 
 
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
@@ -1029,21 +993,6 @@ def _optional_path(value: Any, base_dir: Path, field_name: str) -> Path | None:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{field_name} must be a non-empty path or null.")
     return _resolve_path(value, base_dir)
-
-
-def _shared_groups(value: Any, base_dir: Path) -> tuple[tuple[Path, ...], ...] | None:
-    if value is None:
-        return None
-    groups = _list(value, "analysis.shared_groups")
-    parsed = []
-    for group in groups:
-        paths = _list(group, "analysis.shared_groups entry")
-        if len(paths) < 2:
-            raise ValueError(
-                "Each analysis.shared_groups entry must contain at least two images."
-            )
-        parsed.append(tuple(_resolve_path(path, base_dir) for path in paths))
-    return tuple(parsed)
 
 
 def _non_negative_ints(values: list[Any], field_name: str) -> list[int]:

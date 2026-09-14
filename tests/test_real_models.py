@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from vision_lens.config import load_preset
+from vision_lens.config import load_config
 from vision_lens.pipeline import run_pipeline_from_config
 
 REPO_ROOT = Path(__file__).parents[1]
@@ -19,30 +19,30 @@ pytestmark = [
 
 
 @pytest.mark.parametrize(
-    ("preset", "analysis_overrides", "expected_suffix"),
+    ("config_name", "analysis_overrides", "expected_suffix"),
     [
         (
-            "dino-vits8-attention",
+            "vit_attention.example.yaml",
             {"layers": [11], "heads": None, "head_fusion": "mean"},
             "_heatmap.png",
         ),
         (
-            "dinov2-reg4-attention",
+            "vit_attention.dinov2_reg4.example.yaml",
             {"layers": [11], "heads": None, "head_fusion": "mean"},
             "_heatmap.png",
         ),
         (
-            "dinov2-reg4-rollout",
+            "vit_rollout.dinov2_reg4.example.yaml",
             {"layers": [11], "heads": None, "head_fusion": "mean"},
             "_heatmap.png",
         ),
         (
-            "resnet50-gradcam",
+            "gradcam.example.yaml",
             {"target_layer": "layer4", "target_class": None},
             "_heatmap.png",
         ),
         (
-            "dinov2-pca",
+            "patch_pca.dinov2.example.yaml",
             {
                 "foreground_threshold": 0.5,
                 "foreground_side": "high",
@@ -55,21 +55,20 @@ pytestmark = [
     ],
 )
 def test_pretrained_model_pipeline_smoke(
-    preset,
+    config_name,
     analysis_overrides,
     expected_suffix,
     tmp_path,
 ):
-    config = load_preset(
-        preset,
-        base_dir=REPO_ROOT,
+    config = load_config(
+        REPO_ROOT / "configs" / config_name,
         overrides={
             "input": {"files": ["examples/1.jpg"], "limit": 1},
             "preprocessing": {"image_size": 224},
             "analysis": analysis_overrides,
             "runtime": {"batch_size": 1, "device": "cpu"},
             "output": {
-                "directory": str(tmp_path / preset),
+                "directory": str(tmp_path / config_name),
                 "heatmaps": True,
                 "overlays": False,
                 "grids": False,

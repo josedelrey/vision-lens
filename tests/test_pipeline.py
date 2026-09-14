@@ -10,7 +10,7 @@ from vision_lens.attention import AttentionExtractionResult, LayerAttentionMaps
 from vision_lens.config import (
     OutputConfig,
     VisualizationConfig,
-    load_preset,
+    load_config,
     parse_config,
 )
 from vision_lens.feature_pca import PatchPCAResult
@@ -184,10 +184,12 @@ def test_rollout_grid_caps_requested_columns_to_available_layer_pairs():
     assert labels == ["layer 0", "layer 1", "rollout 0", "rollout 1"]
 
 
-def test_rollout_preset_dispatches_to_rollout_pipeline(monkeypatch):
+def test_rollout_config_dispatches_to_rollout_pipeline(monkeypatch):
     from vision_lens import pipeline
 
-    config = load_preset("dinov2-reg4-rollout")
+    config = load_config(
+        Path(__file__).parents[1] / "configs/vit_rollout.dinov2_reg4.example.yaml"
+    )
     sentinel = object()
     monkeypatch.setattr(
         pipeline,
@@ -405,95 +407,6 @@ def test_patch_pca_pipeline_fits_and_transforms_multiple_bounded_batches(
         "image-2_patch_pca.png",
     }
     assert (output_dir / "run-manifest.json").is_file()
-
-
-def test_patch_pca_fits_listed_images_together_and_other_images_alone(
-    monkeypatch, tmp_path
-):
-    from vision_lens import image_pipeline, processing
-
-    paths = tuple(tmp_path / f"image-{index}.jpg" for index in range(3))
-    for path in paths:
-        Image.new("RGB", (4, 4), "white").save(path)
-    config = parse_config(
-        {
-            "model": {
-                "architecture": "vit",
-                "backend": "timm",
-                "name": "mock_vit",
-                "pretrained": False,
-            },
-            "input": {"files": [str(path) for path in paths]},
-            "output": {"directory": str(tmp_path / "outputs"), "grids": False},
-            "preprocessing": {"image_size": 4},
-            "analysis": {
-                "method": "patch_pca",
-                "foreground_side": "low",
-                "shared_groups": [[str(paths[0]), str(paths[2])]],
-            },
-            "runtime": {"device": "cpu", "batch_size": 2},
-        }
-    )
-    loaded_model = LoadedModel(
-        model=object(),
-        metadata=ModelMetadata(
-            architecture="vit",
-            backend="timm",
-            name="mock_vit",
-            pretrained=False,
-            device="cpu",
-            input_size=(3, 4, 4),
-            image_size=(4, 4),
-            patch_size=(2, 2),
-            num_classes=2,
-            data_config={"mean": (0.0, 0.0, 0.0), "std": (1.0, 1.0, 1.0)},
-        ),
-    )
-    next_image = 0
-    fitted_groups = []
-    original_project = image_pipeline.project_patch_embeddings
-
-    def fake_embeddings(_model, inputs, _patch_grid):
-        nonlocal next_image
-        values = torch.stack(
-            [
-                torch.arange(20, dtype=torch.float32).reshape(4, 5)
-                + (next_image + index) * 20
-                for index in range(len(inputs))
-            ]
-        )
-        next_image += len(inputs)
-        return values
-
-    def record_project(embeddings, **kwargs):
-        fitted_groups.append(tuple(embeddings[:, 0, 0].tolist()))
-        return original_project(embeddings, **kwargs)
-
-    monkeypatch.setattr(image_pipeline, "load_model", lambda _config: loaded_model)
-    monkeypatch.setattr(
-        processing,
-        "load_images",
-        lambda batch_paths, workers=0: [
-            Image.new("RGB", (4, 4), "white") for _ in batch_paths
-        ],
-    )
-    monkeypatch.setattr(
-        image_pipeline,
-        "build_batch_preprocessor",
-        lambda *_args, **_kwargs: lambda _image: torch.ones(3, 4, 4),
-    )
-    monkeypatch.setattr(image_pipeline, "extract_patch_embeddings", fake_embeddings)
-    monkeypatch.setattr(image_pipeline, "project_patch_embeddings", record_project)
-
-    result = run_patch_pca_from_config(config)
-
-    assert fitted_groups == [(0.0, 40.0), (20.0,)]
-    assert result.processed_inputs == 3
-    assert {path.name for path in result.output_paths} == {
-        "image-0_patch_pca.png",
-        "image-1_patch_pca.png",
-        "image-2_patch_pca.png",
-    }
 
 
 def test_items_per_grid_splits_gradcam_comparison_files(tmp_path):

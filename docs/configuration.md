@@ -1,22 +1,22 @@
 # Configuration
 
-Vision Lens uses seven YAML sections: `input`, `model`, `preprocessing`,
-`analysis`, `runtime`, `visualization`, and `output`. A top-level `preset` is
-optional. Unknown keys and incompatible settings are rejected before model
-weights are loaded.
+Vision Lens requires seven YAML sections: `input`, `model`, `preprocessing`,
+`analysis`, `runtime`, `visualization`, and `output`. A video run also requires
+the `video` section. Every setting in each section must be present, even if its
+value is `null` or an empty list. Unknown, missing, and incompatible settings
+are rejected before model weights are loaded. Copy an example from `configs/`
+to start a new workflow.
 
-All relative paths in presets, YAML files, and `--set` overrides are resolved
+All relative paths in YAML files and `--set` overrides are resolved
 from the project root (the nearest ancestor containing `pyproject.toml`). The
 loader searches upward from the config file first, then from the working
 directory. If neither is inside a project, paths use the working directory.
 Absolute paths remain unchanged. The path given to `--config` itself is a
 normal shell path; this rule applies to paths *inside* the configuration.
-Settings are merged in this order, with later values winning:
-
-1. Built-in defaults.
-2. The selected preset.
-3. Values in the YAML file.
-4. Repeated CLI `--set` overrides.
+CLI `--set` values override the YAML values. The YAML must contain every
+setting before overrides are applied. The “Example value” column below shows
+common values; the “Parser default” column describes the Python parser's
+programmatic defaults, not values that a YAML file may omit.
 
 ## Input
 
@@ -29,7 +29,7 @@ input:
   limit: 100
 ```
 
-| Setting | Default | Description | Example |
+| Setting | Parser default | Description | Example |
 |---|---|---|---|
 | `files` | `[]` | Explicit image files, kept in the listed order. | `[cat.jpg]` |
 | `folders` | `[]` | Folders searched for matching files. | `[photos]` |
@@ -52,7 +52,7 @@ model:
   options: {}
 ```
 
-| Setting | Default | Description | Example |
+| Setting | Parser default | Description | Example |
 |---|---|---|---|
 | `architecture` | required | Model family: `vit` or `cnn`. | `vit` |
 | `backend` | required | Loader: `timm` or `torchvision`. | `timm` |
@@ -77,7 +77,7 @@ preprocessing:
   std: null
 ```
 
-| Setting | Default | Description | Example |
+| Setting | Parser default | Description | Example |
 |---|---|---|---|
 | `image_size` | `672` | Square model input width and height for images; longest inference side for video. | `224` |
 | `resize` | `stretch` | Image resize mode: `stretch`, `shortest`, `longest`, or `none`. Video always uses aspect-ratio resizing. | `longest` |
@@ -111,7 +111,7 @@ analysis:
   head_fusion: mean
 ```
 
-| Setting | Default | Description | Example |
+| Setting | Parser default | Description | Example |
 |---|---|---|---|
 | `method` | `attention` | `attention` or `rollout`. | `rollout` |
 | `layers` | required | Layer indices or `all`. | `[2, 5, 8, 11]` |
@@ -127,7 +127,7 @@ analysis:
   target_class: 207
 ```
 
-| Setting | Default | Description | Example |
+| Setting | Parser default | Description | Example |
 |---|---|---|---|
 | `method` | required | Must be `gradcam`. | `gradcam` |
 | `target_layer` | `null` | Module path; `null` chooses the last convolution. | `layer4` |
@@ -143,11 +143,9 @@ analysis:
   projection: fit
   projection_path: null
   save_projection: null
-  shared_groups:
-    - [examples/5.jpg, examples/6.jpg]
 ```
 
-| Setting | Default | Description | Example |
+| Setting | Parser default | Description | Example |
 |---|---|---|---|
 | `method` | required | Must be `patch_pca`. | `patch_pca` |
 | `foreground_threshold` | `0.5` | Normalized first-component cutoff. | `0.6` |
@@ -155,18 +153,17 @@ analysis:
 | `projection` | `fit` | Fit a shared projection or `load` one. | `load` |
 | `projection_path` | `null` | Saved `.npz` loaded when `projection: load`. | `pca.npz` |
 | `save_projection` | `null` | Save the fitted basis and normalization ranges. | `pca.npz` |
-| `shared_groups` | `null` | Groups of image paths that share a PCA fit. Unlisted images are fitted individually; without this setting, all images share one fit. | `[[examples/5.jpg, examples/6.jpg]]` |
 
 A loaded projection reuses its fitted foreground rule and color ranges, so new
 images remain in the same PCA color space.
-PCA components use the approximate low-rank method. The `dinov2-pca` image
-example groups the two horses so they share colors while other images get their
-own fit; it uses `low` to reproduce the earlier horse colors. The ungrouped
-`dinov2-pca` preset uses `high` for its shared eight-image fit. `shared_groups`
-is for image inputs with `projection: fit` and
-`save_projection: null`.
-Approximate PCA fitting holds each fit group's patch embeddings in memory; large
-groups or long video fit windows may need more memory.
+PCA components use the approximate low-rank method. All images selected by one
+configuration share a PCA fit, threshold, and foreground side. The image example
+selects `examples/5.jpg` and `examples/6.jpg` with `foreground_side: low` to
+reproduce the earlier horse colors. To fit another image independently, copy
+the YAML and select only that image; this also lets you choose its own
+`foreground_threshold` and `foreground_side`. Approximate PCA fitting holds the
+selected patch embeddings in memory; large groups or long video fit windows
+may need more memory.
 
 ## Runtime
 
@@ -179,7 +176,7 @@ runtime:
   seed: 42
 ```
 
-| Setting | Default | Description | Example |
+| Setting | Parser default | Description | Example |
 |---|---|---|---|
 | `batch_size` | `8` | Maximum images read, preprocessed, and analyzed together. | `4` |
 | `device` | `auto` | `auto`, `cpu`, `cuda`, or `mps`. | `cuda` |
@@ -193,10 +190,11 @@ then reads, preprocesses, analyzes, renders, and exports no more than
 result object for single-batch runs; multi-batch runs report `processed_inputs`
 without retaining the entire collection in memory.
 
-PCA keeps the historical calculation for a single batch. Larger PCA runs stage
-one embedding batch at a time, fit one projection and one set of normalization
-bounds over the complete input set, then transform each staged batch. This
-keeps colors comparable without holding every image or embedding in memory.
+PCA fits one projection and one set of normalization bounds across all images
+selected by the configuration. Larger runs stage embeddings one batch at a
+time before fitting and rendering. This keeps colors comparable without
+holding every source image in memory, though the approximate fit still loads
+all selected patch embeddings.
 `shared` attention, rollout, and Grad-CAM normalization similarly uses a
 bounded fitting pass before rendering. CPU runs reject `float16` (use
 `bfloat16` instead), and MPS runs reject `bfloat16`.
@@ -220,7 +218,7 @@ visualization:
   normalization_range: null
 ```
 
-| Setting | Default | Description | Example |
+| Setting | Parser default | Description | Example |
 |---|---|---|---|
 | `tile_size` | `null` | `[width, height]`; `null` retains each workflow's historical size. | `[320, 240]` |
 | `columns` | `null` | Grid columns; `null` retains the workflow layout. | `2` |
@@ -253,7 +251,7 @@ output:
   overwrite: replace
 ```
 
-| Setting | Default | Description | Example |
+| Setting | Parser default | Description | Example |
 |---|---|---|---|
 | `directory` | required | Output folder. | `outputs/run-1` |
 | `heatmaps` | `true` | Export heatmaps or PCA color maps. | `false` |
@@ -262,7 +260,7 @@ output:
 | `raw_arrays` | `false` | Export analysis arrays without rendering. | `true` |
 | `image_format` | `png` | `png`, `jpeg`, `tiff`, or `webp`. | `webp` |
 | `raw_format` | `npy` | `npy` or compressed `npz`. | `npz` |
-| `overwrite` | `error` | `replace`, `error`, or `skip` existing files. Presets explicitly retain `replace`. | `error` |
+| `overwrite` | `error` | `replace`, `error`, or `skip` existing files. | `error` |
 
 At least one output type must be enabled.
 
@@ -270,9 +268,8 @@ Every completed image or single-video run also writes `run-manifest.json` in the
 It records the fully resolved configuration, model identity and input size,
 runtime and package versions, input paths with stable collision-safe IDs and
 file metadata, output paths, and UTC start/completion times. Custom
-configurations default to `overwrite: error`, so an existing manifest stops the
-run before the model is loaded. The compatibility presets explicitly use
-`overwrite: replace` to retain their earlier rerun behavior.
+configurations can set `overwrite: error`, so an existing manifest stops the
+run before the model is loaded. The included examples use `overwrite: replace`.
 
 ## Video
 
@@ -314,7 +311,7 @@ video:
   codec: libx264
 ```
 
-| Setting | Default | Description | Example |
+| Setting | Parser default | Description | Example |
 |---|---|---|---|
 | `start_time` | `0.0` | First source timestamp in seconds. | `2.5` |
 | `end_time` | `null` | Exclusive ending timestamp in seconds; `null` reads to the end. | `12.0` |

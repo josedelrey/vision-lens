@@ -159,11 +159,7 @@ def run_patch_pca_from_config(
     output_paths: list[Path] = []
     retained_patch_pca = None
 
-    if config.analysis.shared_groups is not None:
-        output_paths.extend(
-            _run_grouped_patch_pca(config, loaded_model, transform, patch_grid, labels)
-        )
-    elif projection is not None:
+    if projection is not None:
         for input_batch in _tracked_input_batches(config, labels, "Project images"):
             batch = preprocess_batch(
                 input_batch,
@@ -313,109 +309,6 @@ def run_patch_pca_from_config(
         output_paths=output_paths_tuple,
         processed_inputs=len(config.images.paths),
     )
-
-
-def _run_grouped_patch_pca(
-    config: VisionLensConfig,
-    loaded_model: LoadedModel,
-    transform: Any,
-    patch_grid: tuple[int, int],
-    labels: tuple[str, ...],
-) -> tuple[Path, ...]:
-    assert config.analysis.shared_groups is not None
-    assert config.patch_pca is not None
-    paths = config.images.paths
-    index_by_path = {path: index for index, path in enumerate(paths)}
-    groups = [
-        tuple(index_by_path[path] for path in group)
-        for group in config.analysis.shared_groups
-    ]
-    grouped_indices = {index for group in groups for index in group}
-    groups.extend(
-        (index,) for index in range(len(paths)) if index not in grouped_indices
-    )
-
-    with TemporaryDirectory(prefix="vision-lens-pca-") as temporary_directory:
-        staged_paths = [
-            Path(temporary_directory) / f"{index}.npy" for index in range(len(paths))
-        ]
-        for input_batch in _tracked_input_batches(config, labels, "Extract embeddings"):
-            batch = preprocess_batch(
-                input_batch, transform, loaded_model, include_display_images=False
-            )
-            embeddings = extract_patch_embeddings(
-                loaded_model.model, batch.inputs, patch_grid
-            )
-            start = input_batch.index * config.runtime.batch_size
-            for index, embedding in enumerate(embeddings, start=start):
-                np.save(staged_paths[index], embedding.numpy())
-
-        results: list[PatchPCAResult | None] = [None] * len(paths)
-        for group in track_units(
-            groups,
-            total=len(groups),
-            description="Fit PCA groups",
-            unit="group",
-            size=lambda _group: 1,
-        ):
-            embeddings = torch.stack(
-                [
-                    torch.from_numpy(np.load(staged_paths[index], allow_pickle=False))
-                    for index in group
-                ]
-            )
-            projected = project_patch_embeddings(
-                embeddings,
-                patch_grid=patch_grid,
-                image_size=loaded_model.metadata.image_size,
-                foreground_threshold=config.patch_pca.foreground_threshold,
-                foreground_side=config.patch_pca.foreground_side,
-            )
-            for position, index in enumerate(group):
-                results[index] = PatchPCAResult(
-                    patch_embeddings=projected.patch_embeddings[
-                        position : position + 1
-                    ],
-                    foreground_mask=projected.foreground_mask[position : position + 1],
-                    images=(projected.images[position],),
-                    patch_grid=patch_grid,
-                    image_size=projected.image_size,
-                )
-
-    page_offsets, total_grid_pages = _grid_page_plan(
-        len(paths), config.runtime.batch_size, config.visualization.items_per_grid
-    )
-    output_paths = []
-    for batch_index, start in enumerate(
-        range(0, len(paths), config.runtime.batch_size)
-    ):
-        stop = min(start + config.runtime.batch_size, len(paths))
-        batch_results = results[start:stop]
-        assert all(result is not None for result in batch_results)
-        combined = PatchPCAResult(
-            patch_embeddings=torch.cat(
-                [result.patch_embeddings for result in batch_results]
-            ),
-            foreground_mask=torch.cat(
-                [result.foreground_mask for result in batch_results]
-            ),
-            images=tuple(result.images[0] for result in batch_results),
-            patch_grid=patch_grid,
-            image_size=loaded_model.metadata.image_size,
-        )
-        output_paths.extend(
-            export_patch_pca_outputs(
-                combined,
-                image_paths=paths[start:stop],
-                output_dir=config.output.directory,
-                output_config=config.output,
-                visualization_config=config.visualization,
-                input_labels=labels[start:stop],
-                grid_page_offset=page_offsets[batch_index],
-                total_grid_pages=total_grid_pages,
-            )
-        )
-    return tuple(output_paths)
 
 
 def run_vit_rollout_comparison(

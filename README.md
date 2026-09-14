@@ -38,23 +38,23 @@ all dependencies), then commit both files.
 
 ## Quick starts
 
-Run one image through the DINO attention preset:
+Run one image through the DINO attention configuration:
 
 ```bash
-uv run vision-lens --preset dino-vits8-attention --set input.limit=1
+uv run vision-lens --config configs/vit_attention.example.yaml --set input.limit=1
 ```
 
 Reproduce the DINOv2 PCA example:
 
 ```bash
-uv run python scripts/run_dinov2_pca.py
+uv run vision-lens --config configs/patch_pca.dinov2.example.yaml
 ```
 
 Runs print model-loading status and show `tqdm` progress by image or sampled
 video frame in an interactive terminal. Multi-pass work has separate bars for
 fitting and rendering; non-interactive logs keep only the status lines.
 
-The DINOv2 PCA preset fits one shared projection across both example images,
+The DINOv2 PCA configuration fits one shared projection across the two horse images,
 so foreground selection and colors remain comparable:
 
 > **PCA result placeholder**
@@ -70,25 +70,10 @@ resolved configuration, model identity, versions, inputs, and generated files.
 
 ## Configure a workflow
 
-Use a preset as a stable starting point and override only what changes:
-
-```yaml
-preset: dinov2-reg4-attention
-
-input:
-  files: [photo.jpg]
-
-runtime:
-  device: auto
-  batch_size: 4
-
-visualization:
-  overlay_alpha: 0.6
-
-output:
-  directory: results
-  overwrite: error
-```
+Copy an example from `configs/` and edit it for your run. Every setting must
+appear in the YAML, including settings set to `null`. For patch PCA, put only
+the images that should share one fit in a configuration file. Images needing
+different thresholds or `foreground_side` values need separate configurations.
 
 Validate or inspect the resolved configuration before loading a model:
 
@@ -98,26 +83,23 @@ uv run vision-lens resolve --config workflow.yaml
 uv run vision-lens run --config workflow.yaml
 ```
 
-Resolution order is **defaults → preset → YAML → CLI overrides**. Relative
-paths in presets, YAML files, and CLI overrides are resolved from the project
+CLI `--set` values override the complete YAML configuration. Relative
+paths in YAML files and CLI overrides are resolved from the project
 root (the nearest ancestor containing `pyproject.toml`), not the config file's
 directory. If no project root is found, they use the current working directory.
 
 ## Included workflows
 
-| Preset | Analysis | Model | Input size |
+| Example configuration | Analysis | Model | Input size |
 |---|---|---|---:|
-| `dino-vits8-attention` | attention | DINO ViT-S/8 | 224 |
-| `dinov2-reg4-attention` | attention | DINOv2 ViT-S/14 + registers | 672 |
-| `dinov2-reg4-rollout` | rollout | DINOv2 ViT-S/14 + registers | 672 |
-| `resnet50-gradcam` | Grad-CAM | ResNet-50 | 672 |
-| `dinov2-pca` | patch PCA | DINOv2 ViT-B/14 | 672 |
-
-Presets preserve the established rendering, including no-crop resizing,
-per-map normalization, opacity, colors, grids, and PCA projection behavior.
+| `vit_attention.example.yaml` | attention | DINO ViT-S/8 | 224 |
+| `vit_attention.dinov2_reg4.example.yaml` | attention | DINOv2 ViT-S/14 + registers | 672 |
+| `vit_rollout.dinov2_reg4.example.yaml` | rollout | DINOv2 ViT-S/14 + registers | 672 |
+| `gradcam.example.yaml` | Grad-CAM | ResNet-50 | 672 |
+| `patch_pca.dinov2.example.yaml` | patch PCA | DINOv2 ViT-B/14 | 672 |
 
 The [configuration reference](https://github.com/josedelrey/vision-lens/blob/main/docs/configuration.md)
-documents every setting, default, validation rule, and CLI override.
+documents every setting, validation rule, and CLI override.
 
 Attention and Grad-CAM visualizations are diagnostic views, not causal
 explanations. Video processing analyzes sampled frames independently; source
