@@ -1350,6 +1350,7 @@ dependencies = [
     { name = "timm" },
     { name = "torch" },
     { name = "torchvision" },
+    { name = "tqdm" },
 ]
 
 [package.optional-dependencies]
@@ -1373,6 +1374,7 @@ requires-dist = [
     { name = "timm", specifier = ">=1.0" },
     { name = "torch", specifier = ">=2.2" },
     { name = "torchvision", specifier = ">=0.17" },
+    { name = "tqdm", specifier = ">=4.66" },
 ]
 provides-extras = ["video"]
 

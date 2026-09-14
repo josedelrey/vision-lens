@@ -35,6 +35,7 @@ from vision_lens.processing import (
     build_batch_preprocessor,
     preprocess_batch,
 )
+from vision_lens.progress import status, track_video_batches
 from vision_lens.video import (
     SampledVideoFrame,
     VideoMetadata,
@@ -76,8 +77,15 @@ def run_video_from_config(config: VisionLensConfig) -> VideoPipelineResult:
     require_video_dependencies()
     source_path = config.input.paths[0]
     source = probe_video(source_path)
+    sample_count = estimated_sample_count(source, config.video)
+    status(
+        f"{config.analysis.method}: {source_path.name} "
+        f"at {config.video.sampling_rate:g} FPS"
+    )
     _apply_seed(config.runtime.seed)
+    status(f"Loading model {config.model.name}")
     loaded_model = load_model(config)
+    status(f"Model ready on {loaded_model.metadata.device}")
     _validate_gradcam_class(config, loaded_model)
     transform = build_batch_preprocessor(loaded_model, config.preprocessing)
     projection = _video_pca_projection(config, loaded_model, transform, source)
@@ -85,6 +93,7 @@ def run_video_from_config(config: VisionLensConfig) -> VideoPipelineResult:
         config,
         loaded_model,
         transform,
+        source,
     )
 
     resolution = resolved_output_resolution(source, config.video.output_resolution)
@@ -92,10 +101,14 @@ def run_video_from_config(config: VisionLensConfig) -> VideoPipelineResult:
     smoothing_state: dict[str, Any] = {}
     processed_frames = 0
     try:
-        for frame_batch in iter_video_batches(
-            source_path,
-            config.video,
-            config.runtime.batch_size,
+        for frame_batch in track_video_batches(
+            iter_video_batches(
+                source_path,
+                config.video,
+                config.runtime.batch_size,
+            ),
+            total=sample_count,
+            description="Analyze video",
         ):
             batch = _preprocess_frames(
                 frame_batch.index,
@@ -344,10 +357,14 @@ def _video_pca_projection(
     staged_paths = []
     staged_frame_count = 0
     with TemporaryDirectory(prefix="vision-lens-video-pca-") as temporary_directory:
-        for frame_batch in iter_video_batches(
-            config.input.paths[0],
-            config.video,
-            config.runtime.batch_size,
+        for frame_batch in track_video_batches(
+            iter_video_batches(
+                config.input.paths[0],
+                config.video,
+                config.runtime.batch_size,
+            ),
+            total=sample_count,
+            description="Scan PCA frames",
         ):
             selected_frames = tuple(
                 frame
@@ -391,6 +408,7 @@ def _video_pca_projection(
             for path in staged_paths:
                 yield np.load(path, allow_pickle=False)
 
+        status("Fitting PCA projection")
         return fit_patch_pca_projection_batches(
             embedding_batches,
             foreground_threshold=config.analysis.foreground_threshold,
@@ -402,6 +420,7 @@ def _video_normalization_range(
     config: VisionLensConfig,
     loaded_model: LoadedModel,
     transform: Any,
+    source: VideoMetadata,
 ) -> tuple[float, float] | None:
     if config.analysis.method == "patch_pca":
         return None
@@ -413,10 +432,14 @@ def _video_normalization_range(
     assert config.video is not None
     current = None
     smoothing_state: dict[str, Any] = {}
-    for frame_batch in iter_video_batches(
-        config.input.paths[0],
-        config.video,
-        config.runtime.batch_size,
+    for frame_batch in track_video_batches(
+        iter_video_batches(
+            config.input.paths[0],
+            config.video,
+            config.runtime.batch_size,
+        ),
+        total=estimated_sample_count(source, config.video),
+        description="Fit normalization",
     ):
         batch = _preprocess_frames(
             frame_batch.index,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import random
+from collections.abc import Iterator
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -39,11 +40,13 @@ from vision_lens.manifest import (
 )
 from vision_lens.models import LoadedModel, load_model
 from vision_lens.processing import (
+    InputBatch,
     build_batch_preprocessor,
     iter_input_batches,
     preprocess_batch,
     unique_input_labels,
 )
+from vision_lens.progress import status, track_image_batches, track_units
 from vision_lens.video_pipeline import VideoPipelineResult, run_video_from_config
 from vision_lens.visualization import (
     image_grid,
@@ -57,6 +60,33 @@ from vision_lens.visualization import (
 )
 
 ROLLOUT_GRID_MAX_COLUMNS = 4
+
+
+def _load_model_with_status(config: VisionLensConfig) -> LoadedModel:
+    image_count = len(config.images.paths)
+    input_label = "image" if image_count == 1 else "images"
+    status(f"{config.analysis.method}: {image_count} {input_label}")
+    status(f"Loading model {config.model.name}")
+    loaded_model = load_model(config)
+    status(f"Model ready on {loaded_model.metadata.device}")
+    return loaded_model
+
+
+def _tracked_input_batches(
+    config: VisionLensConfig,
+    labels: tuple[str, ...],
+    description: str,
+) -> Iterator[InputBatch]:
+    return track_image_batches(
+        iter_input_batches(
+            config.images.paths,
+            labels,
+            batch_size=config.runtime.batch_size,
+            workers=config.runtime.workers,
+        ),
+        total=len(config.images.paths),
+        description=description,
+    )
 
 
 @dataclass(frozen=True)
@@ -158,7 +188,7 @@ def run_patch_pca_from_config(
         else None
     )
     _apply_seed(config.runtime.seed)
-    loaded_model = load_model(config)
+    loaded_model = _load_model_with_status(config)
     transform = build_batch_preprocessor(loaded_model, config.preprocessing)
     patch_grid = _patch_grid(loaded_model)
     page_offsets, total_grid_pages = _grid_page_plan(
@@ -170,12 +200,7 @@ def run_patch_pca_from_config(
     retained_patch_pca = None
 
     if projection is not None:
-        for input_batch in iter_input_batches(
-            config.images.paths,
-            labels,
-            batch_size=config.runtime.batch_size,
-            workers=config.runtime.workers,
-        ):
+        for input_batch in _tracked_input_batches(config, labels, "Project images"):
             batch = preprocess_batch(
                 input_batch,
                 transform,
@@ -203,51 +228,41 @@ def run_patch_pca_from_config(
                 )
             )
     elif len(config.images.paths) <= config.runtime.batch_size:
-        input_batch = next(
-            iter_input_batches(
-                config.images.paths,
-                labels,
-                batch_size=config.runtime.batch_size,
-                workers=config.runtime.workers,
+        for input_batch in _tracked_input_batches(config, labels, "Analyze images"):
+            batch = preprocess_batch(
+                input_batch,
+                transform,
+                loaded_model,
+                include_display_images=False,
             )
-        )
-        batch = preprocess_batch(
-            input_batch,
-            transform,
-            loaded_model,
-            include_display_images=False,
-        )
-        patch_pca = extract_patch_pca(
-            loaded_model.model,
-            batch.inputs,
-            loaded_model.metadata,
-            foreground_threshold=config.patch_pca.foreground_threshold,
-            foreground_side=config.patch_pca.foreground_side,
-        )
-        projection = patch_pca.projection
-        retained_patch_pca = patch_pca
-        output_paths.extend(
-            export_patch_pca_outputs(
-                patch_pca,
-                image_paths=input_batch.paths,
-                output_dir=config.output.directory,
-                output_config=config.output,
-                visualization_config=config.visualization,
-                input_labels=input_batch.labels,
-                grid_page_offset=page_offsets[input_batch.index],
-                total_grid_pages=total_grid_pages,
+            patch_pca = extract_patch_pca(
+                loaded_model.model,
+                batch.inputs,
+                loaded_model.metadata,
+                foreground_threshold=config.patch_pca.foreground_threshold,
+                foreground_side=config.patch_pca.foreground_side,
             )
-        )
+            projection = patch_pca.projection
+            retained_patch_pca = patch_pca
+            output_paths.extend(
+                export_patch_pca_outputs(
+                    patch_pca,
+                    image_paths=input_batch.paths,
+                    output_dir=config.output.directory,
+                    output_config=config.output,
+                    visualization_config=config.visualization,
+                    input_labels=input_batch.labels,
+                    grid_page_offset=page_offsets[input_batch.index],
+                    total_grid_pages=total_grid_pages,
+                )
+            )
     else:
         with TemporaryDirectory(prefix="vision-lens-pca-") as temporary_directory:
             staged_batches: list[
                 tuple[int, tuple[Path, ...], tuple[str, ...], Path]
             ] = []
-            for input_batch in iter_input_batches(
-                config.images.paths,
-                labels,
-                batch_size=config.runtime.batch_size,
-                workers=config.runtime.workers,
+            for input_batch in _tracked_input_batches(
+                config, labels, "Extract embeddings"
             ):
                 batch = preprocess_batch(
                     input_batch,
@@ -277,12 +292,19 @@ def run_patch_pca_from_config(
                 for _index, _paths, _labels, staged_path in staged_batches:
                     yield np.load(staged_path, allow_pickle=False)
 
+            status("Fitting PCA projection")
             projection = fit_patch_pca_projection_batches(
                 embedding_batches,
                 foreground_threshold=config.patch_pca.foreground_threshold,
                 foreground_side=config.patch_pca.foreground_side,
             )
-            for batch_index, batch_paths, batch_labels, staged_path in staged_batches:
+            for batch_index, batch_paths, batch_labels, staged_path in track_units(
+                staged_batches,
+                total=len(config.images.paths),
+                description="Render PCA",
+                unit="image",
+                size=lambda item: len(item[1]),
+            ):
                 embeddings = np.load(staged_path, allow_pickle=False)
                 patch_pca = project_patch_embeddings(
                     embeddings,
@@ -354,17 +376,12 @@ def run_vit_rollout_comparison_from_config(
     check_manifest_overwrite(config)
     labels = unique_input_labels(config.images.paths)
     _apply_seed(config.runtime.seed)
-    loaded_model = load_model(config)
+    loaded_model = _load_model_with_status(config)
     transform = build_batch_preprocessor(loaded_model, config.preprocessing)
     rendering = config.visualization
     if rendering.normalization == "shared":
         normalization_range = None
-        for input_batch in iter_input_batches(
-            config.images.paths,
-            labels,
-            batch_size=config.runtime.batch_size,
-            workers=config.runtime.workers,
-        ):
+        for input_batch in _tracked_input_batches(config, labels, "Fit normalization"):
             batch = preprocess_batch(
                 input_batch,
                 transform,
@@ -397,12 +414,7 @@ def run_vit_rollout_comparison_from_config(
         )
     output_paths = []
     retained_rollout = None
-    for input_batch in iter_input_batches(
-        config.images.paths,
-        labels,
-        batch_size=config.runtime.batch_size,
-        workers=config.runtime.workers,
-    ):
+    for input_batch in _tracked_input_batches(config, labels, "Analyze images"):
         batch = preprocess_batch(input_batch, transform, loaded_model)
         rollout = extract_attention_rollout(
             loaded_model.model,
@@ -469,7 +481,7 @@ def run_gradcam_from_config(config: VisionLensConfig) -> GradCamPipelineResult:
     check_manifest_overwrite(config)
     labels = unique_input_labels(config.images.paths)
     _apply_seed(config.runtime.seed)
-    loaded_model = load_model(config)
+    loaded_model = _load_model_with_status(config)
     if (
         config.analysis.target_class is not None
         and loaded_model.metadata.num_classes is not None
@@ -483,12 +495,7 @@ def run_gradcam_from_config(config: VisionLensConfig) -> GradCamPipelineResult:
     rendering = config.visualization
     if rendering.normalization == "shared":
         normalization_range = None
-        for input_batch in iter_input_batches(
-            config.images.paths,
-            labels,
-            batch_size=config.runtime.batch_size,
-            workers=config.runtime.workers,
-        ):
+        for input_batch in _tracked_input_batches(config, labels, "Fit normalization"):
             batch = preprocess_batch(
                 input_batch,
                 transform,
@@ -523,12 +530,7 @@ def run_gradcam_from_config(config: VisionLensConfig) -> GradCamPipelineResult:
     )
     output_paths = []
     retained_gradcam = None
-    for input_batch in iter_input_batches(
-        config.images.paths,
-        labels,
-        batch_size=config.runtime.batch_size,
-        workers=config.runtime.workers,
-    ):
+    for input_batch in _tracked_input_batches(config, labels, "Analyze images"):
         batch = preprocess_batch(input_batch, transform, loaded_model)
         gradcam = extract_gradcam(
             loaded_model.model,
@@ -587,17 +589,12 @@ def run_vit_attention_from_config(config: VisionLensConfig) -> PipelineResult:
     check_manifest_overwrite(config)
     labels = unique_input_labels(config.images.paths)
     _apply_seed(config.runtime.seed)
-    loaded_model = load_model(config)
+    loaded_model = _load_model_with_status(config)
     transform = build_batch_preprocessor(loaded_model, config.preprocessing)
     rendering = config.visualization
     if rendering.normalization == "shared":
         normalization_range = None
-        for input_batch in iter_input_batches(
-            config.images.paths,
-            labels,
-            batch_size=config.runtime.batch_size,
-            workers=config.runtime.workers,
-        ):
+        for input_batch in _tracked_input_batches(config, labels, "Fit normalization"):
             batch = preprocess_batch(
                 input_batch,
                 transform,
@@ -625,12 +622,7 @@ def run_vit_attention_from_config(config: VisionLensConfig) -> PipelineResult:
     )
     output_paths = []
     retained_attention = None
-    for input_batch in iter_input_batches(
-        config.images.paths,
-        labels,
-        batch_size=config.runtime.batch_size,
-        workers=config.runtime.workers,
-    ):
+    for input_batch in _tracked_input_batches(config, labels, "Analyze images"):
         batch = preprocess_batch(input_batch, transform, loaded_model)
         attention = _extract_attention(
             loaded_model=loaded_model,
