@@ -50,6 +50,10 @@ Reproduce the DINOv2 PCA example:
 uv run python scripts/run_dinov2_pca.py
 ```
 
+Runs print model-loading status and show `tqdm` progress by image or sampled
+video frame in an interactive terminal. Multi-pass work has separate bars for
+fitting and rendering; non-interactive logs keep only the status lines.
+
 The DINOv2 PCA preset fits one shared projection across both example images,
 so foreground selection and colors remain comparable:
 
