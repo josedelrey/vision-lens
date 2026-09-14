@@ -9,6 +9,7 @@ import matplotlib
 matplotlib.use("Agg")
 
 import numpy as np
+from matplotlib.colors import to_rgb
 from matplotlib.figure import Figure
 from PIL import Image, ImageDraw
 
@@ -270,10 +271,19 @@ def save_grid_figure(
             (height + pixel_bias) / resolved_dpi,
         ),
         dpi=resolved_dpi,
-        frameon=False,
+        frameon=True,
     )
-    if background is not None:
-        figure.patch.set_facecolor(background)
+    background_rgb = to_rgb(background or "white")
+    figure.patch.set_facecolor(background_rgb)
+    linear_rgb = tuple(
+        channel / 12.92 if channel <= 0.04045 else ((channel + 0.055) / 1.055) ** 2.4
+        for channel in background_rgb
+    )
+    luminance = sum(
+        weight * channel
+        for weight, channel in zip((0.2126, 0.7152, 0.0722), linear_rgb, strict=True)
+    )
+    label_color = "black" if luminance > 0.179 else "white"
 
     for index, (image, label) in enumerate(zip(pil_images, labels, strict=True)):
         row, column = divmod(index, columns)
@@ -290,11 +300,12 @@ def save_grid_figure(
                 label,
                 ha="center",
                 va="center",
+                color=label_color,
                 fontsize=GRID_LABEL_FONT_SIZE,
             )
 
     output.parent.mkdir(parents=True, exist_ok=True)
-    figure.savefig(output)
+    figure.savefig(output, facecolor=background_rgb, transparent=False)
     return output
 
 
