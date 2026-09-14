@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -46,6 +46,7 @@ from vision_lens.video import (
     probe_video,
     representative_frame_indices,
     require_video_dependencies,
+    resolve_sampling_rate,
     resolved_output_resolution,
 )
 from vision_lens.visualization import image_grid, overlay_attention, render_heatmap
@@ -77,6 +78,11 @@ def run_video_from_config(config: VisionLensConfig) -> VideoPipelineResult:
     require_video_dependencies()
     source_path = config.input.paths[0]
     source = probe_video(source_path)
+    requested_config = config
+    frame_rate = resolve_sampling_rate(
+        config.video.sampling_rate, source.source_frame_rate
+    )
+    config = replace(config, video=replace(config.video, sampling_rate=frame_rate))
     sample_count = estimated_sample_count(source, config.video)
     status(
         f"{config.analysis.method}: {source_path.name} "
@@ -172,7 +178,7 @@ def run_video_from_config(config: VisionLensConfig) -> VideoPipelineResult:
     output_paths_tuple = tuple(output_paths)
     encoded_duration = processed_frames / config.video.sampling_rate
     write_run_manifest(
-        config,
+        requested_config,
         loaded_model,
         (source_path.stem,),
         output_paths_tuple,
@@ -191,7 +197,7 @@ def run_video_from_config(config: VisionLensConfig) -> VideoPipelineResult:
         },
     )
     return VideoPipelineResult(
-        config=config,
+        config=requested_config,
         loaded_model=loaded_model,
         source=source,
         output_paths=output_paths_tuple,

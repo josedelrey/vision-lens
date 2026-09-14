@@ -122,6 +122,24 @@ def test_video_settings_apply_documented_defaults(tmp_path):
     assert config.video.codec == "libx264"
 
 
+def test_video_sampling_rate_accepts_auto_and_rejects_other_strings(tmp_path):
+    source = tmp_path / "clip.mp4"
+    source.touch()
+    raw = _minimal_config()
+    raw["input"] = {"files": [str(source)]}
+    raw["video"] = {"sampling_rate": "auto"}
+
+    config = parse_config(raw)
+
+    assert config.video is not None
+    assert config.video.sampling_rate == "auto"
+    assert config_to_dict(config)["video"]["sampling_rate"] == "auto"
+
+    raw["video"]["sampling_rate"] = "original"
+    with pytest.raises(ValueError, match="video.sampling_rate"):
+        parse_config(raw)
+
+
 def test_video_rejects_invalid_time_range_and_odd_resolution(tmp_path):
     source = tmp_path / "clip.mp4"
     source.touch()

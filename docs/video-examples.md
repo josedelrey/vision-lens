@@ -10,9 +10,10 @@ uv sync --extra video
 
 By default, the scripts expect `videos/lego.mp4` and `videos/fern.mp4`. Encode
 these from the NeRF PNG sequences at 10 and 15 source FPS respectively. Every
-script samples and exports at 10 FPS, so the Lego orbit produces about 40
-output frames over four seconds and Fern's two-orbit path about 80 frames over
-eight seconds. Both `videos/` and `outputs/` are ignored by Git.
+script uses `video.sampling_rate: auto`, so it samples and exports at the source
+FPS: the Lego orbit produces about 40 output frames over four seconds and
+Fern's two-orbit path about 120 frames over eight seconds. Both `videos/` and
+`outputs/` are ignored by Git.
 
 Check the input MP4 timing before running the examples. The NeRF renderer's
 automatic MP4s are 30 FPS: using them directly would make Lego 1.33 seconds

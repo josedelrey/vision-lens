@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from fractions import Fraction
+from math import isfinite
 from pathlib import Path
 from typing import Any
 
@@ -54,9 +55,7 @@ def probe_video(path: str | Path) -> VideoMetadata:
         duration = _stream_duration(stream)
         if duration is None and container.duration is not None:
             duration = float(container.duration / av.time_base)
-        source_rate = (
-            None if stream.average_rate is None else float(stream.average_rate)
-        )
+        source_rate = _source_frame_rate(stream)
         return VideoMetadata(
             path=source,
             width=int(stream.codec_context.width),
@@ -64,6 +63,24 @@ def probe_video(path: str | Path) -> VideoMetadata:
             duration=duration,
             source_frame_rate=source_rate,
         )
+
+
+def resolve_sampling_rate(
+    configured: float | str,
+    source_frame_rate: float | None,
+) -> float:
+    if configured != "auto":
+        return float(configured)
+    if (
+        source_frame_rate is None
+        or not isfinite(source_frame_rate)
+        or source_frame_rate <= 0
+    ):
+        raise ValueError(
+            "video.sampling_rate=auto requires a valid source video FPS; "
+            "set video.sampling_rate to a positive number instead."
+        )
+    return source_frame_rate
 
 
 def iter_sampled_frames(
@@ -74,6 +91,8 @@ def iter_sampled_frames(
     source = Path(path)
     with av.open(str(source)) as container:
         stream = _video_stream(container)
+        source_rate = _source_frame_rate(stream)
+        sampling_rate = resolve_sampling_rate(config.sampling_rate, source_rate)
         stream_time_base = float(stream.time_base)
         origin = (
             float(stream.start_time * stream.time_base)
@@ -93,9 +112,6 @@ def iter_sampled_frames(
         next_timestamp = config.start_time
         for decoded_index, frame in enumerate(container.decode(stream)):
             if frame.pts is None:
-                source_rate = (
-                    None if stream.average_rate is None else float(stream.average_rate)
-                )
                 if source_rate is None or source_rate <= 0:
                     continue
                 source_timestamp = decoded_index / source_rate
@@ -120,9 +136,7 @@ def iter_sampled_frames(
                     image=image.copy(),
                 )
                 output_index += 1
-                next_timestamp = config.start_time + (
-                    output_index / config.sampling_rate
-                )
+                next_timestamp = config.start_time + (output_index / sampling_rate)
 
 
 def iter_video_batches(
@@ -146,6 +160,9 @@ def estimated_sample_count(
     metadata: VideoMetadata,
     config: VideoConfig,
 ) -> int | None:
+    sampling_rate = resolve_sampling_rate(
+        config.sampling_rate, metadata.source_frame_rate
+    )
     end_time = config.end_time
     if metadata.duration is not None:
         end_time = (
@@ -154,7 +171,7 @@ def estimated_sample_count(
     if end_time is None:
         return config.frame_limit
     duration = max(0.0, end_time - config.start_time)
-    count = int(np.ceil(duration * config.sampling_rate - 1e-9))
+    count = int(np.ceil(duration * sampling_rate - 1e-9))
     if config.frame_limit is not None:
         count = min(count, config.frame_limit)
     return count
@@ -258,6 +275,13 @@ def _video_stream(container: Any) -> Any:
     if not container.streams.video:
         raise ValueError("Input file does not contain a video stream.")
     return container.streams.video[0]
+
+
+def _source_frame_rate(stream: Any) -> float | None:
+    if stream.average_rate is None:
+        return None
+    rate = float(stream.average_rate)
+    return rate if isfinite(rate) and rate > 0 else None
 
 
 def _stream_duration(stream: Any) -> float | None:
