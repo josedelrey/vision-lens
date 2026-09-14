@@ -17,7 +17,7 @@ merged in this order, with later values winning:
 
 ```yaml
 input:
-  files: [../data/images/1.jpg]
+  files: [../examples/1.jpg]
   folders: [../photos]
   patterns: ["*.jpg", "*.png"]
   recursive: true

@@ -1,0 +1,21 @@
+preset: dinov2-reg4-attention
+
+input:
+  files: [../videos/fern.mp4]
+
+analysis:
+  layers: [11]
+
+runtime:
+  batch_size: 1
+
+video:
+  sampling_rate: 10.0
+  temporal_smoothing: 0.0
+
+output:
+  directory: ../outputs/video/dinov2_reg4_attention/fern
+  heatmaps: false
+  overlays: true
+  grids: true
+  overwrite: replace

@@ -37,7 +37,7 @@ def test_vit_pipeline_exports_figures_with_mocked_model(monkeypatch, tmp_path):
                 "options": {},
             },
             "input": {
-                "paths": ["data/images/1.jpg"],
+                "paths": ["examples/1.jpg"],
             },
             "output": {
                 "directory": str(tmp_path),
@@ -463,9 +463,9 @@ def test_attention_pipeline_honors_batch_size_and_raw_only_output(
             },
             "input": {
                 "files": [
-                    "data/images/1.jpg",
-                    "data/images/2.jpg",
-                    "data/images/3.jpg",
+                    "examples/1.jpg",
+                    "examples/2.jpg",
+                    "examples/3.jpg",
                 ]
             },
             "output": {
@@ -548,9 +548,9 @@ def test_shared_normalization_is_fitted_across_all_batches(monkeypatch, tmp_path
             },
             "input": {
                 "files": [
-                    "data/images/1.jpg",
-                    "data/images/2.jpg",
-                    "data/images/3.jpg",
+                    "examples/1.jpg",
+                    "examples/2.jpg",
+                    "examples/3.jpg",
                 ]
             },
             "output": {"directory": str(tmp_path)},
@@ -687,7 +687,7 @@ def test_existing_manifest_fails_before_model_loading(monkeypatch, tmp_path):
                 "name": "mock_vit",
                 "pretrained": False,
             },
-            "input": {"files": ["data/images/1.jpg"]},
+            "input": {"files": ["examples/1.jpg"]},
             "output": {"directory": str(tmp_path), "overwrite": "error"},
             "preprocessing": {"image_size": 4},
             "analysis": {"method": "attention", "layers": [0]},
@@ -724,7 +724,7 @@ def test_gradcam_pipeline_passes_fixed_class_workers_and_batch_size(
                 "name": "mock_cnn",
                 "pretrained": False,
             },
-            "input": {"files": ["data/images/1.jpg", "data/images/2.jpg"]},
+            "input": {"files": ["examples/1.jpg", "examples/2.jpg"]},
             "output": {
                 "directory": str(tmp_path),
                 "heatmaps": False,

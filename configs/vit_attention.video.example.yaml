@@ -1,0 +1,21 @@
+preset: dino-vits8-attention
+
+input:
+  files: [../videos/lego.mp4]
+
+analysis:
+  layers: [11]
+
+runtime:
+  batch_size: 1
+
+video:
+  sampling_rate: 10.0
+  temporal_smoothing: 0.0
+
+output:
+  directory: ../outputs/video/dino_vits8_attention/lego
+  heatmaps: false
+  overlays: true
+  grids: true
+  overwrite: replace
