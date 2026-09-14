@@ -11,7 +11,9 @@ def test_documented_example_configs_validate_without_loading_models(tmp_path):
 
     for path in sorted((REPO_ROOT / "configs").glob("*.example.yaml")):
         overrides = (
-            {"input": {"files": [str(video_input)]}} if ".video." in path.name else None
+            {"input": {"files": [str(video_input)], "folders": []}}
+            if ".video." in path.name
+            else None
         )
         config = load_config(path, overrides=overrides)
         assert config.input.paths

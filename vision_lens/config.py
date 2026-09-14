@@ -528,8 +528,6 @@ def validate_config(config: VisionLensConfig) -> None:
 
     method = config.analysis.method
     if config.video is not None:
-        if len(config.input.paths) != 1:
-            raise ValueError("Video workflows require exactly one input file.")
         if (
             config.video.end_time is not None
             and config.video.end_time <= config.video.start_time

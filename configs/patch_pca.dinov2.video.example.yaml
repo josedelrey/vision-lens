@@ -1,7 +1,11 @@
 preset: dinov2-pca
 
 input:
-  files: [videos/fern.mp4]
+  files: []
+  folders: [videos]
+  patterns: ["*.mp4"]
+  recursive: false
+  limit: null
 
 runtime:
   batch_size: 1
@@ -12,7 +16,7 @@ video:
   temporal_smoothing: 0.0
 
 output:
-  directory: outputs/video/dinov2_pca/fern
+  directory: outputs/video/dinov2_pca
   heatmaps: true
   overlays: false
   grids: true

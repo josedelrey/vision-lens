@@ -1,7 +1,11 @@
 preset: dinov2-reg4-rollout
 
 input:
-  files: [videos/fern.mp4]
+  files: []
+  folders: [videos]
+  patterns: ["*.mp4"]
+  recursive: false
+  limit: null
 
 runtime:
   batch_size: 1
@@ -11,7 +15,7 @@ video:
   temporal_smoothing: 0.0
 
 output:
-  directory: outputs/video/dinov2_reg4_rollout/fern
+  directory: outputs/video/dinov2_reg4_rollout
   heatmaps: false
   overlays: true
   grids: true

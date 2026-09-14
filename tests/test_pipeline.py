@@ -14,18 +14,18 @@ from vision_lens.config import (
     parse_config,
 )
 from vision_lens.feature_pca import PatchPCAResult
-from vision_lens.models import LoadedModel, ModelMetadata
-from vision_lens.pipeline import (
+from vision_lens.image_pipeline import (
     export_gradcam_outputs,
     run_gradcam_from_config,
     run_patch_pca_from_config,
-    run_pipeline_from_config,
     run_vit_attention_from_config,
 )
+from vision_lens.models import LoadedModel, ModelMetadata
+from vision_lens.pipeline import run_pipeline_from_config
 
 
 def test_vit_pipeline_exports_figures_with_mocked_model(monkeypatch, tmp_path):
-    from vision_lens import pipeline, processing
+    from vision_lens import image_pipeline, processing
 
     config = parse_config(
         {
@@ -93,19 +93,19 @@ def test_vit_pipeline_exports_figures_with_mocked_model(monkeypatch, tmp_path):
         image_size=(4, 4),
     )
 
-    monkeypatch.setattr(pipeline, "load_model", lambda _config: loaded_model)
+    monkeypatch.setattr(image_pipeline, "load_model", lambda _config: loaded_model)
     monkeypatch.setattr(
         processing,
         "load_images",
         lambda _paths, workers=0: [Image.new("RGB", (4, 4), "white")],
     )
     monkeypatch.setattr(
-        pipeline,
+        image_pipeline,
         "build_batch_preprocessor",
         lambda *_args, **_kwargs: lambda _image: torch.ones(3, 4, 4),
     )
     monkeypatch.setattr(
-        pipeline,
+        image_pipeline,
         "_extract_attention",
         lambda **_kwargs: attention,
     )
@@ -128,7 +128,7 @@ def test_vit_pipeline_exports_figures_with_mocked_model(monkeypatch, tmp_path):
 
 
 def test_rollout_grid_items_place_layer_row_above_rollout_row():
-    from vision_lens.pipeline import _rollout_grid_items
+    from vision_lens.image_pipeline import _rollout_grid_items
 
     layer_attention = _attention_result(layer_indices=(0, 1, 2, 3, 4))
     rollout = _attention_result(layer_indices=(0, 1, 2, 3, 4))
@@ -164,7 +164,7 @@ def test_rollout_grid_items_place_layer_row_above_rollout_row():
 
 
 def test_rollout_grid_caps_requested_columns_to_available_layer_pairs():
-    from vision_lens.pipeline import _rollout_grid_items
+    from vision_lens.image_pipeline import _rollout_grid_items
 
     layer_attention = _attention_result(layer_indices=(0, 1))
     rollout = _attention_result(layer_indices=(0, 1))
@@ -240,7 +240,7 @@ def test_gradcam_export_preserves_heatmap_overlay_and_grid_layout(tmp_path):
 
 
 def test_patch_pca_pipeline_exports_reference_style_images(monkeypatch, tmp_path):
-    from vision_lens import pipeline, processing
+    from vision_lens import image_pipeline, processing
 
     horse_a = tmp_path / "horse-a.jpg"
     horse_b = tmp_path / "horse-b.jpg"
@@ -293,19 +293,19 @@ def test_patch_pca_pipeline_exports_reference_style_images(monkeypatch, tmp_path
         image_size=(4, 4),
     )
 
-    monkeypatch.setattr(pipeline, "load_model", lambda _config: loaded_model)
+    monkeypatch.setattr(image_pipeline, "load_model", lambda _config: loaded_model)
     monkeypatch.setattr(
         processing,
         "load_images",
         lambda _paths, workers=0: [Image.new("RGB", (4, 4), "white")] * 2,
     )
     monkeypatch.setattr(
-        pipeline,
+        image_pipeline,
         "build_batch_preprocessor",
         lambda *_args, **_kwargs: lambda _image: torch.ones(3, 4, 4),
     )
     monkeypatch.setattr(
-        pipeline,
+        image_pipeline,
         "extract_patch_pca",
         lambda *_args, **_kwargs: patch_pca,
     )
@@ -327,7 +327,7 @@ def test_patch_pca_pipeline_fits_and_transforms_multiple_bounded_batches(
     monkeypatch,
     tmp_path,
 ):
-    from vision_lens import pipeline, processing
+    from vision_lens import image_pipeline, processing
 
     input_dir = tmp_path / "inputs"
     output_dir = tmp_path / "outputs"
@@ -381,18 +381,18 @@ def test_patch_pca_pipeline_fits_and_transforms_multiple_bounded_batches(
             dtype=torch.float32,
         ).reshape(len(inputs), 4, 5)
 
-    monkeypatch.setattr(pipeline, "load_model", lambda _config: loaded_model)
+    monkeypatch.setattr(image_pipeline, "load_model", lambda _config: loaded_model)
     monkeypatch.setattr(
         processing,
         "load_images",
         lambda paths, workers=0: [Image.new("RGB", (4, 4), "white") for _ in paths],
     )
     monkeypatch.setattr(
-        pipeline,
+        image_pipeline,
         "build_batch_preprocessor",
         lambda *_args, **_kwargs: lambda _image: torch.ones(3, 4, 4),
     )
-    monkeypatch.setattr(pipeline, "extract_patch_embeddings", fake_embeddings)
+    monkeypatch.setattr(image_pipeline, "extract_patch_embeddings", fake_embeddings)
 
     result = run_patch_pca_from_config(config)
 
@@ -451,7 +451,7 @@ def test_attention_pipeline_honors_batch_size_and_raw_only_output(
     monkeypatch,
     tmp_path,
 ):
-    from vision_lens import pipeline, processing
+    from vision_lens import image_pipeline, processing
 
     config = parse_config(
         {
@@ -513,18 +513,18 @@ def test_attention_pipeline_honors_batch_size_and_raw_only_output(
             image_size=(4, 4),
         )
 
-    monkeypatch.setattr(pipeline, "load_model", lambda _config: loaded_model)
+    monkeypatch.setattr(image_pipeline, "load_model", lambda _config: loaded_model)
     monkeypatch.setattr(
         processing,
         "load_images",
         lambda paths, workers=0: [Image.new("RGB", (4, 4), "white") for _ in paths],
     )
     monkeypatch.setattr(
-        pipeline,
+        image_pipeline,
         "build_batch_preprocessor",
         lambda *_args, **_kwargs: lambda _image: torch.ones(3, 4, 4),
     )
-    monkeypatch.setattr(pipeline, "_extract_attention", extract_batch)
+    monkeypatch.setattr(image_pipeline, "_extract_attention", extract_batch)
 
     result = run_vit_attention_from_config(config)
 
@@ -536,7 +536,7 @@ def test_attention_pipeline_honors_batch_size_and_raw_only_output(
 
 
 def test_shared_normalization_is_fitted_across_all_batches(monkeypatch, tmp_path):
-    from vision_lens import pipeline, processing
+    from vision_lens import image_pipeline, processing
 
     config = parse_config(
         {
@@ -607,19 +607,19 @@ def test_shared_normalization_is_fitted_across_all_batches(monkeypatch, tmp_path
         rendering_configs.append(kwargs["visualization_config"])
         return ()
 
-    monkeypatch.setattr(pipeline, "load_model", fake_load_model)
+    monkeypatch.setattr(image_pipeline, "load_model", fake_load_model)
     monkeypatch.setattr(
         processing,
         "load_images",
         lambda paths, workers=0: [Image.new("RGB", (4, 4), "white") for _ in paths],
     )
     monkeypatch.setattr(
-        pipeline,
+        image_pipeline,
         "build_batch_preprocessor",
         lambda *_args, **_kwargs: lambda _image: torch.ones(3, 4, 4),
     )
-    monkeypatch.setattr(pipeline, "_extract_attention", fake_attention)
-    monkeypatch.setattr(pipeline, "export_attention_outputs", fake_export)
+    monkeypatch.setattr(image_pipeline, "_extract_attention", fake_attention)
+    monkeypatch.setattr(image_pipeline, "export_attention_outputs", fake_export)
 
     result = run_vit_attention_from_config(config)
 
@@ -676,7 +676,7 @@ def test_output_overwrite_error_and_skip_policies(tmp_path):
 
 
 def test_existing_manifest_fails_before_model_loading(monkeypatch, tmp_path):
-    from vision_lens import pipeline
+    from vision_lens import image_pipeline
 
     (tmp_path / "run-manifest.json").write_text("{}")
     config = parse_config(
@@ -701,7 +701,7 @@ def test_existing_manifest_fails_before_model_loading(monkeypatch, tmp_path):
         loaded = True
         raise AssertionError("model should not be loaded")
 
-    monkeypatch.setattr(pipeline, "load_model", fail_if_loaded)
+    monkeypatch.setattr(image_pipeline, "load_model", fail_if_loaded)
 
     with pytest.raises(FileExistsError, match="Run manifest already exists"):
         run_vit_attention_from_config(config)
@@ -713,7 +713,7 @@ def test_gradcam_pipeline_passes_fixed_class_workers_and_batch_size(
     monkeypatch,
     tmp_path,
 ):
-    from vision_lens import pipeline, processing
+    from vision_lens import image_pipeline, processing
     from vision_lens.attention import GradCamResult
 
     config = parse_config(
@@ -769,7 +769,7 @@ def test_gradcam_pipeline_passes_fixed_class_workers_and_batch_size(
             image_size=(4, 4),
         )
 
-    monkeypatch.setattr(pipeline, "load_model", lambda _config: loaded_model)
+    monkeypatch.setattr(image_pipeline, "load_model", lambda _config: loaded_model)
     monkeypatch.setattr(
         processing,
         "load_images",
@@ -779,11 +779,11 @@ def test_gradcam_pipeline_passes_fixed_class_workers_and_batch_size(
         ),
     )
     monkeypatch.setattr(
-        pipeline,
+        image_pipeline,
         "build_batch_preprocessor",
         lambda *_args, **_kwargs: lambda _image: torch.ones(3, 4, 4),
     )
-    monkeypatch.setattr(pipeline, "extract_gradcam", fake_gradcam)
+    monkeypatch.setattr(image_pipeline, "extract_gradcam", fake_gradcam)
 
     result = run_gradcam_from_config(config)
 

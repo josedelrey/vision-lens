@@ -3,9 +3,6 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
-_EXAMPLE_IMAGES = [f"examples/{index}.jpg" for index in range(1, 9)]
-
-
 PRESETS: dict[str, dict[str, Any]] = {
     "dino-vits8-attention": {
         "model": {
@@ -16,8 +13,8 @@ PRESETS: dict[str, dict[str, Any]] = {
             "options": {},
         },
         "input": {
-            "files": _EXAMPLE_IMAGES,
-            "folders": [],
+            "files": [],
+            "folders": ["examples"],
             "patterns": ["*.jpg", "*.jpeg", "*.png", "*.webp"],
             "recursive": False,
             "limit": None,
@@ -66,7 +63,7 @@ PRESETS: dict[str, dict[str, Any]] = {
             "dpi": None,
             "overlay_alpha": 0.8,
             "cmap": "viridis",
-            "grid_format": "pdf",
+            "grid_format": "png",
             "normalization": "per_map",
             "normalization_range": None,
         },
@@ -80,8 +77,8 @@ PRESETS: dict[str, dict[str, Any]] = {
             "options": {},
         },
         "input": {
-            "files": _EXAMPLE_IMAGES,
-            "folders": [],
+            "files": [],
+            "folders": ["examples"],
             "patterns": ["*.jpg", "*.jpeg", "*.png", "*.webp"],
             "recursive": False,
             "limit": None,
@@ -130,7 +127,7 @@ PRESETS: dict[str, dict[str, Any]] = {
             "dpi": None,
             "overlay_alpha": 0.8,
             "cmap": "viridis",
-            "grid_format": "pdf",
+            "grid_format": "png",
             "normalization": "per_map",
             "normalization_range": None,
         },
@@ -144,8 +141,8 @@ PRESETS: dict[str, dict[str, Any]] = {
             "options": {},
         },
         "input": {
-            "files": _EXAMPLE_IMAGES,
-            "folders": [],
+            "files": [],
+            "folders": ["examples"],
             "patterns": ["*.jpg", "*.jpeg", "*.png", "*.webp"],
             "recursive": False,
             "limit": None,
@@ -194,7 +191,7 @@ PRESETS: dict[str, dict[str, Any]] = {
             "dpi": None,
             "overlay_alpha": 0.8,
             "cmap": "viridis",
-            "grid_format": "pdf",
+            "grid_format": "png",
             "normalization": "per_map",
             "normalization_range": None,
         },
@@ -208,8 +205,8 @@ PRESETS: dict[str, dict[str, Any]] = {
             "options": {},
         },
         "input": {
-            "files": _EXAMPLE_IMAGES,
-            "folders": [],
+            "files": [],
+            "folders": ["examples"],
             "patterns": ["*.jpg", "*.jpeg", "*.png", "*.webp"],
             "recursive": False,
             "limit": None,
@@ -257,7 +254,7 @@ PRESETS: dict[str, dict[str, Any]] = {
             "dpi": None,
             "overlay_alpha": 0.8,
             "cmap": "viridis",
-            "grid_format": "pdf",
+            "grid_format": "png",
             "normalization": "per_map",
             "normalization_range": None,
         },
@@ -271,8 +268,8 @@ PRESETS: dict[str, dict[str, Any]] = {
             "options": {},
         },
         "input": {
-            "files": ["examples/5.jpg", "examples/6.jpg"],
-            "folders": [],
+            "files": [],
+            "folders": ["examples"],
             "patterns": ["*.jpg", "*.jpeg", "*.png", "*.webp"],
             "recursive": False,
             "limit": None,
