@@ -122,6 +122,20 @@ def test_video_settings_apply_documented_defaults(tmp_path):
     assert config.video.codec == "libx264"
 
 
+def test_video_rejects_crop_and_pad_that_shift_spatial_maps(tmp_path):
+    source = tmp_path / "clip.mp4"
+    source.touch()
+    raw = _minimal_config()
+    raw["input"] = {"files": [str(source)]}
+    raw["video"] = {}
+    for field in ("crop", "pad"):
+        raw["preprocessing"] = {"image_size": 672, field: "center"}
+        with pytest.raises(
+            ValueError, match="preprocessing.crop and preprocessing.pad"
+        ):
+            parse_config(raw)
+
+
 def test_video_sampling_rate_accepts_auto_and_rejects_other_strings(tmp_path):
     source = tmp_path / "clip.mp4"
     source.touch()

@@ -37,11 +37,14 @@ class LoadedModel:
     metadata: ModelMetadata
 
 
-def load_model(config: VisionLensConfig) -> LoadedModel:
+def load_model(
+    config: VisionLensConfig, *, dynamic_img_size: bool = False
+) -> LoadedModel:
     return load_configured_model(
         config.model,
         config.preprocessing,
         config.runtime,
+        dynamic_img_size=dynamic_img_size,
     )
 
 
@@ -49,9 +52,16 @@ def load_configured_model(
     model_config: ModelConfig,
     preprocessing_config: PreprocessingConfig,
     runtime_config: RuntimeConfig,
+    *,
+    dynamic_img_size: bool = False,
 ) -> LoadedModel:
     if model_config.architecture == "vit" and model_config.backend == "timm":
-        return load_timm_vit(model_config, preprocessing_config, runtime_config)
+        return load_timm_vit(
+            model_config,
+            preprocessing_config,
+            runtime_config,
+            dynamic_img_size=dynamic_img_size,
+        )
     if model_config.architecture == "cnn" and model_config.backend == "torchvision":
         return load_torchvision_cnn(
             model_config,
@@ -135,11 +145,15 @@ def load_timm_vit(
     model_config: ModelConfig,
     preprocessing_config: PreprocessingConfig,
     runtime_config: RuntimeConfig,
+    *,
+    dynamic_img_size: bool = False,
 ) -> LoadedModel:
     device = resolve_device(runtime_config.device)
     _validate_precision(runtime_config.precision, device)
     model_options = dict(model_config.options or {})
     model_options["img_size"] = preprocessing_config.image_size
+    if dynamic_img_size:
+        model_options["dynamic_img_size"] = True
     try:
         model = timm.create_model(
             model_config.name,

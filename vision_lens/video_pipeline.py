@@ -116,7 +116,7 @@ def run_video_from_config(
     require_video_dependencies()
     _apply_seed(config.runtime.seed)
     status(f"Loading model {config.model.name}")
-    loaded_model = load_model(config)
+    loaded_model = load_model(config, dynamic_img_size=True)
     status(f"Model ready on {loaded_model.metadata.device}")
     results = [
         _run_single_video_from_config(video_config, loaded_model=loaded_model)
@@ -156,10 +156,14 @@ def _run_single_video_from_config(
     _apply_seed(config.runtime.seed)
     if loaded_model is None:
         status(f"Loading model {config.model.name}")
-        loaded_model = load_model(config)
+        loaded_model = load_model(config, dynamic_img_size=True)
         status(f"Model ready on {loaded_model.metadata.device}")
+    loaded_model = _video_model_for_source(loaded_model, config, source)
     _validate_gradcam_class(config, loaded_model)
-    transform = build_batch_preprocessor(loaded_model, config.preprocessing)
+    transform = build_batch_preprocessor(
+        loaded_model,
+        replace(config.preprocessing, resize="stretch", crop="none", pad="none"),
+    )
     projection = _video_pca_projection(config, loaded_model, transform, source)
     normalization_range = _video_normalization_range(
         config,
@@ -188,7 +192,9 @@ def _run_single_video_from_config(
                 source_path,
                 transform,
                 loaded_model,
+                include_display_images=False,
             )
+            original_frames = tuple(frame.image for frame in frame_batch.frames)
             if config.analysis.method == "patch_pca":
                 assert projection is not None
                 embeddings = extract_patch_embeddings(
@@ -210,7 +216,7 @@ def _run_single_video_from_config(
                 )
                 exports.write_pca_batch(
                     frame_batch.frames,
-                    batch.display_images,
+                    original_frames,
                     pca_images,
                     pca.foreground_mask,
                     frame_batch.index,
@@ -224,7 +230,7 @@ def _run_single_video_from_config(
                 )
                 exports.write_map_batch(
                     frame_batch.frames,
-                    batch.display_images,
+                    original_frames,
                     streams,
                     frame_batch.index,
                     normalization_range,
@@ -368,11 +374,15 @@ class _VideoExports:
 
     def _write_video(self, name: str, image: Image.Image) -> None:
         path = self.config.output.directory / f"{self.source_stem}_{name}.mp4"
-        writer = self._writer(path)
+        resolution = self.resolution
+        if name.endswith("_comparison"):
+            width = round(image.width * resolution[1] / image.height)
+            resolution = (width + width % 2, resolution[1])
+        writer = self._writer(path, resolution)
         if writer is not None:
             writer.write(image)
 
-    def _writer(self, path: Path) -> VideoWriter | None:
+    def _writer(self, path: Path, resolution: tuple[int, int]) -> VideoWriter | None:
         if path not in self._writers:
             if not _can_write(path, self.config.output.overwrite):
                 self._writers[path] = None
@@ -381,7 +391,7 @@ class _VideoExports:
                 self._writers[path] = VideoWriter(
                     path,
                     frame_rate=self.config.video.sampling_rate,
-                    resolution=self.resolution,
+                    resolution=resolution,
                     codec=self.config.video.codec,
                 )
                 self._output_paths.append(path)
@@ -683,7 +693,7 @@ def _comparison_frame(
     config: VisionLensConfig,
 ) -> Image.Image:
     return image_grid(
-        (original, visualization),
+        (original, visualization.resize(original.size, Image.Resampling.BILINEAR)),
         columns=2,
         background=config.visualization.background or "black",
         gap=0 if config.visualization.spacing is None else config.visualization.spacing,
@@ -698,6 +708,39 @@ def _patch_grid(loaded_model: LoadedModel) -> tuple[int, int]:
     if patch_size is None:
         raise ValueError("Patch PCA requires a model with a known patch size.")
     return infer_patch_grid_from_image(loaded_model.metadata.image_size, patch_size)
+
+
+def _video_model_for_source(
+    loaded_model: LoadedModel,
+    config: VisionLensConfig,
+    source: VideoMetadata,
+) -> LoadedModel:
+    if config.preprocessing.crop != "none" or config.preprocessing.pad != "none":
+        raise ValueError(
+            "Video aspect-ratio preprocessing requires preprocessing.crop and "
+            "preprocessing.pad to be 'none'."
+        )
+    if source.width <= 0 or source.height <= 0:
+        raise ValueError("Video dimensions must be positive.")
+    patch_size = loaded_model.metadata.patch_size
+    if loaded_model.metadata.architecture == "vit" and patch_size is None:
+        raise ValueError("Video ViT preprocessing requires a known patch size.")
+    scale = config.preprocessing.image_size / max(source.width, source.height)
+    height = max(1, round(source.height * scale))
+    width = max(1, round(source.width * scale))
+    if patch_size is not None:
+        height = max(patch_size[0], round(height / patch_size[0]) * patch_size[0])
+        width = max(patch_size[1], round(width / patch_size[1]) * patch_size[1])
+    metadata = replace(
+        loaded_model.metadata,
+        input_size=(3, height, width),
+        image_size=(height, width),
+        data_config={
+            **loaded_model.metadata.data_config,
+            "input_size": (3, height, width),
+        },
+    )
+    return replace(loaded_model, metadata=metadata)
 
 
 def _validate_gradcam_class(

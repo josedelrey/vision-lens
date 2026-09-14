@@ -1,5 +1,7 @@
 import json
+from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -7,9 +9,10 @@ import torch
 from PIL import Image
 
 from vision_lens.attention import GradCamResult
-from vision_lens.config import VideoConfig, parse_config
+from vision_lens.config import PreprocessingConfig, VideoConfig, parse_config
 from vision_lens.models import LoadedModel, ModelMetadata
 from vision_lens.pipeline import run_pipeline_from_config
+from vision_lens.processing import build_batch_preprocessor
 from vision_lens.video import (
     VideoMetadata,
     VideoWriter,
@@ -19,9 +22,54 @@ from vision_lens.video import (
     probe_video,
     resolve_sampling_rate,
 )
-from vision_lens.video_pipeline import VideoBatchPipelineResult
+from vision_lens.video_pipeline import VideoBatchPipelineResult, _video_model_for_source
 
 av = pytest.importorskip("av")
+
+
+@pytest.mark.parametrize(
+    ("architecture", "patch_size", "expected"),
+    [
+        ("vit", (14, 14), (378, 672)),
+        ("vit", (8, 8), (376, 672)),
+        ("cnn", None, (378, 672)),
+    ],
+)
+def test_video_model_uses_rectangular_source_geometry(
+    architecture, patch_size, expected
+):
+    config = SimpleNamespace(
+        preprocessing=SimpleNamespace(image_size=672, crop="none", pad="none")
+    )
+    loaded = LoadedModel(
+        model=object(),
+        metadata=ModelMetadata(
+            architecture=architecture,
+            backend="timm" if architecture == "vit" else "torchvision",
+            name="mock",
+            pretrained=False,
+            device="cpu",
+            input_size=(3, 672, 672),
+            image_size=(672, 672),
+            patch_size=patch_size,
+            num_classes=2,
+            data_config={"input_size": (3, 672, 672)},
+        ),
+    )
+    source = VideoMetadata(Path("clip.mp4"), 1920, 1080, 1.0, 30.0)
+
+    result = _video_model_for_source(loaded, config, source)
+
+    assert result.metadata.image_size == expected
+    assert result.metadata.input_size == (3, *expected)
+    assert result.metadata.data_config["input_size"] == (3, *expected)
+    assert loaded.metadata.image_size == (672, 672)
+    transform = build_batch_preprocessor(result, PreprocessingConfig(image_size=672))
+    assert transform(Image.new("RGB", (1920, 1080))).shape == (3, *expected)
+    portrait = _video_model_for_source(
+        loaded, config, replace(source, width=1080, height=1920)
+    )
+    assert portrait.metadata.image_size == tuple(reversed(expected))
 
 
 def test_timestamp_sampling_and_batching_use_requested_times(tmp_path):
@@ -186,7 +234,11 @@ def test_short_pca_video_uses_frozen_projection_and_bounded_batches(
         projection_ids.append(id(kwargs["projection"]))
         return original_project(*args, **kwargs)
 
-    monkeypatch.setattr(video_pipeline, "load_model", lambda _config: loaded_model)
+    monkeypatch.setattr(
+        video_pipeline,
+        "load_model",
+        lambda _config, **_kwargs: loaded_model,
+    )
     monkeypatch.setattr(
         video_pipeline,
         "build_batch_preprocessor",
@@ -276,6 +328,12 @@ def test_gradcam_video_exports_overlays_with_one_fixed_class(
         ),
     )
     target_classes = []
+    overlay_sizes = []
+    original_overlay = video_pipeline.overlay_attention
+
+    def record_overlay(image, *args, **kwargs):
+        overlay_sizes.append(image.size)
+        return original_overlay(image, *args, **kwargs)
 
     def fake_gradcam(_model, inputs, _metadata, **kwargs):
         target_classes.append(kwargs["target_classes"])
@@ -289,17 +347,25 @@ def test_gradcam_video_exports_overlays_with_one_fixed_class(
             image_size=(4, 4),
         )
 
-    monkeypatch.setattr(video_pipeline, "load_model", lambda _config: loaded_model)
+    monkeypatch.setattr(
+        video_pipeline,
+        "load_model",
+        lambda _config, **_kwargs: loaded_model,
+    )
     monkeypatch.setattr(
         video_pipeline,
         "build_batch_preprocessor",
-        lambda *_args, **_kwargs: lambda _image: torch.ones(3, 4, 4),
+        lambda loaded, _config: (
+            lambda _image: torch.ones(3, *loaded.metadata.image_size)
+        ),
     )
     monkeypatch.setattr(video_pipeline, "extract_gradcam", fake_gradcam)
+    monkeypatch.setattr(video_pipeline, "overlay_attention", record_overlay)
 
     result = run_pipeline_from_config(config)
 
     assert target_classes == [[1]] * expected_frames
+    assert overlay_sizes == [(64, 48)] * expected_frames
     assert result.processed_frames == expected_frames
     assert result.frame_rate == (4 if sampling_rate == "auto" else 2)
     assert {path.name for path in result.output_paths} == {
@@ -310,7 +376,9 @@ def test_gradcam_video_exports_overlays_with_one_fixed_class(
         probe_video(path).duration == pytest.approx(1.0, abs=0.05)
         for path in result.output_paths
     )
+    assert probe_video(output_dir / "clip_gradcam_comparison.mp4").width == 128
     manifest = json.loads((output_dir / "run-manifest.json").read_text())
+    assert manifest["model"]["input_size"] == [3, 3, 4]
     assert manifest["configuration"]["video"]["sampling_rate"] == sampling_rate
     assert manifest["run"]["sampling_rate"] == result.frame_rate
 
@@ -378,7 +446,7 @@ def test_multiple_videos_have_independent_outputs_and_sampling_rates(
 
     model_loads = []
 
-    def load_once(_config):
+    def load_once(_config, **_kwargs):
         model_loads.append(True)
         return loaded_model
 
@@ -386,7 +454,9 @@ def test_multiple_videos_have_independent_outputs_and_sampling_rates(
     monkeypatch.setattr(
         video_pipeline,
         "build_batch_preprocessor",
-        lambda *_args, **_kwargs: lambda _image: torch.ones(3, 4, 4),
+        lambda loaded, _config: (
+            lambda _image: torch.ones(3, *loaded.metadata.image_size)
+        ),
     )
     monkeypatch.setattr(video_pipeline, "extract_gradcam", fake_gradcam)
 

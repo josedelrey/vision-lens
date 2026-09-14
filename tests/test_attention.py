@@ -1,13 +1,50 @@
 import pytest
 import torch
+from torch import nn
 
 from vision_lens.attention import (
     class_token_attention_to_map,
     compute_attention_rollout,
+    extract_gradcam,
     infer_patch_grid,
     infer_prefix_tokens_and_patch_grid,
     token_attention_to_map,
 )
+from vision_lens.models import ModelMetadata
+
+
+def test_gradcam_preserves_rectangular_input_geometry():
+    class TinyCNN(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.features = nn.Sequential(nn.Conv2d(3, 4, 3, padding=1), nn.ReLU())
+            self.pool = nn.AdaptiveAvgPool2d(1)
+            self.classifier = nn.Linear(4, 2)
+
+        def forward(self, inputs):
+            return self.classifier(self.pool(self.features(inputs)).flatten(1))
+
+    metadata = ModelMetadata(
+        architecture="cnn",
+        backend="torchvision",
+        name="tiny",
+        pretrained=False,
+        device="cpu",
+        input_size=(3, 12, 20),
+        image_size=(12, 20),
+        patch_size=None,
+        num_classes=2,
+        data_config={},
+    )
+    result = extract_gradcam(
+        TinyCNN(),
+        torch.rand(1, 3, 12, 20, requires_grad=True),
+        metadata,
+        target_layer="features.0",
+        target_classes=[1],
+    )
+
+    assert result.maps.shape == (1, 1, 12, 20)
 
 
 def test_infer_patch_grid_from_patch_size():
