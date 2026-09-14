@@ -3,6 +3,7 @@ import subprocess
 import sys
 
 import numpy as np
+import pytest
 import torch
 from PIL import Image
 
@@ -120,6 +121,34 @@ def test_save_grid_figure_preserves_exact_raster_dimensions(tmp_path):
 
     with Image.open(output_path) as grid:
         assert grid.size == (460, 256)
+
+
+@pytest.mark.parametrize(
+    ("background", "expected_rgb", "label_is_lighter"),
+    [(None, (255, 255, 255), False), ("#101010", (16, 16, 16), True)],
+)
+def test_labeled_grid_png_has_opaque_contrasting_background(
+    tmp_path, background, expected_rgb, label_is_lighter
+):
+    output_path = tmp_path / "grid.png"
+    save_grid_figure(
+        images=[Image.new("RGB", (8, 8), "purple")],
+        labels=["layer 2"],
+        output_path=output_path,
+        tile_size=(100, 50),
+        padding=10,
+        background=background,
+    )
+
+    with Image.open(output_path) as grid:
+        pixels = np.asarray(grid.convert("RGBA"))
+    assert np.all(pixels[:, :, 3] == 255)
+    assert tuple(pixels[0, 0, :3]) == expected_rgb
+    label_region = pixels[10:42, 10:110, :3]
+    if label_is_lighter:
+        assert label_region.max() > 200
+    else:
+        assert label_region.min() < 80
 
 
 def test_fixed_normalization_uses_the_configured_range():
