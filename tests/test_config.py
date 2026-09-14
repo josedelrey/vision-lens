@@ -1,4 +1,3 @@
-from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -7,11 +6,9 @@ import yaml
 from vision_lens.config import (
     config_to_dict,
     load_config,
-    load_preset,
     parse_config,
     resolved_config_yaml,
 )
-from vision_lens.presets import available_presets, get_preset
 
 
 def _minimal_config(
@@ -201,61 +198,6 @@ def test_patch_pca_defaults_and_overrides_are_in_analysis_section():
     assert overridden.analysis.foreground_side == "low"
 
 
-def test_patch_pca_shared_groups_resolve_paths_and_round_trip(tmp_path):
-    paths = [tmp_path / f"image-{index}.jpg" for index in range(3)]
-    for path in paths:
-        path.touch()
-    raw = _minimal_config(method="patch_pca")
-    raw["input"] = {"files": [path.name for path in paths]}
-    raw["analysis"]["shared_groups"] = [[paths[0].name, paths[2].name]]
-
-    config = parse_config(raw, base_dir=tmp_path)
-
-    assert config.analysis.shared_groups == ((paths[0], paths[2]),)
-    assert config_to_dict(config)["analysis"]["shared_groups"] == [
-        [str(paths[0]), str(paths[2])]
-    ]
-    assert parse_config(config_to_dict(config), base_dir=tmp_path) == config
-
-
-@pytest.mark.parametrize(
-    ("groups", "message"),
-    [
-        ([["one.jpg"]], "at least two"),
-        ([["one.jpg", "one.jpg"]], "cannot repeat"),
-        ([["one.jpg", "missing.jpg"]], "outside input"),
-        ("one.jpg", "must be a list"),
-    ],
-)
-def test_patch_pca_shared_groups_reject_invalid_members(tmp_path, groups, message):
-    source = tmp_path / "one.jpg"
-    source.touch()
-    raw = _minimal_config(method="patch_pca")
-    raw["input"] = {"files": [source.name]}
-    raw["analysis"]["shared_groups"] = groups
-
-    with pytest.raises(ValueError, match=message):
-        parse_config(raw, base_dir=tmp_path)
-
-
-def test_patch_pca_shared_groups_require_an_image_fit(tmp_path):
-    paths = [tmp_path / f"image-{index}.jpg" for index in range(2)]
-    for path in paths:
-        path.touch()
-    raw = _minimal_config(method="patch_pca")
-    raw["input"] = {"files": [str(path) for path in paths]}
-    raw["analysis"]["shared_groups"] = [[str(path) for path in paths]]
-
-    raw["analysis"]["save_projection"] = str(tmp_path / "projection.npz")
-    with pytest.raises(ValueError, match="requires projection='fit'"):
-        parse_config(raw)
-
-    raw["analysis"]["save_projection"] = None
-    raw["video"] = {}
-    with pytest.raises(ValueError, match="only supported for images"):
-        parse_config(raw)
-
-
 def test_load_config_resolves_yaml_and_overrides_from_project_root(
     tmp_path, monkeypatch
 ):
@@ -263,8 +205,11 @@ def test_load_config_resolves_yaml_and_overrides_from_project_root(
     config_dir = tmp_path / "nested" / "configs"
     config_dir.mkdir(parents=True)
     config_path = config_dir / "experiment.yaml"
-    raw_config = _minimal_config()
-    raw_config["input"]["paths"] = ["images/cat.jpg"]
+    raw_config = yaml.safe_load(
+        (Path(__file__).parents[1] / "configs/vit_attention.example.yaml").read_text()
+    )
+    raw_config["input"]["files"] = ["images/cat.jpg"]
+    raw_config["input"]["folders"] = []
     raw_config["output"]["directory"] = "figures"
     image_path = tmp_path / "images" / "cat.jpg"
     image_path.parent.mkdir()
@@ -284,22 +229,12 @@ def test_load_config_resolves_yaml_and_overrides_from_project_root(
     overridden = load_config(
         config_path,
         overrides={
-            "input": {"paths": ["images/other.jpg"]},
+            "input": {"files": ["images/other.jpg"]},
             "output": {"directory": "other-figures"},
         },
     )
     assert overridden.input.paths == (other_image,)
     assert overridden.output.directory == tmp_path / "other-figures"
-
-
-def test_preset_paths_use_project_root_from_nested_working_directory(monkeypatch):
-    repo_root = Path(__file__).parents[1]
-    monkeypatch.chdir(repo_root / "configs")
-
-    config = load_preset("dino-vits8-attention")
-
-    assert config.input.paths[0] == repo_root / "examples" / "1.jpg"
-    assert config.output.directory == repo_root / "outputs" / "dino_vits8_attention"
 
 
 def test_paths_fall_back_to_working_directory_without_project(tmp_path, monkeypatch):
@@ -308,8 +243,12 @@ def test_paths_fall_back_to_working_directory_without_project(tmp_path, monkeypa
     config_path = config_dir / "workflow.yaml"
     image_path = tmp_path / "photo.jpg"
     image_path.touch()
-    raw_config = _minimal_config()
-    raw_config["input"]["paths"] = ["photo.jpg"]
+    raw_config = yaml.safe_load(
+        (Path(__file__).parents[1] / "configs/vit_attention.example.yaml").read_text()
+    )
+    raw_config["input"]["files"] = ["photo.jpg"]
+    raw_config["input"]["folders"] = []
+    raw_config["output"]["directory"] = "outputs"
     config_path.write_text(yaml.safe_dump(raw_config), encoding="utf-8")
     monkeypatch.chdir(tmp_path)
 
@@ -320,69 +259,53 @@ def test_paths_fall_back_to_working_directory_without_project(tmp_path, monkeypa
 
 
 @pytest.mark.parametrize(
-    ("preset_name", "config_name"),
+    ("section", "key"),
     [
-        ("dino-vits8-attention", "vit_attention.example.yaml"),
-        (
-            "dinov2-reg4-attention",
-            "vit_attention.dinov2_reg4.example.yaml",
-        ),
-        ("dinov2-reg4-rollout", "vit_rollout.dinov2_reg4.example.yaml"),
-        ("resnet50-gradcam", "gradcam.example.yaml"),
-        ("dinov2-pca", "patch_pca.dinov2.example.yaml"),
+        ("input", "limit"),
+        ("model", "pretrained"),
+        ("preprocessing", "mean"),
+        ("analysis", "heads"),
+        ("runtime", "seed"),
+        ("visualization", "padding"),
+        ("output", "raw_format"),
     ],
 )
-def test_presets_resolve_to_the_existing_example_workflows(preset_name, config_name):
-    repo_root = Path(__file__).parents[1]
-
-    preset_config = load_preset(preset_name, base_dir=repo_root)
-    example_config = load_config(repo_root / "configs" / config_name)
-
-    if preset_name == "dinov2-pca":
-        assert preset_config.analysis.foreground_side == "high"
-        assert example_config.analysis.foreground_side == "low"
-        assert example_config.analysis.shared_groups == (
-            (repo_root / "examples/5.jpg", repo_root / "examples/6.jpg"),
-        )
-        example_config = replace(
-            example_config,
-            analysis=replace(
-                example_config.analysis, foreground_side="high", shared_groups=None
-            ),
-        )
-    assert preset_config == example_config
-
-
-def test_user_config_then_cli_values_override_preset_at_setting_level():
-    config = parse_config(
-        {
-            "preset": "dino-vits8-attention",
-            "analysis": {"heads": [1, 3], "head_fusion": "none"},
-        },
-        overrides={
-            "runtime": {"device": "cpu"},
-            "visualization": {"overlay_alpha": 0.25},
-        },
+def test_yaml_requires_every_setting_even_when_overridden(tmp_path, section, key):
+    raw = yaml.safe_load(
+        (Path(__file__).parents[1] / "configs/vit_attention.example.yaml").read_text()
     )
+    raw[section].pop(key)
+    path = tmp_path / "incomplete.yaml"
+    path.write_text(yaml.safe_dump(raw))
 
-    assert config.preset == "dino-vits8-attention"
-    assert config.analysis.layers == (2, 5, 8, 11)
-    assert config.analysis.heads == (1, 3)
-    assert config.analysis.head_fusion == "none"
-    assert config.preprocessing.image_size == 224
-    assert config.runtime.device == "cpu"
-    assert config.visualization.overlay_alpha == 0.25
-    assert config.visualization.cmap == "viridis"
+    with pytest.raises(ValueError, match=f"Missing setting.*{section}:.*{key}"):
+        load_config(path, overrides={section: {key: None}})
 
 
-def test_cli_selected_preset_replaces_config_selected_preset():
-    config = parse_config(
-        {"preset": "resnet50-gradcam"},
-        preset="dino-vits8-attention",
+def test_yaml_requires_all_video_settings(tmp_path):
+    raw = yaml.safe_load(
+        (
+            Path(__file__).parents[1] / "configs/vit_attention.video.example.yaml"
+        ).read_text()
     )
+    raw["video"].pop("codec")
+    path = tmp_path / "incomplete-video.yaml"
+    path.write_text(yaml.safe_dump(raw))
 
-    assert config.preset == "dino-vits8-attention"
-    assert config.analysis.method == "attention"
+    with pytest.raises(ValueError, match="Missing setting.*video: codec"):
+        load_config(path)
+
+
+def test_yaml_rejects_removed_preset_key(tmp_path):
+    raw = yaml.safe_load(
+        (Path(__file__).parents[1] / "configs/vit_attention.example.yaml").read_text()
+    )
+    raw["preset"] = "dino-vits8-attention"
+    path = tmp_path / "old-config.yaml"
+    path.write_text(yaml.safe_dump(raw))
+
+    with pytest.raises(ValueError, match="Unknown key.*preset"):
+        load_config(path)
 
 
 @pytest.mark.parametrize(
@@ -495,13 +418,6 @@ def test_missing_input_is_rejected_before_model_loading(tmp_path):
 
     with pytest.raises(ValueError, match="Input file.*missing.jpg"):
         parse_config(raw_config, base_dir=tmp_path)
-
-
-def test_unknown_preset_lists_available_choices():
-    with pytest.raises(ValueError, match="Unknown preset 'missing'") as error:
-        get_preset("missing")
-
-    assert all(name in str(error.value) for name in available_presets())
 
 
 def test_input_folders_patterns_recursion_and_limit_are_resolved(tmp_path):

@@ -1,9 +1,12 @@
-preset: resnet50-gradcam
-
 input:
   files: []
-  folders: [examples]
-  patterns: ["*.jpg", "*.jpeg", "*.png", "*.webp"]
+  folders:
+    - examples
+  patterns:
+    - '*.jpg'
+    - '*.jpeg'
+    - '*.png'
+    - '*.webp'
   recursive: false
   limit: null
 

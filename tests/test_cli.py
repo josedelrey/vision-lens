@@ -25,16 +25,11 @@ def test_cli_rejects_malformed_override():
         _parse_overrides(["preprocessing.image_size"])
 
 
-def test_cli_lists_presets_without_running_a_model(capsys):
-    assert main(["--list-presets"]) == 0
+def test_cli_requires_a_config_file(capsys):
+    with pytest.raises(SystemExit, match="2"):
+        main(["validate"])
 
-    assert capsys.readouterr().out.splitlines() == [
-        "dino-vits8-attention",
-        "dinov2-reg4-attention",
-        "dinov2-reg4-rollout",
-        "resnet50-gradcam",
-        "dinov2-pca",
-    ]
+    assert "--config" in capsys.readouterr().err
 
 
 def test_cli_hides_individual_output_paths_by_default(monkeypatch, capsys):
@@ -42,7 +37,7 @@ def test_cli_hides_individual_output_paths_by_default(monkeypatch, capsys):
 
     monkeypatch.setattr(cli, "run_pipeline_from_config", lambda _config: _result())
 
-    assert main(["--preset", "dinov2-pca"]) == 0
+    assert main(["--config", "configs/patch_pca.dinov2.example.yaml"]) == 0
 
     output_dir = Path("outputs/example")
     assert capsys.readouterr().out.splitlines() == [
@@ -59,7 +54,7 @@ def test_cli_validates_without_running_a_model(monkeypatch, capsys):
         lambda _config: pytest.fail("model pipeline should not run"),
     )
 
-    assert main(["validate", "--preset", "dinov2-pca"]) == 0
+    assert main(["validate", "--config", "configs/patch_pca.dinov2.example.yaml"]) == 0
     assert capsys.readouterr().out == "configuration is valid\n"
 
 
@@ -68,8 +63,8 @@ def test_cli_prints_resolved_configuration(capsys):
         main(
             [
                 "resolve",
-                "--preset",
-                "dinov2-pca",
+                "--config",
+                "configs/patch_pca.dinov2.example.yaml",
                 "--set",
                 "runtime.device=cpu",
             ]
@@ -88,8 +83,8 @@ def test_cli_reports_configuration_errors_without_a_traceback(capsys):
         main(
             [
                 "validate",
-                "--preset",
-                "dinov2-pca",
+                "--config",
+                "configs/patch_pca.dinov2.example.yaml",
                 "--set",
                 "visualization.colrmap=viridis",
             ]

@@ -1,9 +1,12 @@
-preset: dinov2-reg4-attention
-
 input:
   files: []
-  folders: [examples]
-  patterns: ["*.jpg", "*.jpeg", "*.png", "*.webp"]
+  folders:
+    - examples
+  patterns:
+    - '*.jpg'
+    - '*.jpeg'
+    - '*.png'
+    - '*.webp'
   recursive: false
   limit: null
 
@@ -26,7 +29,11 @@ preprocessing:
 
 analysis:
   method: attention
-  layers: [2, 5, 8, 11]
+  layers:
+    - 2
+    - 5
+    - 8
+    - 11
   heads: null
   head_fusion: mean
 

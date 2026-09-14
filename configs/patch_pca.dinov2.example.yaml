@@ -1,9 +1,13 @@
-preset: dinov2-pca
-
 input:
-  files: []
-  folders: [examples]
-  patterns: ["*.jpg", "*.jpeg", "*.png", "*.webp"]
+  files:
+    - examples/5.jpg
+    - examples/6.jpg
+  folders: []
+  patterns:
+    - '*.jpg'
+    - '*.jpeg'
+    - '*.png'
+    - '*.webp'
   recursive: false
   limit: null
 
@@ -31,8 +35,6 @@ analysis:
   projection: fit
   projection_path: null
   save_projection: null
-  shared_groups:
-    - [examples/5.jpg, examples/6.jpg]
 
 runtime:
   batch_size: 8

@@ -67,5 +67,9 @@ def test_video_example_config_selects_all_mp4_inputs_and_video_mode(
 )
 def test_image_example_config_selects_every_example_image(config_name):
     config = load_config(REPO_ROOT / "configs" / config_name)
-    expected = tuple(sorted((REPO_ROOT / "examples").glob("*.jpg")))
+    expected = (
+        (REPO_ROOT / "examples/5.jpg", REPO_ROOT / "examples/6.jpg")
+        if config_name == "patch_pca.dinov2.example.yaml"
+        else tuple(sorted((REPO_ROOT / "examples").glob("*.jpg")))
+    )
     assert config.input.paths == expected
