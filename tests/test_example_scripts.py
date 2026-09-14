@@ -6,10 +6,17 @@ REPO_ROOT = Path(__file__).parents[1]
 
 EXAMPLE_SCRIPTS = {
     "run_dino_vits8_attention.py": "vit_attention.example.yaml",
+    "run_dino_vits8_attention_video.py": "vit_attention.video.example.yaml",
     "run_dinov2_reg4_attention.py": "vit_attention.dinov2_reg4.example.yaml",
+    "run_dinov2_reg4_attention_video.py": (
+        "vit_attention.dinov2_reg4.video.example.yaml"
+    ),
     "run_dinov2_reg4_rollout.py": "vit_rollout.dinov2_reg4.example.yaml",
+    "run_dinov2_reg4_rollout_video.py": "vit_rollout.dinov2_reg4.video.example.yaml",
     "run_resnet50_gradcam.py": "gradcam.example.yaml",
+    "run_resnet50_gradcam_video.py": "gradcam.video.example.yaml",
     "run_dinov2_pca.py": "patch_pca.dinov2.example.yaml",
+    "run_dinov2_pca_video.py": "patch_pca.dinov2.video.example.yaml",
 }
 
 

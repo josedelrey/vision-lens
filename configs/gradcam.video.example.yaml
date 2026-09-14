@@ -1,0 +1,18 @@
+preset: resnet50-gradcam
+
+input:
+  files: [../videos/lego.mp4]
+
+runtime:
+  batch_size: 1
+
+video:
+  sampling_rate: 10.0
+  temporal_smoothing: 0.0
+
+output:
+  directory: ../outputs/video/resnet50_gradcam/lego
+  heatmaps: false
+  overlays: true
+  grids: true
+  overwrite: replace

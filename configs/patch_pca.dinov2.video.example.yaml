@@ -1,0 +1,19 @@
+preset: dinov2-pca
+
+input:
+  files: [../videos/fern.mp4]
+
+runtime:
+  batch_size: 1
+
+video:
+  sampling_rate: 10.0
+  pca_fit_frames: 32
+  temporal_smoothing: 0.0
+
+output:
+  directory: ../outputs/video/dinov2_pca/fern
+  heatmaps: true
+  overlays: false
+  grids: true
+  overwrite: replace
