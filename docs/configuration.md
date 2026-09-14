@@ -79,8 +79,8 @@ preprocessing:
 
 | Setting | Default | Description | Example |
 |---|---|---|---|
-| `image_size` | `672` | Square model input width and height. | `224` |
-| `resize` | `stretch` | `stretch`, `shortest`, `longest`, or `none`. | `longest` |
+| `image_size` | `672` | Square model input width and height for images; longest inference side for video. | `224` |
+| `resize` | `stretch` | Image resize mode: `stretch`, `shortest`, `longest`, or `none`. Video always uses aspect-ratio resizing. | `longest` |
 | `crop` | `none` | `none` or a `center` crop to `image_size`. | `center` |
 | `pad` | `none` | `none` or `center` padding to `image_size`. | `center` |
 | `interpolation` | `null` | Model-derived by default; override with `nearest`, `bilinear`, `bicubic`, or `lanczos`. | `bicubic` |
@@ -88,7 +88,7 @@ preprocessing:
 | `mean` | `null` | Model-derived RGB means, or three custom values. | `[0.5, 0.5, 0.5]` |
 | `std` | `null` | Model-derived positive RGB standard deviations. | `[0.5, 0.5, 0.5]` |
 
-`stretch` preserves the existing no-crop behavior. To retain aspect ratio, use
+For images, `stretch` preserves the existing no-crop behavior. To retain aspect ratio, use
 `longest` with `pad: center`, or `shortest` with `crop: center`. A transformed
 image must end at the model's required size. Known fixed models reject invalid
 sizes during configuration validation.
@@ -277,6 +277,15 @@ timestamp-sampled frame processing. `input` may select one or more video files;
 `runtime.batch_size` remains the maximum number of decoded frames held and
 analyzed together.
 
+Video inference preserves each source frame's aspect ratio. The longer side is
+scaled to `preprocessing.image_size`; ViT dimensions are then rounded to the
+nearest multiples of the model patch size. For example, a 1920×1080 video with
+`image_size: 672` and 14×14 patches runs at 672×378. CNNs use the proportional
+dimensions directly. Video frames are not cropped or padded, so set
+`preprocessing.crop` and `preprocessing.pad` to `none`. Image preprocessing
+keeps its configured resize behavior. Spatial maps are rendered against the
+decoded source frame, and the manifest records the rectangular model input.
+
 When multiple videos are selected, each runs independently in a subdirectory
 of `output.directory` named after its source file. Each subdirectory has its
 own outputs and `run-manifest.json`. Automatic sampling rates and fitted PCA
@@ -300,7 +309,7 @@ video:
 | `end_time` | `null` | Exclusive ending timestamp in seconds; `null` reads to the end. | `12.0` |
 | `sampling_rate` | `5.0` | Frames sampled per second and output playback FPS. Set `auto` to match the source video's reported average FPS. | `auto` |
 | `frame_limit` | `null` | Maximum sampled frames after applying the time range. | `120` |
-| `output_resolution` | `null` | Even `[width, height]` for every output video; `null` uses the source size, rounded down to even dimensions when needed. | `[1280, 720]` |
+| `output_resolution` | `null` | Even `[width, height]` for single-view output videos; `null` uses the source size, rounded down to even dimensions when needed. Comparison videos use approximately twice the width. | `[1280, 720]` |
 | `pca_fit_frames` | `32` | Maximum evenly distributed representative frames used to fit video PCA. | `64` |
 | `temporal_smoothing` | `0.0` | Previous-frame blend strength from `0` (off) to `1` (strongest). | `0.35` |
 | `codec` | `libx264` | PyAV/FFmpeg encoder name for MP4 outputs. | `libx264` |

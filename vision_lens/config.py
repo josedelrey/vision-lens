@@ -528,6 +528,11 @@ def validate_config(config: VisionLensConfig) -> None:
 
     method = config.analysis.method
     if config.video is not None:
+        if config.preprocessing.crop != "none" or config.preprocessing.pad != "none":
+            raise ValueError(
+                "Video aspect-ratio preprocessing requires preprocessing.crop and "
+                "preprocessing.pad to be 'none'."
+            )
         if (
             config.video.end_time is not None
             and config.video.end_time <= config.video.start_time
