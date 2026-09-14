@@ -19,6 +19,7 @@ from vision_lens.video import (
     probe_video,
     resolve_sampling_rate,
 )
+from vision_lens.video_pipeline import VideoBatchPipelineResult
 
 av = pytest.importorskip("av")
 
@@ -312,6 +313,95 @@ def test_gradcam_video_exports_overlays_with_one_fixed_class(
     manifest = json.loads((output_dir / "run-manifest.json").read_text())
     assert manifest["configuration"]["video"]["sampling_rate"] == sampling_rate
     assert manifest["run"]["sampling_rate"] == result.frame_rate
+
+
+def test_multiple_videos_have_independent_outputs_and_sampling_rates(
+    monkeypatch, tmp_path
+):
+    from vision_lens import video_pipeline
+
+    first = tmp_path / "first.mp4"
+    second = tmp_path / "second.mp4"
+    _make_video(first, frame_count=2, frame_rate=2)
+    _make_video(second, frame_count=3, frame_rate=3)
+    output_dir = tmp_path / "outputs"
+    config = parse_config(
+        {
+            "input": {"files": [str(first), str(second)]},
+            "model": {
+                "architecture": "cnn",
+                "backend": "torchvision",
+                "name": "mock_cnn",
+                "pretrained": False,
+            },
+            "preprocessing": {"image_size": 4},
+            "analysis": {
+                "method": "gradcam",
+                "target_layer": "features.0",
+                "target_class": 1,
+            },
+            "runtime": {"device": "cpu", "batch_size": 1},
+            "visualization": {},
+            "output": {
+                "directory": str(output_dir),
+                "heatmaps": False,
+                "overlays": True,
+                "grids": False,
+            },
+            "video": {"sampling_rate": "auto", "output_resolution": [64, 48]},
+        }
+    )
+    loaded_model = LoadedModel(
+        model=object(),
+        metadata=ModelMetadata(
+            architecture="cnn",
+            backend="torchvision",
+            name="mock_cnn",
+            pretrained=False,
+            device="cpu",
+            input_size=(3, 4, 4),
+            image_size=(4, 4),
+            patch_size=None,
+            num_classes=2,
+            data_config={"mean": (0.0, 0.0, 0.0), "std": (1.0, 1.0, 1.0)},
+        ),
+    )
+
+    def fake_gradcam(_model, inputs, _metadata, **kwargs):
+        return GradCamResult(
+            logits=torch.zeros(len(inputs), 2),
+            maps=torch.ones(len(inputs), 1, 4, 4),
+            target_layer=kwargs["target_layer"],
+            target_classes=tuple(kwargs["target_classes"]),
+            image_size=(4, 4),
+        )
+
+    model_loads = []
+
+    def load_once(_config):
+        model_loads.append(True)
+        return loaded_model
+
+    monkeypatch.setattr(video_pipeline, "load_model", load_once)
+    monkeypatch.setattr(
+        video_pipeline,
+        "build_batch_preprocessor",
+        lambda *_args, **_kwargs: lambda _image: torch.ones(3, 4, 4),
+    )
+    monkeypatch.setattr(video_pipeline, "extract_gradcam", fake_gradcam)
+
+    result = run_pipeline_from_config(config)
+
+    assert isinstance(result, VideoBatchPipelineResult)
+    assert len(model_loads) == 1
+    assert len(result.videos) == 2
+    assert [video.processed_frames for video in result.videos] == [2, 3]
+    assert [video.frame_rate for video in result.videos] == [2, 3]
+    assert {path.parent.name for path in result.output_paths} == {"first", "second"}
+    for name, frame_count in (("first", 2), ("second", 3)):
+        manifest = json.loads((output_dir / name / "run-manifest.json").read_text())
+        assert manifest["run"]["sampled_frames"] == frame_count
+        assert manifest["inputs"][0]["path"].endswith(f"{name}.mp4")
 
 
 def _make_video(path, *, frame_count, frame_rate):

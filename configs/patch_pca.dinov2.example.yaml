@@ -1,10 +1,8 @@
 preset: dinov2-pca
 
 input:
-  files:
-    - examples/5.jpg
-    - examples/6.jpg
-  folders: []
+  files: []
+  folders: [examples]
   patterns: ["*.jpg", "*.jpeg", "*.png", "*.webp"]
   recursive: false
   limit: null

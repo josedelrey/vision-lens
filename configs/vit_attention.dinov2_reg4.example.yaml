@@ -1,16 +1,8 @@
 preset: dinov2-reg4-attention
 
 input:
-  files:
-    - examples/1.jpg
-    - examples/2.jpg
-    - examples/3.jpg
-    - examples/4.jpg
-    - examples/5.jpg
-    - examples/6.jpg
-    - examples/7.jpg
-    - examples/8.jpg
-  folders: []
+  files: []
+  folders: [examples]
   patterns: ["*.jpg", "*.jpeg", "*.png", "*.webp"]
   recursive: false
   limit: null
@@ -56,7 +48,7 @@ visualization:
   dpi: null
   overlay_alpha: 0.8
   cmap: viridis
-  grid_format: pdf
+  grid_format: png
   normalization: per_map
   normalization_range: null
 

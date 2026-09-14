@@ -8,6 +8,7 @@ import yaml
 from vision_lens.config import load_config, load_preset, resolved_config_yaml
 from vision_lens.pipeline import run_pipeline_from_config
 from vision_lens.presets import available_presets
+from vision_lens.video_pipeline import VideoBatchPipelineResult
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -68,10 +69,17 @@ def main(argv: list[str] | None = None) -> int:
         result = run_pipeline_from_config(config)
     except (OSError, RuntimeError, ValueError) as error:
         parser.error(str(error))
-    print(
-        f"saved {len(result.output_paths)} outputs plus run manifest to "
-        f"{result.config.output.directory}"
-    )
+    if isinstance(result, VideoBatchPipelineResult):
+        print(
+            f"saved {len(result.output_paths)} outputs plus "
+            f"{len(result.videos)} run manifests under "
+            f"{result.config.output.directory}"
+        )
+    else:
+        print(
+            f"saved {len(result.output_paths)} outputs plus run manifest to "
+            f"{result.config.output.directory}"
+        )
     return 0
 
 

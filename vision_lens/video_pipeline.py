@@ -34,6 +34,7 @@ from vision_lens.processing import (
     InputBatch,
     build_batch_preprocessor,
     preprocess_batch,
+    unique_input_labels,
 )
 from vision_lens.progress import status, track_video_batches
 from vision_lens.video import (
@@ -64,18 +65,82 @@ class VideoPipelineResult:
 
 
 @dataclass(frozen=True)
+class VideoBatchPipelineResult:
+    config: VisionLensConfig
+    videos: tuple[VideoPipelineResult, ...]
+    output_paths: tuple[Path, ...]
+
+
+@dataclass(frozen=True)
 class _MapStream:
     name: str
     maps: Any
 
 
-def run_video_from_config(config: VisionLensConfig) -> VideoPipelineResult:
+def run_video_from_config(
+    config: VisionLensConfig,
+) -> VideoPipelineResult | VideoBatchPipelineResult:
     if config.video is None:
         raise ValueError("Video pipeline requires a video configuration section.")
+    if len(config.input.paths) == 1:
+        return _run_single_video_from_config(config)
+
+    video_configs = []
+    for source_path, label in zip(
+        config.input.paths, unique_input_labels(config.input.paths), strict=True
+    ):
+        analysis = config.analysis
+        if analysis.save_projection is not None:
+            projection_path = analysis.save_projection
+            analysis = replace(
+                analysis,
+                save_projection=projection_path.with_name(
+                    f"{projection_path.stem}_{label}{projection_path.suffix}"
+                ),
+            )
+        video_config = replace(
+            config,
+            input=replace(
+                config.input,
+                paths=(source_path,),
+                files=(source_path,),
+                folders=(),
+                limit=None,
+            ),
+            output=replace(config.output, directory=config.output.directory / label),
+            analysis=analysis,
+        )
+        check_manifest_overwrite(video_config)
+        video_configs.append(video_config)
+
+    require_video_dependencies()
+    _apply_seed(config.runtime.seed)
+    status(f"Loading model {config.model.name}")
+    loaded_model = load_model(config)
+    status(f"Model ready on {loaded_model.metadata.device}")
+    results = [
+        _run_single_video_from_config(video_config, loaded_model=loaded_model)
+        for video_config in video_configs
+    ]
+
+    return VideoBatchPipelineResult(
+        config=config,
+        videos=tuple(results),
+        output_paths=tuple(path for result in results for path in result.output_paths),
+    )
+
+
+def _run_single_video_from_config(
+    config: VisionLensConfig,
+    *,
+    loaded_model: LoadedModel | None = None,
+) -> VideoPipelineResult:
+    assert config.video is not None
 
     started_at = datetime.now(timezone.utc)
     check_manifest_overwrite(config)
-    require_video_dependencies()
+    if loaded_model is None:
+        require_video_dependencies()
     source_path = config.input.paths[0]
     source = probe_video(source_path)
     requested_config = config
@@ -89,9 +154,10 @@ def run_video_from_config(config: VisionLensConfig) -> VideoPipelineResult:
         f"at {config.video.sampling_rate:g} FPS"
     )
     _apply_seed(config.runtime.seed)
-    status(f"Loading model {config.model.name}")
-    loaded_model = load_model(config)
-    status(f"Model ready on {loaded_model.metadata.device}")
+    if loaded_model is None:
+        status(f"Loading model {config.model.name}")
+        loaded_model = load_model(config)
+        status(f"Model ready on {loaded_model.metadata.device}")
     _validate_gradcam_class(config, loaded_model)
     transform = build_batch_preprocessor(loaded_model, config.preprocessing)
     projection = _video_pca_projection(config, loaded_model, transform, source)

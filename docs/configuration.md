@@ -255,7 +255,7 @@ output:
 
 At least one output type must be enabled.
 
-Every completed run also writes `run-manifest.json` in the output directory.
+Every completed image or single-video run also writes `run-manifest.json` in the output directory.
 It records the fully resolved configuration, model identity and input size,
 runtime and package versions, input paths with stable collision-safe IDs and
 file metadata, output paths, and UTC start/completion times. Custom
@@ -273,9 +273,14 @@ uv sync --locked --no-dev --extra video
 ```
 
 The presence of a `video` section switches the selected image analysis to
-timestamp-sampled frame processing. `input` must select exactly one video file;
+timestamp-sampled frame processing. `input` may select one or more video files;
 `runtime.batch_size` remains the maximum number of decoded frames held and
 analyzed together.
+
+When multiple videos are selected, each runs independently in a subdirectory
+of `output.directory` named after its source file. Each subdirectory has its
+own outputs and `run-manifest.json`. Automatic sampling rates and fitted PCA
+projections are resolved separately for each video.
 
 ```yaml
 video:

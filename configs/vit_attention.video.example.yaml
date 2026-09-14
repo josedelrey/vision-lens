@@ -1,7 +1,11 @@
 preset: dino-vits8-attention
 
 input:
-  files: [videos/lego.mp4]
+  files: []
+  folders: [videos]
+  patterns: ["*.mp4"]
+  recursive: false
+  limit: null
 
 analysis:
   layers: [11]
@@ -14,7 +18,7 @@ video:
   temporal_smoothing: 0.0
 
 output:
-  directory: outputs/video/dino_vits8_attention/lego
+  directory: outputs/video/dino_vits8_attention
   heatmaps: false
   overlays: true
   grids: true

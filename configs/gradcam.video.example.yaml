@@ -1,7 +1,11 @@
 preset: resnet50-gradcam
 
 input:
-  files: [videos/lego.mp4]
+  files: []
+  folders: [videos]
+  patterns: ["*.mp4"]
+  recursive: false
+  limit: null
 
 runtime:
   batch_size: 1
@@ -11,7 +15,7 @@ video:
   temporal_smoothing: 0.0
 
 output:
-  directory: outputs/video/resnet50_gradcam/lego
+  directory: outputs/video/resnet50_gradcam
   heatmaps: false
   overlays: true
   grids: true
