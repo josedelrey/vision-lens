@@ -2,8 +2,8 @@ preset: dinov2-pca
 
 input:
   files:
-    - ../examples/5.jpg
-    - ../examples/6.jpg
+    - examples/5.jpg
+    - examples/6.jpg
   folders: []
   patterns: ["*.jpg", "*.jpeg", "*.png", "*.webp"]
   recursive: false
@@ -57,7 +57,7 @@ visualization:
   normalization_range: null
 
 output:
-  directory: ../outputs/dinov2_patch_pca
+  directory: outputs/dinov2_patch_pca
   heatmaps: true
   overlays: false
   grids: true

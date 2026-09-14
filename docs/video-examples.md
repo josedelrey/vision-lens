@@ -50,12 +50,12 @@ and output destination:
 
 ```bash
 uv run --extra video python scripts/run_dino_vits8_attention_video.py \
-  --set 'input.files=["../videos/fern.mp4"]' \
-  --set 'output.directory=../outputs/video/dino_vits8_attention/fern'
+  --set 'input.files=["videos/fern.mp4"]' \
+  --set 'output.directory=outputs/video/dino_vits8_attention/fern'
 ```
 
-Paths passed via `--set` resolve relative to the script's config file in
-`configs/`, not the shell's working directory. Other useful overrides include
+Paths passed via `--set` resolve relative to the project root, just like paths
+in the YAML config. Other useful overrides include
 `--set video.temporal_smoothing=0.2` to reduce flicker and
 `--set video.frame_limit=20` for a short preview. The Grad-CAM example uses the
 model's top predicted class for each frame by default; set

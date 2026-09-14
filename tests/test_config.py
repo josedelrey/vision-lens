@@ -186,22 +186,67 @@ def test_patch_pca_defaults_and_overrides_are_in_analysis_section():
     assert overridden.analysis.foreground_side == "low"
 
 
-def test_load_config_resolves_all_paths_from_config_file(tmp_path):
+def test_load_config_resolves_yaml_and_overrides_from_project_root(
+    tmp_path, monkeypatch
+):
+    (tmp_path / "pyproject.toml").write_text("[project]\nname = 'example'\n")
     config_dir = tmp_path / "nested" / "configs"
     config_dir.mkdir(parents=True)
     config_path = config_dir / "experiment.yaml"
     raw_config = _minimal_config()
-    raw_config["input"]["paths"] = ["../images/cat.jpg"]
-    raw_config["output"]["directory"] = "../figures"
-    image_path = tmp_path / "nested" / "images" / "cat.jpg"
+    raw_config["input"]["paths"] = ["images/cat.jpg"]
+    raw_config["output"]["directory"] = "figures"
+    image_path = tmp_path / "images" / "cat.jpg"
     image_path.parent.mkdir()
     image_path.touch()
     config_path.write_text(yaml.safe_dump(raw_config), encoding="utf-8")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
 
     config = load_config(config_path)
 
     assert config.input.paths == (image_path,)
-    assert config.output.directory == tmp_path / "nested" / "figures"
+    assert config.output.directory == tmp_path / "figures"
+
+    other_image = image_path.with_name("other.jpg")
+    other_image.touch()
+    overridden = load_config(
+        config_path,
+        overrides={
+            "input": {"paths": ["images/other.jpg"]},
+            "output": {"directory": "other-figures"},
+        },
+    )
+    assert overridden.input.paths == (other_image,)
+    assert overridden.output.directory == tmp_path / "other-figures"
+
+
+def test_preset_paths_use_project_root_from_nested_working_directory(monkeypatch):
+    repo_root = Path(__file__).parents[1]
+    monkeypatch.chdir(repo_root / "configs")
+
+    config = load_preset("dino-vits8-attention")
+
+    assert config.input.paths[0] == repo_root / "examples" / "1.jpg"
+    assert config.output.directory == repo_root / "outputs" / "dino_vits8_attention"
+
+
+def test_paths_fall_back_to_working_directory_without_project(tmp_path, monkeypatch):
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    config_path = config_dir / "workflow.yaml"
+    image_path = tmp_path / "photo.jpg"
+    image_path.touch()
+    raw_config = _minimal_config()
+    raw_config["input"]["paths"] = ["photo.jpg"]
+    config_path.write_text(yaml.safe_dump(raw_config), encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    config = load_config(config_path)
+
+    assert config.input.paths == (image_path,)
+    assert config.output.directory == tmp_path / "outputs"
 
 
 @pytest.mark.parametrize(

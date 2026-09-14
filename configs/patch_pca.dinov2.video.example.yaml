@@ -1,7 +1,7 @@
 preset: dinov2-pca
 
 input:
-  files: [../videos/fern.mp4]
+  files: [videos/fern.mp4]
 
 runtime:
   batch_size: 1
@@ -12,7 +12,7 @@ video:
   temporal_smoothing: 0.0
 
 output:
-  directory: ../outputs/video/dinov2_pca/fern
+  directory: outputs/video/dinov2_pca/fern
   heatmaps: true
   overlays: false
   grids: true

@@ -1,7 +1,7 @@
 preset: dinov2-reg4-attention
 
 input:
-  files: [../videos/fern.mp4]
+  files: [videos/fern.mp4]
 
 analysis:
   layers: [11]
@@ -14,7 +14,7 @@ video:
   temporal_smoothing: 0.0
 
 output:
-  directory: ../outputs/video/dinov2_reg4_attention/fern
+  directory: outputs/video/dinov2_reg4_attention/fern
   heatmaps: false
   overlays: true
   grids: true
