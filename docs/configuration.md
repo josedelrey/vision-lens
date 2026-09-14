@@ -5,8 +5,13 @@ Vision Lens uses seven YAML sections: `input`, `model`, `preprocessing`,
 optional. Unknown keys and incompatible settings are rejected before model
 weights are loaded.
 
-All relative paths are resolved from the YAML file's directory. Settings are
-merged in this order, with later values winning:
+All relative paths in presets, YAML files, and `--set` overrides are resolved
+from the project root (the nearest ancestor containing `pyproject.toml`). The
+loader searches upward from the config file first, then from the working
+directory. If neither is inside a project, paths use the working directory.
+Absolute paths remain unchanged. The path given to `--config` itself is a
+normal shell path; this rule applies to paths *inside* the configuration.
+Settings are merged in this order, with later values winning:
 
 1. Built-in defaults.
 2. The selected preset.
@@ -17,8 +22,8 @@ merged in this order, with later values winning:
 
 ```yaml
 input:
-  files: [../examples/1.jpg]
-  folders: [../photos]
+  files: [examples/1.jpg]
+  folders: [photos]
   patterns: ["*.jpg", "*.png"]
   recursive: true
   limit: 100
@@ -27,7 +32,7 @@ input:
 | Setting | Default | Description | Example |
 |---|---|---|---|
 | `files` | `[]` | Explicit image files, kept in the listed order. | `[cat.jpg]` |
-| `folders` | `[]` | Folders searched for matching files. | `[../photos]` |
+| `folders` | `[]` | Folders searched for matching files. | `[photos]` |
 | `patterns` | `['*.jpg', '*.jpeg', '*.png', '*.webp']` | Glob patterns applied to every folder. | `["*.jpg"]` |
 | `recursive` | `false` | Search inside nested folders. | `true` |
 | `limit` | `null` | Maximum inputs after expansion; `null` means all. | `50` |
@@ -137,7 +142,7 @@ analysis:
   foreground_side: low
   projection: fit
   projection_path: null
-  save_projection: ../outputs/pca-projection.npz
+  save_projection: outputs/pca-projection.npz
 ```
 
 | Setting | Default | Description | Example |
@@ -227,7 +232,7 @@ one range across the run. `fixed` clips to an explicit range.
 
 ```yaml
 output:
-  directory: ../outputs/custom
+  directory: outputs/custom
   heatmaps: true
   overlays: true
   grids: true
@@ -239,7 +244,7 @@ output:
 
 | Setting | Default | Description | Example |
 |---|---|---|---|
-| `directory` | required | Output folder. | `../outputs/run-1` |
+| `directory` | required | Output folder. | `outputs/run-1` |
 | `heatmaps` | `true` | Export heatmaps or PCA color maps. | `false` |
 | `overlays` | `true` (`false` for PCA) | Export overlays where supported. | `false` |
 | `grids` | `true` | Export comparison grids. | `false` |

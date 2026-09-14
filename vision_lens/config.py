@@ -281,7 +281,7 @@ def load_config(
 
     return parse_config(
         raw_config,
-        base_dir=config_path.parent,
+        base_dir=_project_root(config_path.parent),
         preset=preset,
         overrides=overrides,
     )
@@ -308,7 +308,7 @@ def parse_config(
     preset: str | None = None,
     overrides: dict[str, Any] | None = None,
 ) -> VisionLensConfig:
-    base = Path.cwd().resolve() if base_dir is None else Path(base_dir).resolve()
+    base = _project_root(Path.cwd()) if base_dir is None else Path(base_dir).resolve()
     preset_name = _preset_name(raw_config, preset)
     resolved = get_preset(preset_name) if preset_name is not None else {}
     user_config = {key: value for key, value in raw_config.items() if key != "preset"}
@@ -984,6 +984,15 @@ def _resolve_path(path: Any, base_dir: Path) -> Path:
     if not resolved.is_absolute():
         resolved = base_dir / resolved
     return resolved.resolve()
+
+
+def _project_root(start: Path) -> Path:
+    for candidate in (start, Path.cwd()):
+        path = candidate.resolve()
+        for directory in (path, *path.parents):
+            if (directory / "pyproject.toml").is_file():
+                return directory
+    return Path.cwd().resolve()
 
 
 def _optional_path(value: Any, base_dir: Path, field_name: str) -> Path | None:

@@ -99,7 +99,9 @@ uv run vision-lens run --config workflow.yaml
 ```
 
 Resolution order is **defaults → preset → YAML → CLI overrides**. Relative
-paths in YAML files are resolved from the YAML file's directory.
+paths in presets, YAML files, and CLI overrides are resolved from the project
+root (the nearest ancestor containing `pyproject.toml`), not the config file's
+directory. If no project root is found, they use the current working directory.
 
 ## Included workflows
 
