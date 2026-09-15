@@ -38,7 +38,7 @@ analysis:
   save_projection: null
 
 runtime:
-  batch_size: 8
+  batch_size: 1
   device: auto
   workers: 0
   precision: float32
@@ -54,8 +54,8 @@ visualization:
   background: null
   dpi: null
   output_size: match
-  interpolation: anyup
-  anyup_query_chunk_size: null
+  interpolation: anyup_soft
+  anyup_query_chunk_size: 4096
   overlay_alpha: 1.0
   overlay_alpha_curve:
     steepness: 15

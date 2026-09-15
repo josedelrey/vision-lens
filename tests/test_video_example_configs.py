@@ -38,8 +38,8 @@ def test_video_example_config_uses_expected_video_mode(tmp_path, config_name, me
     assert config.runtime.batch_size == 1
     assert config.output.directory == output
     assert config.visualization.output_size == "match"
-    assert config.visualization.anyup_query_chunk_size is not None
-    assert config.visualization.anyup_query_chunk_size > 0
+    assert config.visualization.interpolation == "anyup_soft"
+    assert config.visualization.anyup_query_chunk_size == 4096
     assert config.output.grids
     if method == "patch_pca":
         assert config.output.heatmaps
@@ -69,3 +69,5 @@ def test_image_example_config_selects_every_example_image(config_name):
     )
     assert config.input.paths == expected
     assert config.visualization.output_size == "match"
+    assert config.visualization.interpolation == "anyup_soft"
+    assert config.visualization.anyup_query_chunk_size == 4096

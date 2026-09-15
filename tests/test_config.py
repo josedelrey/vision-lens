@@ -683,11 +683,19 @@ def test_visualization_interpolation_rejects_unknown_modes(interpolation):
         parse_config(_minimal_config({"interpolation": interpolation}))
 
 
-@pytest.mark.parametrize("interpolation", ["anyup", "anyup_mask"])
+@pytest.mark.parametrize("interpolation", ["anyup", "anyup_mask", "anyup_soft"])
 def test_visualization_interpolation_accepts_anyup_modes(interpolation):
-    config = parse_config(_minimal_config({"interpolation": interpolation}))
+    values = {"interpolation": interpolation}
+    if interpolation == "anyup_soft":
+        values["anyup_query_chunk_size"] = 4096
+    config = parse_config(_minimal_config(values))
 
     assert config.visualization.interpolation == interpolation
+
+
+def test_anyup_soft_requires_query_chunking():
+    with pytest.raises(ValueError, match="anyup_soft.*anyup_query_chunk_size"):
+        parse_config(_minimal_config({"interpolation": "anyup_soft"}))
 
 
 def test_pca_projection_paths_resolve_from_config_and_load_must_exist(tmp_path):

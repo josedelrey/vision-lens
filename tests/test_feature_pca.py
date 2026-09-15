@@ -255,7 +255,7 @@ def test_patch_pca_bilinear_mask_interpolates_colors_then_applies_sharp_mask():
     assert np.all(bilinear_masked_pixels[:, 4, 0] > 0)
 
 
-@pytest.mark.parametrize("interpolation", ["anyup", "anyup_mask"])
+@pytest.mark.parametrize("interpolation", ["anyup", "anyup_mask", "anyup_soft"])
 def test_patch_pca_anyup_streams_projected_values(
     monkeypatch,
     interpolation,
@@ -271,6 +271,7 @@ def test_patch_pca_anyup_streams_projected_values(
         *,
         values=None,
         q_chunk_size,
+        attention_mode="hard",
     ):
         calls.append(
             (
@@ -279,6 +280,7 @@ def test_patch_pca_anyup_streams_projected_values(
                 None if values is None else values.clone(),
                 output_size,
                 q_chunk_size,
+                attention_mode,
             )
         )
         source = features if values is None else values
@@ -313,6 +315,7 @@ def test_patch_pca_anyup_streams_projected_values(
     assert torch.equal(calls[0][2], calls[0][1])
     assert calls[0][3] == (2, 4)
     assert calls[0][4] == 7
+    assert calls[0][5] == ("soft" if interpolation == "anyup_soft" else "hard")
     assert pixels.shape == (2, 4, 3)
     if interpolation == "anyup":
         assert len(calls) == 2
@@ -342,6 +345,7 @@ def test_patch_pca_anyup_fits_projection_from_original_features(monkeypatch):
         *,
         values=None,
         q_chunk_size,
+        attention_mode="hard",
     ):
         assert q_chunk_size == 5
         source = features if values is None else values
