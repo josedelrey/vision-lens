@@ -11,11 +11,11 @@ REPO_ROOT = Path(__file__).parents[1]
 @pytest.mark.parametrize(
     ("config_name", "method"),
     [
-        ("vit_attention.video.example.yaml", "attention"),
-        ("vit_attention.dinov2_reg4.video.example.yaml", "attention"),
-        ("vit_rollout.dinov2_reg4.video.example.yaml", "rollout"),
-        ("gradcam.video.example.yaml", "gradcam"),
-        ("patch_pca.dinov2.video.example.yaml", "patch_pca"),
+        ("vit_attention.video.yaml", "attention"),
+        ("vit_attention.dinov2_reg4.video.yaml", "attention"),
+        ("vit_rollout.dinov2_reg4.video.yaml", "rollout"),
+        ("gradcam.video.yaml", "gradcam"),
+        ("patch_pca.dinov2.video.yaml", "patch_pca"),
     ],
 )
 def test_video_example_config_selects_all_mp4_inputs_and_video_mode(
@@ -58,18 +58,18 @@ def test_video_example_config_selects_all_mp4_inputs_and_video_mode(
 @pytest.mark.parametrize(
     "config_name",
     [
-        "vit_attention.example.yaml",
-        "vit_attention.dinov2_reg4.example.yaml",
-        "vit_rollout.dinov2_reg4.example.yaml",
-        "gradcam.example.yaml",
-        "patch_pca.dinov2.example.yaml",
+        "vit_attention.yaml",
+        "vit_attention.dinov2_reg4.yaml",
+        "vit_rollout.dinov2_reg4.yaml",
+        "gradcam.yaml",
+        "patch_pca.dinov2.yaml",
     ],
 )
 def test_image_example_config_selects_every_example_image(config_name):
     config = load_config(REPO_ROOT / "configs" / config_name)
     expected = (
         (REPO_ROOT / "examples/5.jpg", REPO_ROOT / "examples/6.jpg")
-        if config_name == "patch_pca.dinov2.example.yaml"
+        if config_name == "patch_pca.dinov2.yaml"
         else tuple(sorted((REPO_ROOT / "examples").glob("*.jpg")))
     )
     assert config.input.paths == expected

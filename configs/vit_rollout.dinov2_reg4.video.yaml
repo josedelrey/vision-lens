@@ -51,8 +51,12 @@ visualization:
   background: null
   dpi: null
   overlay_alpha: 0.8
+  overlay_alpha_curve: null
   cmap: viridis
-  cmap_black: null
+  cmap_black:
+    threshold: 20
+    blend_width: 35
+    transparent: true
   grid_format: png
   normalization: per_map
   normalization_range: null

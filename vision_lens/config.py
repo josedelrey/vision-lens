@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import isfinite
 from pathlib import Path
 from typing import Any, Literal
 
@@ -49,6 +50,7 @@ SECTION_KEYS = {
         "background",
         "dpi",
         "overlay_alpha",
+        "overlay_alpha_curve",
         "cmap",
         "cmap_black",
         "grid_format",
@@ -214,6 +216,7 @@ class VisualizationConfig:
     grid_format: str = "png"
     normalization: NormalizationMode = "per_map"
     normalization_range: tuple[float, float] | None = None
+    overlay_alpha_curve: float | None = None
 
     @property
     def render_cmap(self) -> str | ColormapSpec:
@@ -432,6 +435,9 @@ def parse_config(
             overlay_alpha=_unit_interval(
                 visualization_section.get("overlay_alpha", 0.45),
                 "visualization.overlay_alpha",
+            ),
+            overlay_alpha_curve=_overlay_alpha_curve(
+                visualization_section.get("overlay_alpha_curve")
             ),
             cmap=_optional_str(
                 visualization_section.get("cmap", "viridis"),
@@ -671,6 +677,11 @@ def config_to_dict(config: VisionLensConfig) -> dict[str, Any]:
         "background": config.visualization.background,
         "dpi": config.visualization.dpi,
         "overlay_alpha": config.visualization.overlay_alpha,
+        "overlay_alpha_curve": (
+            None
+            if config.visualization.overlay_alpha_curve is None
+            else {"steepness": config.visualization.overlay_alpha_curve}
+        ),
         "cmap": config.visualization.cmap,
         "cmap_black": (
             None
@@ -1189,6 +1200,25 @@ def _foreground_threshold(value: Any) -> float | Literal["auto"]:
     if value == "auto":
         return "auto"
     return _unit_interval(value, "analysis.foreground_threshold")
+
+
+def _overlay_alpha_curve(value: Any) -> float | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict) or set(value) != {"steepness"}:
+        raise ValueError(
+            "visualization.overlay_alpha_curve must be null or contain exactly "
+            "steepness."
+        )
+    steepness = _positive_number(
+        value["steepness"],
+        "visualization.overlay_alpha_curve.steepness",
+    )
+    if not isfinite(steepness):
+        raise ValueError(
+            "visualization.overlay_alpha_curve.steepness must be finite."
+        )
+    return steepness
 
 
 def _cmap_black(value: Any) -> tuple[int, int, bool] | None:

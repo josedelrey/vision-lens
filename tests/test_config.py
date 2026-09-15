@@ -56,6 +56,7 @@ def test_parse_config_applies_documented_defaults():
     assert config.preprocessing.interpolation is None
     assert config.preprocessing.normalize is True
     assert config.visualization.overlay_alpha == 0.45
+    assert config.visualization.overlay_alpha_curve is None
     assert config.visualization.cmap == "viridis"
     assert config.visualization.grid_format == "png"
     assert config.visualization.columns is None
@@ -207,6 +208,41 @@ def test_colormap_black_settings_parse_and_round_trip():
     }
 
 
+def test_overlay_alpha_curve_parses_and_round_trips():
+    raw = _minimal_config(
+        {
+            "overlay_alpha": 0.35,
+            "overlay_alpha_curve": {"steepness": 12},
+        }
+    )
+
+    config = parse_config(raw)
+
+    assert config.visualization.overlay_alpha_curve == 12
+    assert config_to_dict(config)["visualization"]["overlay_alpha_curve"] == {
+        "steepness": 12
+    }
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        {},
+        {"steepness": 0},
+        {"steepness": -1},
+        {"steepness": True},
+        {"steepness": float("inf")},
+        {"steepness": float("nan")},
+        {"steepness": 10, "midpoint": 0.5},
+    ],
+)
+def test_overlay_alpha_curve_rejects_invalid_settings(value):
+    raw = _minimal_config({"overlay_alpha_curve": value})
+
+    with pytest.raises(ValueError, match="visualization.overlay_alpha_curve"):
+        parse_config(raw)
+
+
 @pytest.mark.parametrize(
     "value",
     [
@@ -265,7 +301,7 @@ def test_load_config_resolves_yaml_and_overrides_from_project_root(
     config_dir.mkdir(parents=True)
     config_path = config_dir / "experiment.yaml"
     raw_config = yaml.safe_load(
-        (Path(__file__).parents[1] / "configs/vit_attention.example.yaml").read_text()
+        (Path(__file__).parents[1] / "configs/vit_attention.yaml").read_text()
     )
     raw_config["input"]["files"] = ["images/cat.jpg"]
     raw_config["input"]["folders"] = []
@@ -303,7 +339,7 @@ def test_paths_fall_back_to_working_directory_without_project(tmp_path, monkeypa
     image_path = tmp_path / "photo.jpg"
     image_path.touch()
     raw_config = yaml.safe_load(
-        (Path(__file__).parents[1] / "configs/vit_attention.example.yaml").read_text()
+        (Path(__file__).parents[1] / "configs/vit_attention.yaml").read_text()
     )
     raw_config["input"]["files"] = ["photo.jpg"]
     raw_config["input"]["folders"] = []
@@ -331,7 +367,7 @@ def test_paths_fall_back_to_working_directory_without_project(tmp_path, monkeypa
 )
 def test_yaml_requires_every_setting_even_when_overridden(tmp_path, section, key):
     raw = yaml.safe_load(
-        (Path(__file__).parents[1] / "configs/vit_attention.example.yaml").read_text()
+        (Path(__file__).parents[1] / "configs/vit_attention.yaml").read_text()
     )
     raw[section].pop(key)
     path = tmp_path / "incomplete.yaml"
@@ -343,9 +379,7 @@ def test_yaml_requires_every_setting_even_when_overridden(tmp_path, section, key
 
 def test_yaml_requires_all_video_settings(tmp_path):
     raw = yaml.safe_load(
-        (
-            Path(__file__).parents[1] / "configs/vit_attention.video.example.yaml"
-        ).read_text()
+        (Path(__file__).parents[1] / "configs/vit_attention.video.yaml").read_text()
     )
     raw["video"].pop("codec")
     path = tmp_path / "incomplete-video.yaml"
@@ -357,7 +391,7 @@ def test_yaml_requires_all_video_settings(tmp_path):
 
 def test_yaml_rejects_removed_preset_key(tmp_path):
     raw = yaml.safe_load(
-        (Path(__file__).parents[1] / "configs/vit_attention.example.yaml").read_text()
+        (Path(__file__).parents[1] / "configs/vit_attention.yaml").read_text()
     )
     raw["preset"] = "dino-vits8-attention"
     path = tmp_path / "old-config.yaml"

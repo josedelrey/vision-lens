@@ -9,7 +9,7 @@ def test_documented_example_configs_validate_without_loading_models(tmp_path):
     video_input = tmp_path / "sample.mp4"
     video_input.touch()
 
-    for path in sorted((REPO_ROOT / "configs").glob("*.example.yaml")):
+    for path in sorted((REPO_ROOT / "configs").glob("*.yaml")):
         overrides = (
             {"input": {"files": [str(video_input)], "folders": []}}
             if ".video." in path.name

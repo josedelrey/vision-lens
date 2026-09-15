@@ -41,13 +41,13 @@ all dependencies), then commit both files.
 Run one image through the DINO attention configuration:
 
 ```bash
-uv run vision-lens --config configs/vit_attention.example.yaml --set input.limit=1
+uv run vision-lens --config configs/vit_attention.yaml --set input.limit=1
 ```
 
 Reproduce the DINOv2 PCA example:
 
 ```bash
-uv run vision-lens --config configs/patch_pca.dinov2.example.yaml
+uv run vision-lens --config configs/patch_pca.dinov2.yaml
 ```
 
 Runs print model-loading status and show `tqdm` progress by image or sampled
@@ -92,11 +92,11 @@ directory. If no project root is found, they use the current working directory.
 
 | Example configuration | Analysis | Model | Input size |
 |---|---|---|---:|
-| `vit_attention.example.yaml` | attention | DINO ViT-S/8 | 224 |
-| `vit_attention.dinov2_reg4.example.yaml` | attention | DINOv2 ViT-S/14 + registers | 672 |
-| `vit_rollout.dinov2_reg4.example.yaml` | rollout | DINOv2 ViT-S/14 + registers | 672 |
-| `gradcam.example.yaml` | Grad-CAM | ResNet-50 | 672 |
-| `patch_pca.dinov2.example.yaml` | patch PCA | DINOv2 ViT-B/14 | 672 |
+| `vit_attention.yaml` | attention | DINO ViT-S/8 | 224 |
+| `vit_attention.dinov2_reg4.yaml` | attention | DINOv2 ViT-S/14 + registers | 672 |
+| `vit_rollout.dinov2_reg4.yaml` | rollout | DINOv2 ViT-S/14 + registers | 672 |
+| `gradcam.yaml` | Grad-CAM | ResNet-50 | 672 |
+| `patch_pca.dinov2.yaml` | patch PCA | DINOv2 ViT-B/14 | 672 |
 
 The [configuration reference](https://github.com/josedelrey/vision-lens/blob/main/docs/configuration.md)
 documents every setting, validation rule, and CLI override.

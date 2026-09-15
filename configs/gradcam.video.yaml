@@ -1,24 +1,21 @@
 input:
   files: []
   folders:
-    - examples
+    - videos
   patterns:
-    - '*.jpg'
-    - '*.jpeg'
-    - '*.png'
-    - '*.webp'
+    - '*.mp4'
   recursive: false
   limit: null
 
 model:
-  architecture: vit
-  backend: timm
-  name: vit_small_patch8_224.dino
+  architecture: cnn
+  backend: torchvision
+  name: resnet50
   pretrained: true
   options: {}
 
 preprocessing:
-  image_size: 224
+  image_size: 672
   resize: stretch
   crop: none
   pad: none
@@ -28,17 +25,12 @@ preprocessing:
   std: null
 
 analysis:
-  method: attention
-  layers:
-    - 2
-    - 5
-    - 8
-    - 11
-  heads: null
-  head_fusion: mean
+  method: gradcam
+  target_layer: layer4
+  target_class: null
 
 runtime:
-  batch_size: 8
+  batch_size: 1
   device: auto
   workers: 0
   precision: float32
@@ -54,18 +46,32 @@ visualization:
   background: null
   dpi: null
   overlay_alpha: 0.8
+  overlay_alpha_curve: null
   cmap: viridis
-  cmap_black: null
+  cmap_black:
+    threshold: 20
+    blend_width: 35
+    transparent: true
   grid_format: png
   normalization: per_map
   normalization_range: null
 
 output:
-  directory: outputs/dino_vits8_attention
-  heatmaps: true
+  directory: outputs/video/resnet50_gradcam
+  heatmaps: false
   overlays: true
   grids: true
   raw_arrays: false
   image_format: png
   raw_format: npy
   overwrite: replace
+
+video:
+  start_time: 0.0
+  end_time: null
+  sampling_rate: auto
+  frame_limit: null
+  output_resolution: null
+  pca_fit_frames: 32
+  temporal_smoothing: 0.0
+  codec: libx264

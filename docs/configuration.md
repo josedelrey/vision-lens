@@ -98,7 +98,7 @@ sizes during configuration validation.
 All four analyses run through the same command:
 
 ```bash
-uv run vision-lens run --config configs/gradcam.example.yaml
+uv run vision-lens run --config configs/gradcam.yaml
 ```
 
 ### Attention and rollout
@@ -218,6 +218,8 @@ visualization:
   background: white
   dpi: 150
   overlay_alpha: 0.6
+  overlay_alpha_curve:
+    steepness: 10
   cmap: magma
   cmap_black:
     threshold: 20
@@ -239,6 +241,7 @@ visualization:
 | `background` | `null` | Pillow/Matplotlib color. | `"#101010"` |
 | `dpi` | `null` | Output DPI; `null` retains workflow behavior. | `150` |
 | `overlay_alpha` | `0.45` | Heatmap opacity from 0 to 1. | `0.8` |
+| `overlay_alpha_curve` | `null` | Optional sigmoid-like, value-dependent overlay opacity. `steepness` must be positive; larger values make the transition around 0.5 sharper. | `{steepness: 10}` |
 | `cmap` | `viridis` | Matplotlib colormap. | `magma` |
 | `cmap_black` | `null` | Optional black start using 0–255 palette positions. `threshold` stays black through that position; `blend_width` controls the linear transition; `transparent` reveals the source beneath pure black in overlays. | `{threshold: 20, blend_width: 35, transparent: true}` |
 | `grid_format` | `png` | `png`, `pdf`, or `svg`. | `pdf` |
@@ -247,6 +250,13 @@ visualization:
 
 `per_map` is the historical attention and Grad-CAM behavior. `shared` computes
 one range across the run. `fixed` clips to an explicit range.
+Set `overlay_alpha_curve` to `null` to retain the constant `overlay_alpha`.
+When enabled, the normalized map value controls opacity through an
+endpoint-normalized sigmoid: the lowest value is exactly transparent, the
+highest is exactly opaque, and `overlay_alpha` is ignored. The curve is
+applied after the colormap and optional `cmap_black` processing. If
+`cmap_black.transparent` is also enabled, its pure-black pixels remain fully
+transparent; all other pixels use the sigmoid opacity.
 Set `cmap_black` to `null` to use the selected colormap unchanged. With a
 threshold of `20` and a blend width of `35`, normalized values through palette
 position 20 are pure black, values from 20 to 55 blend linearly from black into
@@ -375,19 +385,19 @@ sample timestamps.
 Validate without loading a model:
 
 ```bash
-uv run vision-lens validate --config configs/vit_attention.example.yaml
+uv run vision-lens validate --config configs/vit_attention.yaml
 ```
 
 Print final values, expanded inputs, and absolute paths:
 
 ```bash
-uv run vision-lens resolve --config configs/vit_attention.example.yaml
+uv run vision-lens resolve --config configs/vit_attention.yaml
 ```
 
 Override any leaf setting from the command line using YAML values:
 
 ```bash
-uv run vision-lens run --config configs/gradcam.example.yaml \
+uv run vision-lens run --config configs/gradcam.yaml \
   --set input.limit=4 \
   --set runtime.batch_size=2 \
   --set analysis.target_class=207 \
