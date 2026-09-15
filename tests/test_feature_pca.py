@@ -229,7 +229,7 @@ def test_patch_pca_nearest_preserves_constant_patch_blocks():
     assert np.all(pixels[:, 4:] == np.array([255, 0, 0]))
 
 
-def test_patch_pca_mask_interpolates_all_colors_then_applies_sharp_mask():
+def test_patch_pca_bilinear_mask_interpolates_colors_then_applies_sharp_mask():
     embeddings = torch.tensor([[[0.0, 3.0, 0.0], [3.0, 0.0, 0.0]]])
     projection = _two_patch_projection()
     bilinear = project_patch_embeddings(
@@ -239,20 +239,20 @@ def test_patch_pca_mask_interpolates_all_colors_then_applies_sharp_mask():
         projection=projection,
         interpolation="bilinear",
     )
-    masked = project_patch_embeddings(
+    bilinear_masked = project_patch_embeddings(
         embeddings,
         patch_grid=(1, 2),
         image_size=(2, 8),
         projection=projection,
-        interpolation="mask",
+        interpolation="bilinear_mask",
     )
 
     bilinear_pixels = np.asarray(bilinear.images[0])
-    masked_pixels = np.asarray(masked.images[0])
-    assert np.all(masked_pixels[:, :4] == 0)
-    assert np.all(masked_pixels[:, 4, 1] > 0)
+    bilinear_masked_pixels = np.asarray(bilinear_masked.images[0])
+    assert np.all(bilinear_masked_pixels[:, :4] == 0)
+    assert np.all(bilinear_masked_pixels[:, 4, 1] > 0)
     assert np.all(bilinear_pixels[:, 4, 1] == 0)
-    assert np.all(masked_pixels[:, 4, 0] > 0)
+    assert np.all(bilinear_masked_pixels[:, 4, 0] > 0)
 
 
 def _two_patch_projection() -> PatchPCAProjection:

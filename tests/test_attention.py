@@ -172,7 +172,7 @@ def test_nearest_attention_upscaling_preserves_patch_blocks():
     assert torch.equal(maps, expected)
 
 
-def test_mask_attention_upscaling_is_bilinear():
+def test_bilinear_mask_attention_upscaling_is_bilinear():
     token_attention = torch.zeros(1, 5, 5)
     token_attention[:, 0, 1:] = torch.tensor([0.0, 1.0, 1.0, 0.0])
 
@@ -183,15 +183,15 @@ def test_mask_attention_upscaling_is_bilinear():
         normalize=False,
         interpolation="bilinear",
     )
-    masked = token_attention_to_map(
+    bilinear_masked = token_attention_to_map(
         token_attention,
         image_size=(6, 6),
         patch_size=(3, 3),
         normalize=False,
-        interpolation="mask",
+        interpolation="bilinear_mask",
     )
 
-    assert torch.equal(masked, bilinear)
+    assert torch.equal(bilinear_masked, bilinear)
 
 
 def test_class_token_attention_to_map_mean_fusion_values():

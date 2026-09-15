@@ -15,7 +15,7 @@ from vision_lens.models import ModelMetadata
 
 ForegroundThreshold = float | Literal["auto"]
 RGBFitScope = Literal["foreground", "all"]
-Interpolation = Literal["nearest", "bilinear", "mask"]
+Interpolation = Literal["nearest", "bilinear", "bilinear_mask"]
 _OTSU_BINS = 256
 
 
@@ -110,8 +110,10 @@ def project_patch_embeddings(
         raise ValueError("foreground_side must be one of: high, low.")
     if rgb_fit_scope not in {"foreground", "all"}:
         raise ValueError("rgb_fit_scope must be one of: foreground, all.")
-    if interpolation not in {"nearest", "bilinear", "mask"}:
-        raise ValueError("interpolation must be one of: nearest, bilinear, mask.")
+    if interpolation not in {"nearest", "bilinear", "bilinear_mask"}:
+        raise ValueError(
+            "interpolation must be one of: nearest, bilinear, bilinear_mask."
+        )
 
     embeddings = torch.as_tensor(patch_embeddings).detach().float().cpu()
     if embeddings.ndim != 3:
@@ -156,7 +158,9 @@ def project_patch_embeddings(
         dtype=flattened.dtype,
     )
     projected_mask = (
-        torch.ones_like(foreground_mask) if interpolation == "mask" else foreground_mask
+        torch.ones_like(foreground_mask)
+        if interpolation == "bilinear_mask"
+        else foreground_mask
     )
     projected_embeddings = flattened[projected_mask]
     if projected_embeddings.numel():
@@ -197,7 +201,7 @@ def render_patch_pca_images(
     image_size: tuple[int, int],
     interpolation: Interpolation,
 ) -> tuple[Image.Image, ...]:
-    """Render projected patch colors, applying mask-mode edges after interpolation."""
+    """Render projected patch colors, applying masked edges after interpolation."""
     colors = torch.as_tensor(rgb_patches).detach().float().cpu()
     masks = torch.as_tensor(foreground_mask).detach().bool().cpu()
     batch_size, patch_count, channels = colors.shape
@@ -205,8 +209,10 @@ def render_patch_pca_images(
         raise ValueError("rgb_patches shape does not match the patch grid.")
     if tuple(masks.shape) != (batch_size, patch_count):
         raise ValueError("foreground_mask shape does not match rgb_patches.")
-    if interpolation not in {"nearest", "bilinear", "mask"}:
-        raise ValueError("interpolation must be one of: nearest, bilinear, mask.")
+    if interpolation not in {"nearest", "bilinear", "bilinear_mask"}:
+        raise ValueError(
+            "interpolation must be one of: nearest, bilinear, bilinear_mask."
+        )
 
     patch_images = colors.reshape(batch_size, patch_grid[0], patch_grid[1], 3).permute(
         0, 3, 1, 2
@@ -216,7 +222,7 @@ def render_patch_pca_images(
     rendered = functional.interpolate(
         patch_images, size=image_size, mode=mode, **options
     )
-    if interpolation == "mask":
+    if interpolation == "bilinear_mask":
         patch_masks = masks.reshape(batch_size, 1, *patch_grid).float()
         sharp_mask = functional.interpolate(
             patch_masks, size=image_size, mode="nearest"
