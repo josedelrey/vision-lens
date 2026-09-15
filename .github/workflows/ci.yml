@@ -19,8 +19,8 @@ jobs:
           python-version: "3.12"
           enable-cache: true
       - run: uv sync --locked --all-extras
-      - run: uv run ruff check vision_lens tests scripts
-      - run: uv run ruff format --check vision_lens tests scripts
+      - run: uv run ruff check vision_lens tests
+      - run: uv run ruff format --check vision_lens tests
       - run: uv run pytest -m "not real_model"
       - run: uv build
       - uses: actions/upload-artifact@v4

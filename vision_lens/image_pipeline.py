@@ -760,9 +760,7 @@ def export_attention_outputs(
                     layer_page,
                     output_path=output_path,
                     alpha=alpha,
-                    alpha_curve_steepness=(
-                        visualization.overlay_alpha_curve_steepness
-                    ),
+                    alpha_curve_steepness=(visualization.overlay_alpha_curve_steepness),
                     alpha_curve_midpoint=visualization.overlay_alpha_curve_midpoint,
                     cmap=cmap,
                     head_index=head_index,
@@ -802,9 +800,7 @@ def export_attention_outputs(
                     labels=[labels[index] for index in indices],
                     output_path=output_path,
                     alpha=alpha,
-                    alpha_curve_steepness=(
-                        visualization.overlay_alpha_curve_steepness
-                    ),
+                    alpha_curve_steepness=(visualization.overlay_alpha_curve_steepness),
                     alpha_curve_midpoint=visualization.overlay_alpha_curve_midpoint,
                     cmap=cmap,
                     head_index=head_index,
@@ -1029,9 +1025,7 @@ def export_rollout_comparison_outputs(
                     rollout=rollout_page,
                     image_index=image_index,
                     alpha=alpha,
-                    alpha_curve_steepness=(
-                        visualization.overlay_alpha_curve_steepness
-                    ),
+                    alpha_curve_steepness=(visualization.overlay_alpha_curve_steepness),
                     alpha_curve_midpoint=visualization.overlay_alpha_curve_midpoint,
                     cmap=cmap,
                     columns=visualization.columns,
@@ -1154,9 +1148,7 @@ def export_gradcam_outputs(
                 labels=[labels[index] for index in indices],
                 output_path=grid_path,
                 alpha=alpha,
-                alpha_curve_steepness=(
-                    visualization.overlay_alpha_curve_steepness
-                ),
+                alpha_curve_steepness=(visualization.overlay_alpha_curve_steepness),
                 alpha_curve_midpoint=visualization.overlay_alpha_curve_midpoint,
                 cmap=cmap,
                 columns=visualization.columns,

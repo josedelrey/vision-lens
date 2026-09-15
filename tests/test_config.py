@@ -233,9 +233,7 @@ def test_overlay_alpha_curve_parses_and_round_trips():
 
 
 def test_overlay_alpha_curve_midpoint_defaults_to_half():
-    config = parse_config(
-        _minimal_config({"overlay_alpha_curve": {"steepness": 12}})
-    )
+    config = parse_config(_minimal_config({"overlay_alpha_curve": {"steepness": 12}}))
 
     assert config.visualization.overlay_alpha_curve is not None
     assert config.visualization.overlay_alpha_curve.midpoint == 0.5
