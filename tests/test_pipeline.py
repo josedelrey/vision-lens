@@ -6,7 +6,11 @@ import pytest
 import torch
 from PIL import Image
 
-from vision_lens.attention import AttentionExtractionResult, LayerAttentionMaps
+from vision_lens.attention import (
+    AttentionExtractionResult,
+    GradCamResult,
+    LayerAttentionMaps,
+)
 from vision_lens.config import (
     OutputConfig,
     VisualizationConfig,
@@ -15,8 +19,10 @@ from vision_lens.config import (
 )
 from vision_lens.feature_pca import PatchPCAResult
 from vision_lens.image_pipeline import (
+    export_attention_outputs,
     export_gradcam_outputs,
     export_patch_pca_outputs,
+    export_rollout_comparison_outputs,
     run_gradcam_from_config,
     run_patch_pca_from_config,
     run_vit_attention_from_config,
@@ -54,6 +60,7 @@ def test_vit_pipeline_exports_figures_with_mocked_model(monkeypatch, tmp_path):
                 "device": "cpu",
             },
             "visualization": {
+                "match_input_size": True,
                 "overlay_alpha": 0.35,
                 "cmap": "viridis",
                 "grid_format": "svg",
@@ -98,7 +105,7 @@ def test_vit_pipeline_exports_figures_with_mocked_model(monkeypatch, tmp_path):
     monkeypatch.setattr(
         processing,
         "load_images",
-        lambda _paths, workers=0: [Image.new("RGB", (4, 4), "white")],
+        lambda _paths, workers=0: [Image.new("RGB", (7, 5), "white")],
     )
     monkeypatch.setattr(
         image_pipeline,
@@ -121,6 +128,10 @@ def test_vit_pipeline_exports_figures_with_mocked_model(monkeypatch, tmp_path):
         "layer-0_images_heads-mean.svg",
     }
     assert all(Path(path).is_file() for path in result.output_paths)
+    with Image.open(tmp_path / "1_layer-0_heads-mean_heatmap.png") as heatmap:
+        assert heatmap.size == (7, 5)
+    with Image.open(tmp_path / "1_layer-0_heads-mean_overlay.png") as overlay:
+        assert overlay.size == (7, 5)
     manifest = json.loads((tmp_path / "run-manifest.json").read_text())
     assert manifest["status"] == "completed"
     assert manifest["model"]["name"] == "mock_vit"
@@ -202,8 +213,6 @@ def test_rollout_config_dispatches_to_rollout_pipeline(monkeypatch):
 
 
 def test_gradcam_export_preserves_heatmap_overlay_and_grid_layout(tmp_path):
-    from vision_lens.attention import GradCamResult
-
     images = [
         Image.new("RGB", (4, 4), "white"),
         Image.new("RGB", (4, 4), "black"),
@@ -240,6 +249,91 @@ def test_gradcam_export_preserves_heatmap_overlay_and_grid_layout(tmp_path):
     }
     with Image.open(tmp_path / "gradcam_images.png") as grid:
         assert grid.size == (460, 256)
+
+
+def test_match_input_size_applies_to_all_image_exporters(tmp_path):
+    input_size = (9, 5)
+    image = Image.new("RGB", input_size, "white")
+    visualization = VisualizationConfig(match_input_size=True)
+    attention = _attention_result(layer_indices=(0,))
+    gradcam = GradCamResult(
+        logits=torch.zeros(1, 2),
+        maps=torch.rand(1, 1, 4, 4),
+        target_classes=(0,),
+        target_layer="layer4",
+        image_size=(4, 4),
+    )
+    patch_pca = PatchPCAResult(
+        patch_embeddings=torch.rand(1, 4, 3),
+        foreground_mask=torch.ones(1, 4, dtype=torch.bool),
+        images=(Image.new("RGB", (4, 4), "red"),),
+        patch_grid=(2, 2),
+        image_size=(4, 4),
+    )
+    output = OutputConfig(tmp_path, grids=False)
+
+    attention_paths = export_attention_outputs(
+        images=[image],
+        image_paths=(Path("attention.jpg"),),
+        attention=attention,
+        output_dir=tmp_path,
+        alpha=0.45,
+        cmap="viridis",
+        grid_format="png",
+        output_config=output,
+        visualization_config=visualization,
+    )
+    rollout_paths = export_rollout_comparison_outputs(
+        images=[image],
+        image_paths=(Path("rollout.jpg"),),
+        layer_attention=attention,
+        rollout=attention,
+        output_dir=tmp_path,
+        alpha=0.45,
+        cmap="viridis",
+        grid_format="png",
+        output_config=output,
+        visualization_config=visualization,
+    )
+    gradcam_paths = export_gradcam_outputs(
+        images=[image],
+        image_paths=(Path("gradcam.jpg"),),
+        gradcam=gradcam,
+        output_dir=tmp_path,
+        alpha=0.45,
+        cmap="viridis",
+        grid_format="png",
+        output_config=output,
+        visualization_config=visualization,
+    )
+    pca_paths = export_patch_pca_outputs(
+        patch_pca,
+        image_paths=(Path("pca.jpg"),),
+        output_dir=tmp_path,
+        output_config=output,
+        visualization_config=visualization,
+        input_sizes=(input_size,),
+    )
+
+    for path in (*attention_paths, *rollout_paths, *gradcam_paths, *pca_paths):
+        if path.suffix == ".png":
+            with Image.open(path) as rendered:
+                assert rendered.size == input_size
+
+    native_dir = tmp_path / "native"
+    native_paths = export_gradcam_outputs(
+        images=[image],
+        image_paths=(Path("gradcam.jpg"),),
+        gradcam=gradcam,
+        output_dir=native_dir,
+        alpha=0.45,
+        cmap="viridis",
+        grid_format="png",
+        output_config=OutputConfig(native_dir, overlays=False, grids=False),
+        visualization_config=VisualizationConfig(match_input_size=False),
+    )
+    with Image.open(native_paths[0]) as rendered:
+        assert rendered.size == (4, 4)
 
 
 def test_patch_pca_pipeline_exports_reference_style_images(monkeypatch, tmp_path):

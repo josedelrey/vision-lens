@@ -57,6 +57,7 @@ def test_parse_config_applies_documented_defaults():
     assert config.preprocessing.normalize is True
     assert config.visualization.overlay_alpha == 0.45
     assert config.visualization.overlay_alpha_curve is None
+    assert config.visualization.match_input_size is False
     assert config.visualization.cmap == "viridis"
     assert config.visualization.grid_format == "png"
     assert config.visualization.columns is None
@@ -171,6 +172,7 @@ def test_parse_config_reads_visualization_values():
     config = parse_config(
         _minimal_config(
             {
+                "match_input_size": True,
                 "overlay_alpha": 0.35,
                 "cmap": "magma",
                 "grid_format": "svg",
@@ -179,8 +181,10 @@ def test_parse_config_reads_visualization_values():
     )
 
     assert config.visualization.overlay_alpha == 0.35
+    assert config.visualization.match_input_size is True
     assert config.visualization.cmap == "magma"
     assert config.visualization.grid_format == "svg"
+    assert config_to_dict(config)["visualization"]["match_input_size"] is True
 
 
 def test_colormap_black_settings_parse_and_round_trip():

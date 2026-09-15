@@ -49,6 +49,7 @@ SECTION_KEYS = {
         "labels",
         "background",
         "dpi",
+        "match_input_size",
         "overlay_alpha",
         "overlay_alpha_curve",
         "cmap",
@@ -216,6 +217,7 @@ class VisualizationConfig:
     labels: bool | None = None
     background: str | None = None
     dpi: int | None = None
+    match_input_size: bool = False
     overlay_alpha: float = 0.45
     cmap: str = "viridis"
     cmap_black: tuple[int, int, bool] | None = None
@@ -449,6 +451,10 @@ def parse_config(
             dpi=_optional_positive_int(
                 visualization_section.get("dpi"),
                 "visualization.dpi",
+            ),
+            match_input_size=_bool(
+                visualization_section.get("match_input_size", False),
+                "visualization.match_input_size",
             ),
             overlay_alpha=_unit_interval(
                 visualization_section.get("overlay_alpha", 0.45),
@@ -694,6 +700,7 @@ def config_to_dict(config: VisionLensConfig) -> dict[str, Any]:
         "labels": config.visualization.labels,
         "background": config.visualization.background,
         "dpi": config.visualization.dpi,
+        "match_input_size": config.visualization.match_input_size,
         "overlay_alpha": config.visualization.overlay_alpha,
         "overlay_alpha_curve": (
             None

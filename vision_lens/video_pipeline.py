@@ -172,7 +172,12 @@ def _run_single_video_from_config(
         source,
     )
 
-    resolution = resolved_output_resolution(source, config.video.output_resolution)
+    configured_resolution = (
+        None
+        if config.visualization.match_input_size
+        else config.video.output_resolution
+    )
+    resolution = resolved_output_resolution(source, configured_resolution)
     exports = _VideoExports(config, source_path.stem, resolution)
     smoothing_state: dict[str, Any] = {}
     processed_frames = 0
