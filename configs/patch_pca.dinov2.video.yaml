@@ -28,6 +28,7 @@ analysis:
   method: patch_pca
   foreground_threshold: 0.5
   foreground_side: high
+  rgb_fit_scope: foreground
   projection: fit
   projection_path: null
   save_projection: null
@@ -49,8 +50,8 @@ visualization:
   background: null
   dpi: null
   match_input_size: true
-  interpolation: bilinear
-  overlay_alpha: 0.45
+  interpolation: mask
+  overlay_alpha: 1.0
   overlay_alpha_curve:
     steepness: 15
     midpoint: 0.25

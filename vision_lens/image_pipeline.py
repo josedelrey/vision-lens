@@ -205,6 +205,7 @@ def run_patch_pca_from_config(
                 loaded_model.metadata,
                 foreground_threshold=config.patch_pca.foreground_threshold,
                 foreground_side=config.patch_pca.foreground_side,
+                rgb_fit_scope=config.patch_pca.rgb_fit_scope,
                 interpolation=config.visualization.interpolation,
             )
             projection = patch_pca.projection
@@ -270,6 +271,7 @@ def run_patch_pca_from_config(
                 embedding_batches,
                 foreground_threshold=config.patch_pca.foreground_threshold,
                 foreground_side=config.patch_pca.foreground_side,
+                rgb_fit_scope=config.patch_pca.rgb_fit_scope,
             )
             for (
                 batch_index,

@@ -289,14 +289,29 @@ def test_patch_pca_defaults_and_overrides_are_in_analysis_section():
 
     assert config.analysis.foreground_threshold == 0.5
     assert config.analysis.foreground_side == "high"
+    assert config.analysis.rgb_fit_scope == "foreground"
     assert config.output.overlays is False
 
     raw_config["analysis"].update(
-        {"foreground_threshold": 0.65, "foreground_side": "low"}
+        {
+            "foreground_threshold": 0.65,
+            "foreground_side": "low",
+            "rgb_fit_scope": "all",
+        }
     )
     overridden = parse_config(raw_config)
     assert overridden.analysis.foreground_threshold == 0.65
     assert overridden.analysis.foreground_side == "low"
+    assert overridden.analysis.rgb_fit_scope == "all"
+    assert config_to_dict(overridden)["analysis"]["rgb_fit_scope"] == "all"
+
+
+def test_patch_pca_rejects_unknown_rgb_fit_scope():
+    raw_config = _minimal_config(method="patch_pca")
+    raw_config["analysis"]["rgb_fit_scope"] = "background"
+
+    with pytest.raises(ValueError, match="analysis.rgb_fit_scope"):
+        parse_config(raw_config)
 
 
 def test_patch_pca_accepts_auto_threshold_and_rejects_other_strings():

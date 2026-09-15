@@ -14,6 +14,7 @@ from vision_lens.attention import infer_patch_grid_from_image
 from vision_lens.models import ModelMetadata
 
 ForegroundThreshold = float | Literal["auto"]
+RGBFitScope = Literal["foreground", "all"]
 Interpolation = Literal["nearest", "bilinear", "mask"]
 _OTSU_BINS = 256
 
@@ -40,6 +41,7 @@ class PatchPCAProjection:
     rgb_maximum: Any
     foreground_threshold: float
     foreground_side: Literal["high", "low"]
+    rgb_fit_scope: RGBFitScope = "foreground"
 
 
 def extract_patch_pca(
@@ -48,6 +50,7 @@ def extract_patch_pca(
     metadata: ModelMetadata,
     foreground_threshold: ForegroundThreshold = 0.5,
     foreground_side: Literal["high", "low"] = "high",
+    rgb_fit_scope: RGBFitScope = "foreground",
     projection: PatchPCAProjection | None = None,
     interpolation: Interpolation = "bilinear",
 ) -> PatchPCAResult:
@@ -65,6 +68,7 @@ def extract_patch_pca(
         image_size=image_size,
         foreground_threshold=foreground_threshold,
         foreground_side=foreground_side,
+        rgb_fit_scope=rgb_fit_scope,
         projection=projection,
         interpolation=interpolation,
     )
@@ -96,6 +100,7 @@ def project_patch_embeddings(
     image_size: tuple[int, int],
     foreground_threshold: ForegroundThreshold = 0.5,
     foreground_side: Literal["high", "low"] = "high",
+    rgb_fit_scope: RGBFitScope = "foreground",
     projection: PatchPCAProjection | None = None,
     interpolation: Interpolation = "bilinear",
 ) -> PatchPCAResult:
@@ -103,6 +108,8 @@ def project_patch_embeddings(
     _validate_foreground_threshold(foreground_threshold)
     if foreground_side not in {"high", "low"}:
         raise ValueError("foreground_side must be one of: high, low.")
+    if rgb_fit_scope not in {"foreground", "all"}:
+        raise ValueError("rgb_fit_scope must be one of: foreground, all.")
     if interpolation not in {"nearest", "bilinear", "mask"}:
         raise ValueError("interpolation must be one of: nearest, bilinear, mask.")
 
@@ -126,6 +133,7 @@ def project_patch_embeddings(
             flattened,
             foreground_threshold,
             foreground_side,
+            rgb_fit_scope,
         )
     else:
         _validate_projection(projection, feature_count)
@@ -227,11 +235,14 @@ def fit_patch_pca_projection_batches(
     *,
     foreground_threshold: ForegroundThreshold = 0.5,
     foreground_side: Literal["high", "low"] = "high",
+    rgb_fit_scope: RGBFitScope = "foreground",
 ) -> PatchPCAProjection:
     """Fit one approximate PCA projection from all embedding batches."""
     _validate_foreground_threshold(foreground_threshold)
     if foreground_side not in {"high", "low"}:
         raise ValueError("foreground_side must be one of: high, low.")
+    if rgb_fit_scope not in {"foreground", "all"}:
+        raise ValueError("rgb_fit_scope must be one of: foreground, all.")
 
     foreground_components = _fit_batched_components(batch_factory, components=1)
     foreground_minimum, foreground_maximum = _streaming_projected_bounds(
@@ -267,8 +278,9 @@ def fit_patch_pca_projection_batches(
             if mask.any():
                 yield flattened[mask]
 
+    rgb_batches = batch_factory if rgb_fit_scope == "all" else foreground_batches
     rgb_components = _fit_batched_components(
-        foreground_batches,
+        rgb_batches,
         components=3,
         allow_empty=True,
         feature_count=int(foreground_components.shape[0]),
@@ -280,7 +292,7 @@ def fit_patch_pca_projection_batches(
         )
     if rgb_components.numel():
         rgb_minimum, rgb_maximum = _streaming_projected_bounds(
-            foreground_batches,
+            rgb_batches,
             rgb_components,
             allow_empty=True,
         )
@@ -297,6 +309,7 @@ def fit_patch_pca_projection_batches(
         rgb_maximum=rgb_maximum,
         foreground_threshold=foreground_threshold,
         foreground_side=foreground_side,
+        rgb_fit_scope=rgb_fit_scope,
     )
 
 
@@ -317,6 +330,7 @@ def save_patch_pca_projection(
             rgb_maximum=_as_numpy(projection.rgb_maximum),
             foreground_threshold=projection.foreground_threshold,
             foreground_side=projection.foreground_side,
+            rgb_fit_scope=projection.rgb_fit_scope,
         )
     return output
 
@@ -332,6 +346,11 @@ def load_patch_pca_projection(path: str | Path) -> PatchPCAProjection:
             rgb_maximum=torch.from_numpy(values["rgb_maximum"]),
             foreground_threshold=float(values["foreground_threshold"]),
             foreground_side=str(values["foreground_side"]),
+            rgb_fit_scope=(
+                str(values["rgb_fit_scope"])
+                if "rgb_fit_scope" in values
+                else "foreground"
+            ),
         )
 
 
@@ -385,6 +404,7 @@ def _fit_projection(
     values: Any,
     foreground_threshold: ForegroundThreshold,
     foreground_side: Literal["high", "low"],
+    rgb_fit_scope: RGBFitScope,
 ) -> tuple[PatchPCAProjection, Any]:
     first_projected, first_components = _fit_pca_projection(values, components=1)
     first_minimum, first_maximum = _value_bounds(first_projected)
@@ -402,9 +422,9 @@ def _fit_projection(
     else:
         foreground_mask = normalized_first[:, 0] < foreground_threshold
 
-    foreground = values[foreground_mask]
-    if foreground.numel():
-        rgb_projected, rgb_components = _fit_pca_projection(foreground, components=3)
+    rgb_values = values if rgb_fit_scope == "all" else values[foreground_mask]
+    if rgb_values.numel():
+        rgb_projected, rgb_components = _fit_pca_projection(rgb_values, components=3)
         rgb_minimum, rgb_maximum = _value_bounds(rgb_projected)
     else:
         rgb_components = values.new_zeros((values.shape[1], 3))
@@ -426,6 +446,7 @@ def _fit_projection(
         rgb_maximum=rgb_maximum,
         foreground_threshold=foreground_threshold,
         foreground_side=foreground_side,
+        rgb_fit_scope=rgb_fit_scope,
     )
     return projection, normalized_first
 
