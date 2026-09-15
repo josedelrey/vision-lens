@@ -45,7 +45,7 @@ visualization:
   labels: null
   background: null
   dpi: null
-  match_input_size: true
+  output_size: match
   interpolation: anyup
   overlay_alpha: 1.0
   overlay_alpha_curve:
@@ -75,7 +75,6 @@ video:
   end_time: null
   sampling_rate: auto
   frame_limit: null
-  output_resolution: null
   pca_fit_frames: 32
   temporal_smoothing: 0.0
   codec: libx264

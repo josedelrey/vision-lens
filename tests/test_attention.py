@@ -216,13 +216,14 @@ def test_anyup_attention_upscaling_uses_guidance_image(
         normalize=False,
         interpolation=interpolation,
         guidance_image=guidance_image,
+        output_size=(3, 5),
     )
 
-    assert torch.equal(maps, torch.full((1, 1, 6, 6), 0.25))
+    assert torch.equal(maps, torch.full((1, 1, 3, 5), 0.25))
     assert len(calls) == 1
     assert calls[0][0] is guidance_image
     assert calls[0][1].shape == (1, 1, 2, 2)
-    assert calls[0][2] == (6, 6)
+    assert calls[0][2] == (3, 5)
 
 
 def test_class_token_attention_to_map_mean_fusion_values():

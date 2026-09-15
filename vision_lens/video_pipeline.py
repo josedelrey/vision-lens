@@ -166,6 +166,24 @@ def _run_single_video_from_config(
         status(f"Model ready on {loaded_model.metadata.device}")
     loaded_model = _video_model_for_source(loaded_model, config, source)
     _validate_gradcam_class(config, loaded_model)
+    configured_output_size = config.visualization.output_size
+    resolution = resolved_output_resolution(
+        source,
+        configured_output_size if isinstance(configured_output_size, tuple) else None,
+        default=(
+            None
+            if configured_output_size == "match"
+            else (
+                loaded_model.metadata.image_size[1],
+                loaded_model.metadata.image_size[0],
+            )
+        ),
+    )
+    analysis_output_size = (
+        (resolution[1], resolution[0])
+        if isinstance(configured_output_size, tuple)
+        else loaded_model.metadata.image_size
+    )
     transform = build_batch_preprocessor(
         loaded_model,
         replace(config.preprocessing, resize="stretch", crop="none", pad="none"),
@@ -176,14 +194,8 @@ def _run_single_video_from_config(
         loaded_model,
         transform,
         source,
+        analysis_output_size,
     )
-
-    configured_resolution = (
-        None
-        if config.visualization.match_input_size
-        else config.video.output_resolution
-    )
-    resolution = resolved_output_resolution(source, configured_resolution)
     exports = _VideoExports(config, source_path.stem, resolution)
     smoothing_state: dict[str, Any] = {}
     processed_frames = 0
@@ -239,7 +251,12 @@ def _run_single_video_from_config(
                     frame_batch.index,
                 )
             else:
-                analysis = _analyze_maps(config, loaded_model, batch.inputs)
+                analysis = _analyze_maps(
+                    config,
+                    loaded_model,
+                    batch.inputs,
+                    analysis_output_size,
+                )
                 streams = _smooth_streams(
                     _map_streams(config, analysis),
                     smoothing_state,
@@ -327,6 +344,7 @@ class _VideoExports:
             normalization = "fixed"
         for stream in streams:
             for frame_index, original in enumerate(originals):
+                display_frame = _frame_at_output_size(original, self.resolution)
                 heatmap = render_heatmap(
                     stream.maps,
                     cmap=self.config.visualization.render_cmap,
@@ -335,7 +353,7 @@ class _VideoExports:
                     normalization_range=normalization_range,
                 )
                 overlay = overlay_attention(
-                    original,
+                    display_frame,
                     stream.maps,
                     alpha=self.config.visualization.overlay_alpha,
                     alpha_curve_steepness=(
@@ -356,7 +374,7 @@ class _VideoExports:
                 if self.config.output.grids:
                     self._write_video(
                         f"{stream.name}_comparison",
-                        _comparison_frame(original, overlay, self.config),
+                        _comparison_frame(display_frame, overlay, self.config),
                     )
             if self.config.output.raw_arrays:
                 self._write_raw_batch(
@@ -375,12 +393,13 @@ class _VideoExports:
         batch_index: int,
     ) -> None:
         for original, pca_image in zip(originals, pca_images, strict=True):
+            display_frame = _frame_at_output_size(original, self.resolution)
             if self.config.output.heatmaps:
                 self._write_video("patch_pca", pca_image)
             if self.config.output.grids:
                 self._write_video(
                     "patch_pca_comparison",
-                    _comparison_frame(original, pca_image, self.config),
+                    _comparison_frame(display_frame, pca_image, self.config),
                 )
         if self.config.output.raw_arrays:
             self._write_raw_batch(
@@ -531,6 +550,7 @@ def _video_normalization_range(
     loaded_model: LoadedModel,
     transform: Any,
     source: VideoMetadata,
+    output_size: tuple[int, int],
 ) -> tuple[float, float] | None:
     if config.analysis.method == "patch_pca":
         return None
@@ -560,7 +580,10 @@ def _video_normalization_range(
             include_display_images=False,
         )
         streams = _smooth_streams(
-            _map_streams(config, _analyze_maps(config, loaded_model, batch.inputs)),
+            _map_streams(
+                config,
+                _analyze_maps(config, loaded_model, batch.inputs, output_size),
+            ),
             smoothing_state,
             config.video.temporal_smoothing,
         )
@@ -581,6 +604,7 @@ def _analyze_maps(
     config: VisionLensConfig,
     loaded_model: LoadedModel,
     inputs: Any,
+    output_size: tuple[int, int],
 ) -> AttentionExtractionResult | GradCamResult:
     guidance_image = _anyup_guidance(config, loaded_model, inputs)
     if config.analysis.method == "attention":
@@ -594,6 +618,7 @@ def _analyze_maps(
             normalize=False,
             interpolation=config.visualization.interpolation,
             guidance_image=guidance_image,
+            output_size=output_size,
         )
     if config.analysis.method == "rollout":
         return extract_attention_rollout(
@@ -604,6 +629,7 @@ def _analyze_maps(
             normalize=False,
             interpolation=config.visualization.interpolation,
             guidance_image=guidance_image,
+            output_size=output_size,
         )
     target_classes = (
         None
@@ -619,6 +645,7 @@ def _analyze_maps(
         normalize=False,
         interpolation=config.visualization.interpolation,
         guidance_image=guidance_image,
+        output_size=output_size,
     )
 
 
@@ -736,6 +763,15 @@ def _comparison_frame(
             0 if config.visualization.padding is None else config.visualization.padding
         ),
     )
+
+
+def _frame_at_output_size(
+    frame: Image.Image,
+    output_size: tuple[int, int],
+) -> Image.Image:
+    if frame.size == output_size:
+        return frame
+    return frame.resize(output_size, Image.Resampling.BILINEAR)
 
 
 def _patch_grid(loaded_model: LoadedModel) -> tuple[int, int]:

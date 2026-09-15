@@ -182,6 +182,7 @@ def run_patch_pca_from_config(
                 projection=projection,
                 interpolation=config.visualization.interpolation,
                 guidance_image=_anyup_guidance(config, loaded_model, batch.inputs),
+                output_size=_analysis_output_size(config, loaded_model),
             )
             if len(config.images.paths) <= config.runtime.batch_size:
                 retained_patch_pca = patch_pca
@@ -215,6 +216,7 @@ def run_patch_pca_from_config(
                 rgb_fit_scope=config.patch_pca.rgb_fit_scope,
                 interpolation=config.visualization.interpolation,
                 guidance_image=_anyup_guidance(config, loaded_model, batch.inputs),
+                output_size=_analysis_output_size(config, loaded_model),
             )
             projection = patch_pca.projection
             retained_patch_pca = patch_pca
@@ -315,7 +317,7 @@ def run_patch_pca_from_config(
                 patch_pca = project_patch_embeddings(
                     embeddings,
                     patch_grid=patch_grid,
-                    image_size=loaded_model.metadata.image_size,
+                    image_size=_analysis_output_size(config, loaded_model),
                     projection=projection,
                     interpolation=config.visualization.interpolation,
                     guidance_image=(
@@ -411,6 +413,7 @@ def run_vit_rollout_comparison_from_config(
                 normalize=False,
                 interpolation=config.visualization.interpolation,
                 guidance_image=_anyup_guidance(config, loaded_model, batch.inputs),
+                output_size=_analysis_output_size(config, loaded_model),
             )
             fitted_attention = _extract_attention(
                 loaded_model=loaded_model,
@@ -441,6 +444,7 @@ def run_vit_rollout_comparison_from_config(
             normalize=config.visualization.normalization == "per_map",
             interpolation=config.visualization.interpolation,
             guidance_image=_anyup_guidance(config, loaded_model, batch.inputs),
+            output_size=_analysis_output_size(config, loaded_model),
         )
         layer_attention = _extract_attention(
             loaded_model=loaded_model,
@@ -534,6 +538,7 @@ def run_gradcam_from_config(config: VisionLensConfig) -> GradCamPipelineResult:
                 normalize=False,
                 interpolation=config.visualization.interpolation,
                 guidance_image=_anyup_guidance(config, loaded_model, batch.inputs),
+                output_size=_analysis_output_size(config, loaded_model),
             )
             normalization_range = _extend_value_range(
                 normalization_range,
@@ -566,6 +571,7 @@ def run_gradcam_from_config(config: VisionLensConfig) -> GradCamPipelineResult:
             normalize=config.visualization.normalization == "per_map",
             interpolation=config.visualization.interpolation,
             guidance_image=_anyup_guidance(config, loaded_model, batch.inputs),
+            output_size=_analysis_output_size(config, loaded_model),
         )
         if len(config.images.paths) <= config.runtime.batch_size:
             retained_gradcam = gradcam
@@ -713,6 +719,7 @@ def export_attention_outputs(
         ),
         grid_format=grid_format,
     )
+    images = _images_at_output_size(images, visualization, attention.image_size)
     output_dir.mkdir(parents=True, exist_ok=True)
     output_paths: list[Path] = []
     labels = list(input_labels or tuple(path.stem for path in image_paths))
@@ -873,13 +880,17 @@ def export_patch_pca_outputs(
     visualization = visualization_config or VisualizationConfig()
     if input_sizes is not None and len(input_sizes) != len(patch_pca.images):
         raise ValueError("Patch PCA images and input_sizes must have the same length.")
-    if visualization.match_input_size and input_sizes is None:
-        raise ValueError("input_sizes are required when match_input_size is enabled.")
+    if visualization.output_size == "match" and input_sizes is None:
+        raise ValueError("input_sizes are required when output_size is 'match'.")
     rendered_images = tuple(
         _render_pca_at_output_size(
             patch_pca,
             index,
-            input_sizes[index] if input_sizes is not None else image.size,
+            _resolved_image_output_size(
+                visualization,
+                input_sizes[index] if input_sizes is not None else None,
+                image.size,
+            ),
             visualization,
         )
         for index, image in enumerate(patch_pca.images)
@@ -974,6 +985,7 @@ def export_rollout_comparison_outputs(
         ),
         grid_format=grid_format,
     )
+    images = _images_at_output_size(images, visualization, rollout.image_size)
     output_dir.mkdir(parents=True, exist_ok=True)
     output_paths: list[Path] = []
     labels = list(input_labels or tuple(path.stem for path in image_paths))
@@ -1112,6 +1124,7 @@ def export_gradcam_outputs(
         ),
         grid_format=grid_format,
     )
+    images = _images_at_output_size(images, visualization, gradcam.image_size)
     output_dir.mkdir(parents=True, exist_ok=True)
     output_paths: list[Path] = []
     labels = list(input_labels or tuple(path.stem for path in image_paths))
@@ -1221,6 +1234,7 @@ def _extract_attention(
         normalize=config.visualization.normalization == "per_map",
         interpolation=config.visualization.interpolation,
         guidance_image=_anyup_guidance(config, loaded_model, inputs),
+        output_size=_analysis_output_size(config, loaded_model),
     )
 
 
@@ -1336,13 +1350,64 @@ def _blank_like(image: Any) -> Any:
     return Image.new("RGB", base_size, "white")
 
 
+def _analysis_output_size(
+    config: VisionLensConfig,
+    loaded_model: LoadedModel,
+) -> tuple[int, int]:
+    output_size = config.visualization.output_size
+    if isinstance(output_size, tuple):
+        width, height = output_size
+        return (height, width)
+    return loaded_model.metadata.image_size
+
+
+def _images_at_output_size(
+    images: list[Any],
+    visualization: VisualizationConfig,
+    native_size: tuple[int, int],
+) -> list[Any]:
+    if visualization.output_size == "match":
+        return images
+    target_size = (
+        visualization.output_size
+        if isinstance(visualization.output_size, tuple)
+        else (native_size[1], native_size[0])
+    )
+    return [
+        image
+        if image.size == target_size
+        else image.resize(target_size, Image.Resampling.BILINEAR)
+        for image in images
+    ]
+
+
+def _resolved_image_output_size(
+    visualization: VisualizationConfig,
+    input_size: tuple[int, int] | None,
+    native_size: tuple[int, int],
+) -> tuple[int, int]:
+    if visualization.output_size == "match":
+        if input_size is None:
+            raise ValueError("input_size is required when output_size is 'match'.")
+        return input_size
+    if isinstance(visualization.output_size, tuple):
+        return visualization.output_size
+    return native_size
+
+
 def _visualization_images(
     batch: Any,
     visualization: VisualizationConfig,
 ) -> list[Any]:
-    if visualization.match_input_size:
+    if visualization.output_size == "match":
         return list(batch.source.images)
-    return list(batch.display_images)
+    images = list(batch.display_images)
+    if isinstance(visualization.output_size, tuple):
+        images = [
+            image.resize(visualization.output_size, Image.Resampling.BILINEAR)
+            for image in images
+        ]
+    return images
 
 
 def _resize_visualization(
@@ -1350,7 +1415,7 @@ def _resize_visualization(
     size: tuple[int, int],
     visualization: VisualizationConfig,
 ) -> Image.Image:
-    if not visualization.match_input_size or image.size == size:
+    if image.size == size:
         return image
     resampling = (
         Image.Resampling.NEAREST
@@ -1367,7 +1432,7 @@ def _render_pca_at_output_size(
     visualization: VisualizationConfig,
 ) -> Image.Image:
     image = patch_pca.images[index]
-    if not visualization.match_input_size or image.size == size:
+    if image.size == size:
         return image
     if patch_pca.rgb_patches is None:
         return _resize_visualization(image, size, visualization)
