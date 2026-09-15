@@ -140,6 +140,7 @@ analysis:
   method: patch_pca
   foreground_threshold: 0.5
   foreground_side: low
+  rgb_fit_scope: foreground
   projection: fit
   projection_path: null
   save_projection: null
@@ -150,11 +151,12 @@ analysis:
 | `method` | required | Must be `patch_pca`. | `patch_pca` |
 | `foreground_threshold` | `0.5` | Normalized first-component cutoff, or `auto` to choose an Otsu split from the fit data. | `auto` |
 | `foreground_side` | `high` | Keep the `high` or `low` side. | `low` |
+| `rgb_fit_scope` | `foreground` | Fit the RGB PCA basis and bounds from foreground patches or from `all` patches. The foreground mask is still applied afterward. | `all` |
 | `projection` | `fit` | Fit a shared projection or `load` one. | `load` |
 | `projection_path` | `null` | Saved `.npz` loaded when `projection: load`. | `pca.npz` |
 | `save_projection` | `null` | Save the fitted basis and normalization ranges. | `pca.npz` |
 
-A loaded projection reuses its fitted foreground rule and color ranges, so new
+A loaded projection reuses its fitted foreground rule, RGB fit scope, and color ranges, so new
 images remain in the same PCA color space.
 With `foreground_threshold: auto`, PCA fits one threshold from the normalized
 first component and stores the resulting number in the projection. Video uses

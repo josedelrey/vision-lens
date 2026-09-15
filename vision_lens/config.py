@@ -89,6 +89,7 @@ ANALYSIS_KEYS = {
         "method",
         "foreground_threshold",
         "foreground_side",
+        "rgb_fit_scope",
         "projection",
         "projection_path",
         "save_projection",
@@ -157,6 +158,7 @@ class AttentionConfig:
 class PatchPCAConfig:
     foreground_threshold: float | Literal["auto"] = 0.5
     foreground_side: Literal["high", "low"] = "high"
+    rgb_fit_scope: Literal["foreground", "all"] = "foreground"
 
 
 @dataclass(frozen=True)
@@ -169,6 +171,7 @@ class AnalysisConfig:
     target_class: int | None = None
     foreground_threshold: float | Literal["auto"] | None = None
     foreground_side: Literal["high", "low"] | None = None
+    rgb_fit_scope: Literal["foreground", "all"] | None = None
     projection: Literal["fit", "load"] | None = None
     projection_path: Path | None = None
     save_projection: Path | None = None
@@ -299,9 +302,11 @@ class VisionLensConfig:
             return None
         assert self.analysis.foreground_threshold is not None
         assert self.analysis.foreground_side is not None
+        assert self.analysis.rgb_fit_scope is not None
         return PatchPCAConfig(
             foreground_threshold=self.analysis.foreground_threshold,
             foreground_side=self.analysis.foreground_side,
+            rgb_fit_scope=self.analysis.rgb_fit_scope,
         )
 
 
@@ -860,6 +865,11 @@ def _parse_analysis(
             section.get("foreground_threshold", 0.5),
         ),
         foreground_side=_foreground_side(section.get("foreground_side", "high")),
+        rgb_fit_scope=_choice(
+            section.get("rgb_fit_scope", "foreground"),
+            "analysis.rgb_fit_scope",
+            {"foreground", "all"},
+        ),
         projection=_choice(
             section.get("projection", "fit"),
             "analysis.projection",
@@ -892,6 +902,7 @@ def _analysis_to_dict(analysis: AnalysisConfig) -> dict[str, Any]:
     else:
         resolved["foreground_threshold"] = analysis.foreground_threshold
         resolved["foreground_side"] = analysis.foreground_side
+        resolved["rgb_fit_scope"] = analysis.rgb_fit_scope
         resolved["projection"] = analysis.projection
         resolved["projection_path"] = (
             None if analysis.projection_path is None else str(analysis.projection_path)

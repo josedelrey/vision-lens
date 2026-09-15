@@ -49,6 +49,32 @@ def test_patch_pca_zero_pads_missing_rgb_components():
     assert torch.count_nonzero(result.projection.rgb_components[:, 2:]) == 0
 
 
+def test_patch_pca_can_fit_rgb_projection_from_all_patches():
+    embeddings = torch.tensor(
+        [[[0.0, 0.0, 0.0], [0.2, 3.0, 0.0], [2.0, 0.0, 4.0], [3.0, 1.0, 1.0]]]
+    )
+
+    result = project_patch_embeddings(
+        embeddings,
+        patch_grid=(2, 2),
+        image_size=(2, 2),
+        foreground_threshold=0.5,
+        rgb_fit_scope="all",
+    )
+    batched = fit_patch_pca_projection_batches(
+        lambda: (embeddings[:, :2], embeddings[:, 2:]),
+        foreground_threshold=0.5,
+        rgb_fit_scope="all",
+    )
+    _, expected = _fit_pca_projection(embeddings.flatten(0, 1), components=3)
+
+    assert result.projection is not None
+    assert result.projection.rgb_fit_scope == "all"
+    assert torch.allclose(result.projection.rgb_components, expected)
+    assert batched.rgb_fit_scope == "all"
+    assert torch.allclose(batched.rgb_components, expected)
+
+
 def test_batched_pca_uses_the_same_approximate_fit_for_every_batch_size():
     generator = torch.Generator().manual_seed(12)
     embeddings = torch.rand(7, 4, 6, generator=generator)
@@ -135,6 +161,7 @@ def test_auto_threshold_matches_single_and_batched_fits_and_survives_save(tmp_pa
         projection=loaded,
     )
     assert loaded.foreground_threshold == batched.foreground_threshold
+    assert loaded.rgb_fit_scope == "foreground"
     assert torch.equal(reused.foreground_mask, direct.foreground_mask)
 
 

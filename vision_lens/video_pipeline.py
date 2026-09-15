@@ -511,6 +511,7 @@ def _video_pca_projection(
             embedding_batches,
             foreground_threshold=config.analysis.foreground_threshold,
             foreground_side=config.analysis.foreground_side,
+            rgb_fit_scope=config.analysis.rgb_fit_scope,
         )
 
 
