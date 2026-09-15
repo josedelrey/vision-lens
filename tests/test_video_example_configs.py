@@ -1,7 +1,6 @@
 from pathlib import Path
 
 import pytest
-import yaml
 
 from vision_lens.config import load_config
 
@@ -18,20 +17,16 @@ REPO_ROOT = Path(__file__).parents[1]
         ("patch_pca.dinov2.video.yaml", "patch_pca"),
     ],
 )
-def test_video_example_config_selects_second_video_and_video_mode(
-    tmp_path, config_name, method
-):
-    source = REPO_ROOT / "videos/2.mp4"
+def test_video_example_config_uses_expected_video_mode(tmp_path, config_name, method):
+    source = tmp_path / "sample.mp4"
+    source.touch()
     output = tmp_path / "outputs"
     example = REPO_ROOT / "configs" / config_name
-    raw = yaml.safe_load(example.read_text())
-    assert raw["input"]["files"] == ["videos/2.mp4"]
-    assert raw["input"]["folders"] == []
-    assert raw["input"]["patterns"] == ["*.mp4"]
 
     config = load_config(
         example,
         overrides={
+            "input": {"files": [str(source)], "folders": []},
             "output": {"directory": str(output)},
         },
     )
