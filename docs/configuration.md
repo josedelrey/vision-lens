@@ -218,6 +218,7 @@ visualization:
   background: white
   dpi: 150
   match_input_size: true
+  interpolation: mask
   overlay_alpha: 0.6
   overlay_alpha_curve:
     steepness: 10
@@ -243,6 +244,7 @@ visualization:
 | `background` | `null` | Pillow/Matplotlib color. | `"#101010"` |
 | `dpi` | `null` | Output DPI; `null` retains workflow behavior. | `150` |
 | `match_input_size` | `false` | Resize each standalone visualization to its original input dimensions. Video uses the source frame dimensions when enabled. | `true` |
+| `interpolation` | `bilinear` | Visualization upscaling mode: `nearest`, `bilinear`, or `mask`. | `mask` |
 | `overlay_alpha` | `0.45` | Heatmap opacity from 0 to 1. | `0.8` |
 | `overlay_alpha_curve` | `null` | Optional sigmoid-like, value-dependent overlay opacity. `steepness` must be positive; `midpoint` defaults to `0.5` and moves the transition within the normalized 0–1 range. | `{steepness: 10, midpoint: 0.25}` |
 | `cmap` | `viridis` | Matplotlib colormap. | `magma` |
@@ -253,9 +255,17 @@ visualization:
 
 `per_map` is the historical attention and Grad-CAM behavior. `shared` computes
 one range across the run. `fixed` clips to an explicit range.
+`nearest` preserves one constant-color block per attention, Grad-CAM activation,
+or PCA patch. `bilinear` smoothly interpolates all maps. For attention, rollout,
+and Grad-CAM, `mask` is identical to `bilinear`. For patch PCA, `mask` fits the
+RGB PCA basis and scaling bounds from foreground patches, projects every patch
+through that foreground basis, bilinearly interpolates those colors, and then
+applies the foreground mask with nearest-neighbor upscaling. This avoids blending
+foreground colors with black while keeping a sharp foreground boundary.
+
 When `match_input_size` is enabled, image heatmaps, overlays, and patch PCA
-images use the source image width and height; generated maps are resized with
-bilinear interpolation. Composite grid dimensions remain controlled by the
+images use the source image width and height with the configured visualization
+interpolation. Composite grid dimensions remain controlled by the
 grid layout and `tile_size`. For video, this setting takes precedence over
 `video.output_resolution` and uses codec-compatible even source dimensions.
 Disable it to retain the model-sized image outputs and configured video

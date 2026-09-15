@@ -58,6 +58,7 @@ def test_parse_config_applies_documented_defaults():
     assert config.visualization.overlay_alpha == 0.45
     assert config.visualization.overlay_alpha_curve is None
     assert config.visualization.match_input_size is False
+    assert config.visualization.interpolation == "bilinear"
     assert config.visualization.cmap == "viridis"
     assert config.visualization.grid_format == "png"
     assert config.visualization.columns is None
@@ -590,6 +591,7 @@ def test_all_new_controls_are_parsed_and_resolved(tmp_path):
         "labels": False,
         "background": "#101010",
         "dpi": 150,
+        "interpolation": "mask",
         "overlay_alpha": 0.25,
         "cmap": "magma",
         "grid_format": "svg",
@@ -616,6 +618,8 @@ def test_all_new_controls_are_parsed_and_resolved(tmp_path):
     assert config.runtime.precision == "bfloat16"
     assert config.visualization.tile_size == (320, 240)
     assert config.visualization.items_per_grid == 6
+    assert config.visualization.interpolation == "mask"
+    assert config_to_dict(config)["visualization"]["interpolation"] == "mask"
     assert config.visualization.normalization_range == (-1.0, 2.0)
     assert config.output.image_format == "webp"
     assert config.output.raw_format == "npz"
@@ -626,6 +630,11 @@ def test_fixed_normalization_requires_a_range():
 
     with pytest.raises(ValueError, match="normalization_range is required"):
         parse_config(raw_config)
+
+
+def test_visualization_interpolation_rejects_unknown_modes():
+    with pytest.raises(ValueError, match="visualization.interpolation"):
+        parse_config(_minimal_config({"interpolation": "bicubic"}))
 
 
 def test_pca_projection_paths_resolve_from_config_and_load_must_exist(tmp_path):

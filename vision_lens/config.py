@@ -13,6 +13,7 @@ AttentionLayers = Literal["all"] | tuple[int, ...]
 AnalysisMethod = Literal["attention", "rollout", "gradcam", "patch_pca"]
 Precision = Literal["float32", "float16", "bfloat16"]
 NormalizationMode = Literal["per_map", "shared", "fixed"]
+VisualizationInterpolation = Literal["nearest", "bilinear", "mask"]
 
 DEFAULT_INPUT_PATTERNS = ("*.jpg", "*.jpeg", "*.png", "*.webp")
 
@@ -50,6 +51,7 @@ SECTION_KEYS = {
         "background",
         "dpi",
         "match_input_size",
+        "interpolation",
         "overlay_alpha",
         "overlay_alpha_curve",
         "cmap",
@@ -218,6 +220,7 @@ class VisualizationConfig:
     background: str | None = None
     dpi: int | None = None
     match_input_size: bool = False
+    interpolation: VisualizationInterpolation = "bilinear"
     overlay_alpha: float = 0.45
     cmap: str = "viridis"
     cmap_black: tuple[int, int, bool] | None = None
@@ -455,6 +458,11 @@ def parse_config(
             match_input_size=_bool(
                 visualization_section.get("match_input_size", False),
                 "visualization.match_input_size",
+            ),
+            interpolation=_choice(
+                visualization_section.get("interpolation", "bilinear"),
+                "visualization.interpolation",
+                {"nearest", "bilinear", "mask"},
             ),
             overlay_alpha=_unit_interval(
                 visualization_section.get("overlay_alpha", 0.45),
@@ -701,6 +709,7 @@ def config_to_dict(config: VisionLensConfig) -> dict[str, Any]:
         "background": config.visualization.background,
         "dpi": config.visualization.dpi,
         "match_input_size": config.visualization.match_input_size,
+        "interpolation": config.visualization.interpolation,
         "overlay_alpha": config.visualization.overlay_alpha,
         "overlay_alpha_curve": (
             None
