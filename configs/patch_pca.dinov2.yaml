@@ -52,9 +52,10 @@ visualization:
   labels: null
   background: null
   dpi: null
+  match_input_size: true
   overlay_alpha: 0.45
   overlay_alpha_curve:
-    steepness: 10
+    steepness: 15
     midpoint: 0.25
   cmap: viridis
   cmap_black:
@@ -66,7 +67,7 @@ visualization:
   normalization_range: null
 
 output:
-  directory: outputs/dinov2_patch_pca
+  directory: outputs/image/dinov2_patch_pca
   heatmaps: true
   overlays: false
   grids: true

@@ -45,9 +45,10 @@ visualization:
   labels: null
   background: null
   dpi: null
+  match_input_size: true
   overlay_alpha: 0.8
   overlay_alpha_curve:
-    steepness: 10
+    steepness: 15
     midpoint: 0.25
   cmap: viridis
   cmap_black:

@@ -217,6 +217,7 @@ visualization:
   labels: true
   background: white
   dpi: 150
+  match_input_size: true
   overlay_alpha: 0.6
   overlay_alpha_curve:
     steepness: 10
@@ -241,6 +242,7 @@ visualization:
 | `labels` | `null` | Show labels; `null` keeps workflow behavior. | `false` |
 | `background` | `null` | Pillow/Matplotlib color. | `"#101010"` |
 | `dpi` | `null` | Output DPI; `null` retains workflow behavior. | `150` |
+| `match_input_size` | `false` | Resize each standalone visualization to its original input dimensions. Video uses the source frame dimensions when enabled. | `true` |
 | `overlay_alpha` | `0.45` | Heatmap opacity from 0 to 1. | `0.8` |
 | `overlay_alpha_curve` | `null` | Optional sigmoid-like, value-dependent overlay opacity. `steepness` must be positive; `midpoint` defaults to `0.5` and moves the transition within the normalized 0–1 range. | `{steepness: 10, midpoint: 0.25}` |
 | `cmap` | `viridis` | Matplotlib colormap. | `magma` |
@@ -251,6 +253,13 @@ visualization:
 
 `per_map` is the historical attention and Grad-CAM behavior. `shared` computes
 one range across the run. `fixed` clips to an explicit range.
+When `match_input_size` is enabled, image heatmaps, overlays, and patch PCA
+images use the source image width and height; generated maps are resized with
+bilinear interpolation. Composite grid dimensions remain controlled by the
+grid layout and `tile_size`. For video, this setting takes precedence over
+`video.output_resolution` and uses codec-compatible even source dimensions.
+Disable it to retain the model-sized image outputs and configured video
+resolution.
 Set `overlay_alpha_curve` to `null` to retain the constant `overlay_alpha`.
 When enabled, the normalized map value controls opacity through an
 endpoint-normalized sigmoid: the lowest value is exactly transparent, the

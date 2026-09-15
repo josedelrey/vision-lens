@@ -183,6 +183,7 @@ def run_patch_pca_from_config(
                     output_dir=config.output.directory,
                     output_config=config.output,
                     visualization_config=config.visualization,
+                    input_sizes=tuple(image.size for image in input_batch.images),
                     input_labels=input_batch.labels,
                     grid_page_offset=page_offsets[input_batch.index],
                     total_grid_pages=total_grid_pages,
@@ -212,6 +213,7 @@ def run_patch_pca_from_config(
                     output_dir=config.output.directory,
                     output_config=config.output,
                     visualization_config=config.visualization,
+                    input_sizes=tuple(image.size for image in input_batch.images),
                     input_labels=input_batch.labels,
                     grid_page_offset=page_offsets[input_batch.index],
                     total_grid_pages=total_grid_pages,
@@ -220,7 +222,13 @@ def run_patch_pca_from_config(
     else:
         with TemporaryDirectory(prefix="vision-lens-pca-") as temporary_directory:
             staged_batches: list[
-                tuple[int, tuple[Path, ...], tuple[str, ...], Path]
+                tuple[
+                    int,
+                    tuple[Path, ...],
+                    tuple[str, ...],
+                    tuple[tuple[int, int], ...],
+                    Path,
+                ]
             ] = []
             for input_batch in _tracked_input_batches(
                 config, labels, "Extract embeddings"
@@ -245,12 +253,13 @@ def run_patch_pca_from_config(
                         input_batch.index,
                         input_batch.paths,
                         input_batch.labels,
+                        tuple(image.size for image in input_batch.images),
                         staged_path,
                     )
                 )
 
             def embedding_batches() -> Any:
-                for _index, _paths, _labels, staged_path in staged_batches:
+                for _index, _paths, _labels, _sizes, staged_path in staged_batches:
                     yield np.load(staged_path, allow_pickle=False)
 
             status("Fitting PCA projection")
@@ -259,7 +268,13 @@ def run_patch_pca_from_config(
                 foreground_threshold=config.patch_pca.foreground_threshold,
                 foreground_side=config.patch_pca.foreground_side,
             )
-            for batch_index, batch_paths, batch_labels, staged_path in track_units(
+            for (
+                batch_index,
+                batch_paths,
+                batch_labels,
+                batch_sizes,
+                staged_path,
+            ) in track_units(
                 staged_batches,
                 total=len(config.images.paths),
                 description="Render PCA",
@@ -280,6 +295,7 @@ def run_patch_pca_from_config(
                         output_dir=config.output.directory,
                         output_config=config.output,
                         visualization_config=config.visualization,
+                        input_sizes=batch_sizes,
                         input_labels=batch_labels,
                         grid_page_offset=page_offsets[batch_index],
                         total_grid_pages=total_grid_pages,
@@ -396,7 +412,7 @@ def run_vit_rollout_comparison_from_config(
         )
         output_paths.extend(
             export_rollout_comparison_outputs(
-                images=list(batch.display_images),
+                images=_visualization_images(batch, rendering),
                 image_paths=input_batch.paths,
                 layer_attention=layer_attention,
                 rollout=rollout,
@@ -509,7 +525,7 @@ def run_gradcam_from_config(config: VisionLensConfig) -> GradCamPipelineResult:
             retained_gradcam = gradcam
         output_paths.extend(
             export_gradcam_outputs(
-                images=list(batch.display_images),
+                images=_visualization_images(batch, rendering),
                 image_paths=input_batch.paths,
                 gradcam=gradcam,
                 output_dir=config.output.directory,
@@ -594,7 +610,7 @@ def run_vit_attention_from_config(config: VisionLensConfig) -> PipelineResult:
             retained_attention = attention
         output_paths.extend(
             export_attention_outputs(
-                images=list(batch.display_images),
+                images=_visualization_images(batch, rendering),
                 image_paths=input_batch.paths,
                 attention=attention,
                 output_dir=config.output.directory,
@@ -675,6 +691,11 @@ def export_attention_outputs(
                             head_index=head_index,
                             normalization=visualization.normalization,
                             normalization_range=normalization_range,
+                        )
+                        heatmap = _resize_visualization(
+                            heatmap,
+                            image.size,
+                            visualization,
                         )
                         output_paths.append(save_image(heatmap, path))
                 if output.overlays:
@@ -798,6 +819,7 @@ def export_patch_pca_outputs(
     output_dir: Path,
     output_config: OutputConfig | None = None,
     visualization_config: VisualizationConfig | None = None,
+    input_sizes: tuple[tuple[int, int], ...] | None = None,
     input_labels: tuple[str, ...] | None = None,
     grid_page_offset: int = 0,
     total_grid_pages: int | None = None,
@@ -807,11 +829,23 @@ def export_patch_pca_outputs(
 
     output = output_config or OutputConfig(output_dir)
     visualization = visualization_config or VisualizationConfig()
+    if input_sizes is not None and len(input_sizes) != len(patch_pca.images):
+        raise ValueError("Patch PCA images and input_sizes must have the same length.")
+    if visualization.match_input_size and input_sizes is None:
+        raise ValueError("input_sizes are required when match_input_size is enabled.")
+    rendered_images = tuple(
+        _resize_visualization(
+            image,
+            input_sizes[index] if input_sizes is not None else image.size,
+            visualization,
+        )
+        for index, image in enumerate(patch_pca.images)
+    )
     labels = input_labels or tuple(path.stem for path in image_paths)
     output_dir.mkdir(parents=True, exist_ok=True)
     output_paths = []
     if output.heatmaps:
-        for label, image in zip(labels, patch_pca.images, strict=True):
+        for label, image in zip(labels, rendered_images, strict=True):
             output_path = output_dir / f"{label}_patch_pca.{output.image_format}"
             if _can_write(output_path, output.overwrite):
                 output_paths.append(save_image(image, output_path))
@@ -838,7 +872,7 @@ def export_patch_pca_outputs(
         visualization.items_per_grid,
     )
     for page_index, indices in enumerate(indices_pages):
-        page_images = [patch_pca.images[index] for index in indices]
+        page_images = [rendered_images[index] for index in indices]
         show_labels = False if visualization.labels is None else visualization.labels
         if show_labels:
             from vision_lens.visualization import labeled_image
@@ -921,11 +955,15 @@ def export_rollout_comparison_outputs(
                 if _can_write(path, output.overwrite):
                     output_paths.append(
                         save_image(
-                            render_heatmap(
-                                rollout_for_image.maps,
-                                cmap=cmap,
-                                normalization=visualization.normalization,
-                                normalization_range=normalization_range,
+                            _resize_visualization(
+                                render_heatmap(
+                                    rollout_for_image.maps,
+                                    cmap=cmap,
+                                    normalization=visualization.normalization,
+                                    normalization_range=normalization_range,
+                                ),
+                                image.size,
+                                visualization,
                             ),
                             path,
                         )
@@ -1046,11 +1084,15 @@ def export_gradcam_outputs(
             if _can_write(path, output.overwrite):
                 output_paths.append(
                     save_image(
-                        render_heatmap(
-                            maps,
-                            cmap=cmap,
-                            normalization=visualization.normalization,
-                            normalization_range=normalization_range,
+                        _resize_visualization(
+                            render_heatmap(
+                                maps,
+                                cmap=cmap,
+                                normalization=visualization.normalization,
+                                normalization_range=normalization_range,
+                            ),
+                            image.size,
+                            visualization,
                         ),
                         path,
                     )
@@ -1251,6 +1293,25 @@ def _rollout_grid_items(
 def _blank_like(image: Any) -> Any:
     base_size = getattr(image, "size", (224, 224))
     return Image.new("RGB", base_size, "white")
+
+
+def _visualization_images(
+    batch: Any,
+    visualization: VisualizationConfig,
+) -> list[Any]:
+    if visualization.match_input_size:
+        return list(batch.source.images)
+    return list(batch.display_images)
+
+
+def _resize_visualization(
+    image: Image.Image,
+    size: tuple[int, int],
+    visualization: VisualizationConfig,
+) -> Image.Image:
+    if not visualization.match_input_size or image.size == size:
+        return image
+    return image.resize(size, Image.Resampling.BILINEAR)
 
 
 def _chunks(values: Any, size: int | None) -> tuple[Any, ...]:

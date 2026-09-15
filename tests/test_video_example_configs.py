@@ -42,6 +42,7 @@ def test_video_example_config_selects_second_video_and_video_mode(
     assert config.video.sampling_rate == "auto"
     assert config.runtime.batch_size == 1
     assert config.output.directory == output
+    assert config.visualization.match_input_size is True
     assert config.output.grids
     if method == "patch_pca":
         assert config.output.heatmaps
@@ -70,3 +71,4 @@ def test_image_example_config_selects_every_example_image(config_name):
         else tuple(sorted((REPO_ROOT / "examples").glob("*.jpg")))
     )
     assert config.input.paths == expected
+    assert config.visualization.match_input_size is True
