@@ -651,6 +651,13 @@ def test_visualization_interpolation_rejects_unknown_modes(interpolation):
         parse_config(_minimal_config({"interpolation": interpolation}))
 
 
+@pytest.mark.parametrize("interpolation", ["anyup", "anyup_mask"])
+def test_visualization_interpolation_accepts_anyup_modes(interpolation):
+    config = parse_config(_minimal_config({"interpolation": interpolation}))
+
+    assert config.visualization.interpolation == interpolation
+
+
 def test_pca_projection_paths_resolve_from_config_and_load_must_exist(tmp_path):
     raw_config = _minimal_config(method="patch_pca")
     raw_config["input"]["paths"] = [str(Path("examples/1.jpg").resolve())]

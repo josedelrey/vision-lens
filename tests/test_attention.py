@@ -194,6 +194,37 @@ def test_bilinear_mask_attention_upscaling_is_bilinear():
     assert torch.equal(bilinear_masked, bilinear)
 
 
+@pytest.mark.parametrize("interpolation", ["anyup", "anyup_mask"])
+def test_anyup_attention_upscaling_uses_guidance_image(
+    monkeypatch,
+    interpolation,
+):
+    calls = []
+
+    def fake_upsample(image, features, output_size):
+        calls.append((image, features, output_size))
+        return torch.full((1, 1, *output_size), 0.25)
+
+    monkeypatch.setattr("vision_lens.attention.upsample_features", fake_upsample)
+    token_attention = torch.zeros(1, 5, 5)
+    guidance_image = torch.rand(1, 3, 6, 6)
+
+    maps = token_attention_to_map(
+        token_attention,
+        image_size=(6, 6),
+        patch_size=(3, 3),
+        normalize=False,
+        interpolation=interpolation,
+        guidance_image=guidance_image,
+    )
+
+    assert torch.equal(maps, torch.full((1, 1, 6, 6), 0.25))
+    assert len(calls) == 1
+    assert calls[0][0] is guidance_image
+    assert calls[0][1].shape == (1, 1, 2, 2)
+    assert calls[0][2] == (6, 6)
+
+
 def test_class_token_attention_to_map_mean_fusion_values():
     attention = torch.zeros(1, 2, 5, 5)
     attention[:, 0, 0, 1:] = torch.tensor([1.0, 3.0, 5.0, 7.0])

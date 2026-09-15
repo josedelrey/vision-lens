@@ -246,7 +246,7 @@ visualization:
 | `background` | `null` | Pillow/Matplotlib color. | `"#101010"` |
 | `dpi` | `null` | Output DPI; `null` retains workflow behavior. | `150` |
 | `match_input_size` | `false` | Resize each standalone visualization to its original input dimensions. Video uses the source frame dimensions when enabled. | `true` |
-| `interpolation` | `bilinear` | Visualization upscaling mode: `nearest`, `bilinear`, or `bilinear_mask`. | `bilinear_mask` |
+| `interpolation` | `bilinear` | Visualization upscaling mode: `nearest`, `bilinear`, `bilinear_mask`, `anyup`, or `anyup_mask`. | `anyup_mask` |
 | `overlay_alpha` | `0.45` | Uniform heatmap opacity from 0 to 1. When an alpha curve is enabled, this scales the curve's per-pixel opacity. | `0.8` |
 | `overlay_alpha_curve` | `null` | Optional sigmoid-like, value-dependent overlay opacity applied before `overlay_alpha`. `steepness` must be positive; `midpoint` defaults to `0.5` and moves the transition within the normalized 0–1 range. | `{steepness: 10, midpoint: 0.25}` |
 | `cmap` | `viridis` | Matplotlib colormap. | `magma` |
@@ -265,6 +265,22 @@ projects every patch through that foreground basis, bilinearly interpolates thos
 colors, and then applies the foreground mask with nearest-neighbor upscaling. This
 avoids blending foreground colors with black while keeping a sharp foreground
 boundary.
+
+`anyup` and `anyup_mask` replace bilinear feature-map upscaling with the
+[official AnyUp model](https://github.com/wimmerth/anyup). For attention,
+rollout, and Grad-CAM, the two AnyUp modes are identical. For patch PCA, the PCA
+directions, foreground threshold, and projection bounds are fitted from the
+original patch embeddings. AnyUp then upsamples the embedding map before those
+fixed projections are applied. `anyup` also upsamples the foreground weights with
+AnyUp; `anyup_mask` instead applies the original foreground mask with
+nearest-neighbor upscaling for a sharp boundary.
+
+The first AnyUp run downloads the official multi-backbone implementation and
+checkpoint from its pinned `checkpoint_v2` release through PyTorch Hub; later
+runs use PyTorch's local cache. Vision Lens uses the original attention-based
+AnyUp implementation, so NATTEN is not required. The reusable adapter is
+available as `vision_lens.anyup`, including the model loader, ImageNet
+guidance-image preparation, and generic `upsample_features` function.
 
 When `match_input_size` is enabled, image heatmaps, overlays, and patch PCA
 images use the source image width and height with the configured visualization
