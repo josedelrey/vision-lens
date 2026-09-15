@@ -1267,9 +1267,7 @@ def _overlay_alpha_curve(value: Any) -> OverlayAlphaCurveSpec | None:
         "visualization.overlay_alpha_curve.steepness",
     )
     if not isfinite(steepness):
-        raise ValueError(
-            "visualization.overlay_alpha_curve.steepness must be finite."
-        )
+        raise ValueError("visualization.overlay_alpha_curve.steepness must be finite.")
     midpoint = _unit_interval(
         value.get("midpoint", 0.5),
         "visualization.overlay_alpha_curve.midpoint",

@@ -74,9 +74,7 @@ def test_gradcam_nearest_upscaling_preserves_activation_blocks():
     )
     result = extract_gradcam(
         DownsamplingCNN(),
-        torch.arange(64, dtype=torch.float32)
-        .reshape(1, 1, 8, 8)
-        .requires_grad_(),
+        torch.arange(64, dtype=torch.float32).reshape(1, 1, 8, 8).requires_grad_(),
         metadata,
         target_layer="features",
         target_classes=[0],
