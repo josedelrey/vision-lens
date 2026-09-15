@@ -11,6 +11,12 @@ import numpy as np
 import torch
 from PIL import Image
 
+from vision_lens.anyup import (
+    IMAGENET_MEAN,
+    IMAGENET_STD,
+    is_anyup_interpolation,
+    prepare_anyup_image,
+)
 from vision_lens.attention import (
     AttentionExtractionResult,
     GradCamResult,
@@ -213,6 +219,11 @@ def _run_single_video_from_config(
                     image_size=(resolution[1], resolution[0]),
                     projection=projection,
                     interpolation=config.visualization.interpolation,
+                    guidance_image=_anyup_guidance(
+                        config,
+                        loaded_model,
+                        batch.inputs,
+                    ),
                 )
                 pca_images = _smooth_images(
                     pca.images,
@@ -571,6 +582,7 @@ def _analyze_maps(
     loaded_model: LoadedModel,
     inputs: Any,
 ) -> AttentionExtractionResult | GradCamResult:
+    guidance_image = _anyup_guidance(config, loaded_model, inputs)
     if config.analysis.method == "attention":
         return extract_attention_maps(
             loaded_model.model,
@@ -581,6 +593,7 @@ def _analyze_maps(
             head_fusion=config.analysis.head_fusion,
             normalize=False,
             interpolation=config.visualization.interpolation,
+            guidance_image=guidance_image,
         )
     if config.analysis.method == "rollout":
         return extract_attention_rollout(
@@ -590,6 +603,7 @@ def _analyze_maps(
             layers=config.analysis.layers,
             normalize=False,
             interpolation=config.visualization.interpolation,
+            guidance_image=guidance_image,
         )
     target_classes = (
         None
@@ -604,6 +618,7 @@ def _analyze_maps(
         target_classes=target_classes,
         normalize=False,
         interpolation=config.visualization.interpolation,
+        guidance_image=guidance_image,
     )
 
 
@@ -728,6 +743,30 @@ def _patch_grid(loaded_model: LoadedModel) -> tuple[int, int]:
     if patch_size is None:
         raise ValueError("Patch PCA requires a model with a known patch size.")
     return infer_patch_grid_from_image(loaded_model.metadata.image_size, patch_size)
+
+
+def _anyup_guidance(
+    config: VisionLensConfig,
+    loaded_model: LoadedModel,
+    inputs: Any,
+) -> Any | None:
+    if not is_anyup_interpolation(config.visualization.interpolation):
+        return None
+    source_mean = None
+    source_std = None
+    if config.preprocessing.normalize:
+        source_mean = (
+            config.preprocessing.mean
+            or loaded_model.metadata.data_config.get("mean", IMAGENET_MEAN)
+        )
+        source_std = config.preprocessing.std or loaded_model.metadata.data_config.get(
+            "std", IMAGENET_STD
+        )
+    return prepare_anyup_image(
+        inputs,
+        source_mean=source_mean,
+        source_std=source_std,
+    ).to(loaded_model.metadata.device)
 
 
 def _video_model_for_source(

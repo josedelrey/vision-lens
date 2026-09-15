@@ -255,6 +255,93 @@ def test_patch_pca_bilinear_mask_interpolates_colors_then_applies_sharp_mask():
     assert np.all(bilinear_masked_pixels[:, 4, 0] > 0)
 
 
+@pytest.mark.parametrize("interpolation", ["anyup", "anyup_mask"])
+def test_patch_pca_anyup_projects_features_after_upsampling(
+    monkeypatch,
+    interpolation,
+):
+    embeddings = torch.tensor([[[0.0, 3.0, 0.0], [3.0, 0.0, 0.0]]])
+    guidance_image = torch.rand(1, 3, 2, 4)
+    calls = []
+
+    def fake_upsample(image, features, output_size):
+        calls.append((image, features.clone(), output_size))
+        if features.shape[1] == 1:
+            return torch.nn.functional.interpolate(
+                features,
+                size=output_size,
+                mode="bilinear",
+                align_corners=False,
+            )
+        upsampled = torch.zeros(1, 3, *output_size)
+        upsampled[:, 0, :, 2:] = 2.0
+        upsampled[:, 1, :, 2:] = 1.0
+        return upsampled
+
+    monkeypatch.setattr("vision_lens.feature_pca.upsample_features", fake_upsample)
+
+    result = project_patch_embeddings(
+        embeddings,
+        patch_grid=(1, 2),
+        image_size=(2, 4),
+        projection=_two_patch_projection(),
+        interpolation=interpolation,
+        guidance_image=guidance_image,
+    )
+
+    pixels = np.asarray(result.images[0])
+    assert calls[0][0] is guidance_image
+    assert torch.equal(
+        calls[0][1],
+        embeddings.reshape(1, 1, 2, 3).permute(0, 3, 1, 2),
+    )
+    assert calls[0][2] == (2, 4)
+    assert np.all(pixels[:, :2] == 0)
+    assert np.all(pixels[:, 3] == np.array([170, 85, 0]))
+    if interpolation == "anyup":
+        assert len(calls) == 2
+        assert calls[1][1].shape == (1, 1, 1, 2)
+        assert np.all(pixels[:, 2] == np.array([128, 64, 0]))
+    else:
+        assert len(calls) == 1
+        assert np.all(pixels[:, 2] == np.array([170, 85, 0]))
+
+
+def test_patch_pca_anyup_fits_projection_from_original_features(monkeypatch):
+    from vision_lens import feature_pca
+
+    embeddings = torch.tensor(
+        [[[0.0, 1.0, 0.0], [3.0, 0.0, 0.0], [1.0, 2.0, 0.0], [2.0, 1.0, 0.0]]]
+    )
+    fitted_values = []
+    original_fit = feature_pca._fit_projection
+
+    def recording_fit(values, *args):
+        fitted_values.append(values.clone())
+        return original_fit(values, *args)
+
+    def nearest_upsample(_image, features, output_size):
+        return torch.nn.functional.interpolate(
+            features,
+            size=output_size,
+            mode="nearest",
+        )
+
+    monkeypatch.setattr(feature_pca, "_fit_projection", recording_fit)
+    monkeypatch.setattr(feature_pca, "upsample_features", nearest_upsample)
+
+    project_patch_embeddings(
+        embeddings,
+        patch_grid=(2, 2),
+        image_size=(4, 4),
+        interpolation="anyup",
+        guidance_image=torch.rand(1, 3, 4, 4),
+    )
+
+    assert len(fitted_values) == 1
+    assert torch.equal(fitted_values[0], embeddings.flatten(0, 1))
+
+
 def _two_patch_projection() -> PatchPCAProjection:
     return PatchPCAProjection(
         foreground_components=torch.tensor([[1.0], [0.0], [0.0]]),

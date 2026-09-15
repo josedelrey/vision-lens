@@ -12,6 +12,12 @@ import numpy as np
 import torch
 from PIL import Image
 
+from vision_lens.anyup import (
+    IMAGENET_MEAN,
+    IMAGENET_STD,
+    is_anyup_interpolation,
+    prepare_anyup_image,
+)
 from vision_lens.attention import (
     AttentionExtractionResult,
     GradCamResult,
@@ -175,6 +181,7 @@ def run_patch_pca_from_config(
                 loaded_model.metadata,
                 projection=projection,
                 interpolation=config.visualization.interpolation,
+                guidance_image=_anyup_guidance(config, loaded_model, batch.inputs),
             )
             if len(config.images.paths) <= config.runtime.batch_size:
                 retained_patch_pca = patch_pca
@@ -207,6 +214,7 @@ def run_patch_pca_from_config(
                 foreground_side=config.patch_pca.foreground_side,
                 rgb_fit_scope=config.patch_pca.rgb_fit_scope,
                 interpolation=config.visualization.interpolation,
+                guidance_image=_anyup_guidance(config, loaded_model, batch.inputs),
             )
             projection = patch_pca.projection
             retained_patch_pca = patch_pca
@@ -232,6 +240,7 @@ def run_patch_pca_from_config(
                     tuple[str, ...],
                     tuple[tuple[int, int], ...],
                     Path,
+                    Path | None,
                 ]
             ] = []
             for input_batch in _tracked_input_batches(
@@ -252,6 +261,13 @@ def run_patch_pca_from_config(
                     Path(temporary_directory) / f"batch-{input_batch.index}.npy"
                 )
                 _save_array(embeddings, staged_path)
+                guidance = _anyup_guidance(config, loaded_model, batch.inputs)
+                guidance_path = None
+                if guidance is not None:
+                    guidance_path = (
+                        Path(temporary_directory) / f"guidance-{input_batch.index}.npy"
+                    )
+                    _save_array(guidance, guidance_path)
                 staged_batches.append(
                     (
                         input_batch.index,
@@ -259,11 +275,19 @@ def run_patch_pca_from_config(
                         input_batch.labels,
                         tuple(image.size for image in input_batch.images),
                         staged_path,
+                        guidance_path,
                     )
                 )
 
             def embedding_batches() -> Any:
-                for _index, _paths, _labels, _sizes, staged_path in staged_batches:
+                for (
+                    _index,
+                    _paths,
+                    _labels,
+                    _sizes,
+                    staged_path,
+                    _guidance_path,
+                ) in staged_batches:
                     yield np.load(staged_path, allow_pickle=False)
 
             status("Fitting PCA projection")
@@ -279,6 +303,7 @@ def run_patch_pca_from_config(
                 batch_labels,
                 batch_sizes,
                 staged_path,
+                guidance_path,
             ) in track_units(
                 staged_batches,
                 total=len(config.images.paths),
@@ -293,6 +318,13 @@ def run_patch_pca_from_config(
                     image_size=loaded_model.metadata.image_size,
                     projection=projection,
                     interpolation=config.visualization.interpolation,
+                    guidance_image=(
+                        None
+                        if guidance_path is None
+                        else torch.as_tensor(
+                            np.load(guidance_path, allow_pickle=False)
+                        ).to(loaded_model.metadata.device)
+                    ),
                 )
                 output_paths.extend(
                     export_patch_pca_outputs(
@@ -378,6 +410,7 @@ def run_vit_rollout_comparison_from_config(
                 layers=config.attention.layers,
                 normalize=False,
                 interpolation=config.visualization.interpolation,
+                guidance_image=_anyup_guidance(config, loaded_model, batch.inputs),
             )
             fitted_attention = _extract_attention(
                 loaded_model=loaded_model,
@@ -407,6 +440,7 @@ def run_vit_rollout_comparison_from_config(
             layers=config.attention.layers,
             normalize=config.visualization.normalization == "per_map",
             interpolation=config.visualization.interpolation,
+            guidance_image=_anyup_guidance(config, loaded_model, batch.inputs),
         )
         layer_attention = _extract_attention(
             loaded_model=loaded_model,
@@ -499,6 +533,7 @@ def run_gradcam_from_config(config: VisionLensConfig) -> GradCamPipelineResult:
                 ),
                 normalize=False,
                 interpolation=config.visualization.interpolation,
+                guidance_image=_anyup_guidance(config, loaded_model, batch.inputs),
             )
             normalization_range = _extend_value_range(
                 normalization_range,
@@ -530,6 +565,7 @@ def run_gradcam_from_config(config: VisionLensConfig) -> GradCamPipelineResult:
             ),
             normalize=config.visualization.normalization == "per_map",
             interpolation=config.visualization.interpolation,
+            guidance_image=_anyup_guidance(config, loaded_model, batch.inputs),
         )
         if len(config.images.paths) <= config.runtime.batch_size:
             retained_gradcam = gradcam
@@ -1184,6 +1220,7 @@ def _extract_attention(
         head_fusion=config.attention.head_fusion,
         normalize=config.visualization.normalization == "per_map",
         interpolation=config.visualization.interpolation,
+        guidance_image=_anyup_guidance(config, loaded_model, inputs),
     )
 
 
@@ -1334,6 +1371,8 @@ def _render_pca_at_output_size(
         return image
     if patch_pca.rgb_patches is None:
         return _resize_visualization(image, size, visualization)
+    if is_anyup_interpolation(visualization.interpolation):
+        return _resize_visualization(image, size, visualization)
     return render_patch_pca_images(
         patch_pca.rgb_patches[index : index + 1],
         patch_pca.foreground_mask[index : index + 1],
@@ -1354,6 +1393,30 @@ def _patch_grid(loaded_model: LoadedModel) -> tuple[int, int]:
     if patch_size is None:
         raise ValueError("Patch PCA requires a model with a known patch size.")
     return infer_patch_grid_from_image(loaded_model.metadata.image_size, patch_size)
+
+
+def _anyup_guidance(
+    config: VisionLensConfig,
+    loaded_model: LoadedModel,
+    inputs: Any,
+) -> Any | None:
+    if not is_anyup_interpolation(config.visualization.interpolation):
+        return None
+    source_mean = None
+    source_std = None
+    if config.preprocessing.normalize:
+        source_mean = (
+            config.preprocessing.mean
+            or loaded_model.metadata.data_config.get("mean", IMAGENET_MEAN)
+        )
+        source_std = config.preprocessing.std or loaded_model.metadata.data_config.get(
+            "std", IMAGENET_STD
+        )
+    return prepare_anyup_image(
+        inputs,
+        source_mean=source_mean,
+        source_std=source_std,
+    ).to(loaded_model.metadata.device)
 
 
 def _apply_seed(seed: int | None) -> None:

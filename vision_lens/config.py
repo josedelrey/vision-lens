@@ -13,7 +13,13 @@ AttentionLayers = Literal["all"] | tuple[int, ...]
 AnalysisMethod = Literal["attention", "rollout", "gradcam", "patch_pca"]
 Precision = Literal["float32", "float16", "bfloat16"]
 NormalizationMode = Literal["per_map", "shared", "fixed"]
-VisualizationInterpolation = Literal["nearest", "bilinear", "bilinear_mask"]
+VisualizationInterpolation = Literal[
+    "nearest",
+    "bilinear",
+    "bilinear_mask",
+    "anyup",
+    "anyup_mask",
+]
 
 DEFAULT_INPUT_PATTERNS = ("*.jpg", "*.jpeg", "*.png", "*.webp")
 
@@ -467,7 +473,13 @@ def parse_config(
             interpolation=_choice(
                 visualization_section.get("interpolation", "bilinear"),
                 "visualization.interpolation",
-                {"nearest", "bilinear", "bilinear_mask"},
+                {
+                    "nearest",
+                    "bilinear",
+                    "bilinear_mask",
+                    "anyup",
+                    "anyup_mask",
+                },
             ),
             overlay_alpha=_unit_interval(
                 visualization_section.get("overlay_alpha", 0.45),

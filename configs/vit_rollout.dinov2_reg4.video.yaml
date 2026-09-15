@@ -27,9 +27,6 @@ preprocessing:
 analysis:
   method: rollout
   layers:
-    - 2
-    - 5
-    - 8
     - 11
   heads: null
   head_fusion: mean
@@ -51,7 +48,7 @@ visualization:
   background: null
   dpi: null
   match_input_size: true
-  interpolation: bilinear_mask
+  interpolation: anyup
   overlay_alpha: 1.0
   overlay_alpha_curve:
     steepness: 15

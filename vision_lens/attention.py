@@ -8,11 +8,18 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as functional
 
+from vision_lens.anyup import is_anyup_interpolation, upsample_features
 from vision_lens.models import ModelMetadata
 
 LayerSelection = Literal["all"] | int | Iterable[int]
 HeadFusion = Literal["mean", "max", "none"]
-Interpolation = Literal["nearest", "bilinear", "bilinear_mask"]
+Interpolation = Literal[
+    "nearest",
+    "bilinear",
+    "bilinear_mask",
+    "anyup",
+    "anyup_mask",
+]
 
 
 @dataclass(frozen=True)
@@ -49,6 +56,7 @@ def extract_attention_maps(
     head_fusion: HeadFusion = "mean",
     normalize: bool = True,
     interpolation: Interpolation = "bilinear",
+    guidance_image: Any | None = None,
 ) -> AttentionExtractionResult:
     blocks = _vit_blocks(model)
     layer_indices = _select_layers(layers, total_layers=len(blocks))
@@ -81,6 +89,9 @@ def extract_attention_maps(
                 head_fusion=head_fusion,
                 normalize=normalize,
                 interpolation=interpolation,
+                guidance_image=(
+                    model_inputs if guidance_image is None else guidance_image
+                ),
             ),
             head_indices=head_indices,
             head_fusion=head_fusion,
@@ -107,6 +118,7 @@ def extract_attention_rollout(
     layers: LayerSelection = "all",
     normalize: bool = True,
     interpolation: Interpolation = "bilinear",
+    guidance_image: Any | None = None,
 ) -> AttentionExtractionResult:
     blocks = _vit_blocks(model)
     layer_indices = _select_layers(layers, total_layers=len(blocks))
@@ -140,6 +152,9 @@ def extract_attention_rollout(
                 patch_size=metadata.patch_size,
                 normalize=normalize,
                 interpolation=interpolation,
+                guidance_image=(
+                    model_inputs if guidance_image is None else guidance_image
+                ),
             ),
             head_indices=None,
             head_fusion="mean",
@@ -190,6 +205,7 @@ def token_attention_to_map(
     patch_size: tuple[int, int] | None,
     normalize: bool = True,
     interpolation: Interpolation = "bilinear",
+    guidance_image: Any | None = None,
 ) -> Any:
     if len(token_attention.shape) != 3:
         raise ValueError("token_attention must have shape (batch, tokens, tokens).")
@@ -208,7 +224,12 @@ def token_attention_to_map(
         patch_grid[0],
         patch_grid[1],
     )
-    resized_maps = _interpolate_maps(patch_maps, image_size, interpolation)
+    resized_maps = _interpolate_maps(
+        patch_maps,
+        image_size,
+        interpolation,
+        guidance_image=guidance_image,
+    )
     if normalize:
         return normalize_maps(resized_maps)
     return resized_maps
@@ -222,6 +243,7 @@ def extract_gradcam(
     target_classes: Iterable[int] | None = None,
     normalize: bool = True,
     interpolation: Interpolation = "bilinear",
+    guidance_image: Any | None = None,
 ) -> GradCamResult:
     resolved_layer_name, layer_module = _resolve_gradcam_layer(model, target_layer)
     activations = None
@@ -262,7 +284,12 @@ def extract_gradcam(
     weights = gradients.mean(dim=(2, 3), keepdim=True)
     maps = (weights * activations).sum(dim=1, keepdim=True)
     maps = functional.relu(maps)
-    maps = _interpolate_maps(maps, metadata.image_size, interpolation)
+    maps = _interpolate_maps(
+        maps,
+        metadata.image_size,
+        interpolation,
+        guidance_image=model_inputs if guidance_image is None else guidance_image,
+    )
 
     return GradCamResult(
         logits=logits.detach().cpu(),
@@ -283,6 +310,7 @@ def class_token_attention_to_map(
     head_fusion: HeadFusion = "mean",
     normalize: bool = True,
     interpolation: Interpolation = "bilinear",
+    guidance_image: Any | None = None,
 ) -> Any:
     _validate_attention_tensor(attention)
     selected_heads = _select_heads(attention, heads)
@@ -299,7 +327,12 @@ def class_token_attention_to_map(
         patch_grid[0],
         patch_grid[1],
     )
-    resized_maps = _interpolate_maps(patch_maps, image_size, interpolation)
+    resized_maps = _interpolate_maps(
+        patch_maps,
+        image_size,
+        interpolation,
+        guidance_image=guidance_image,
+    )
 
     if normalize:
         return normalize_maps(resized_maps)
@@ -310,11 +343,21 @@ def _interpolate_maps(
     maps: Any,
     image_size: tuple[int, int],
     interpolation: Interpolation,
+    *,
+    guidance_image: Any | None = None,
 ) -> Any:
-    if interpolation not in {"nearest", "bilinear", "bilinear_mask"}:
+    choices = {"nearest", "bilinear", "bilinear_mask", "anyup", "anyup_mask"}
+    if interpolation not in choices:
         raise ValueError(
-            "interpolation must be one of: nearest, bilinear, bilinear_mask."
+            "interpolation must be one of: nearest, bilinear, bilinear_mask, "
+            "anyup, anyup_mask."
         )
+    if is_anyup_interpolation(interpolation):
+        if guidance_image is None:
+            raise ValueError(
+                f"guidance_image is required for interpolation={interpolation!r}."
+            )
+        return upsample_features(guidance_image, maps, image_size)
     mode = "nearest" if interpolation == "nearest" else "bilinear"
     options = {} if mode == "nearest" else {"align_corners": False}
     return functional.interpolate(maps, size=image_size, mode=mode, **options)
