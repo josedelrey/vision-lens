@@ -120,7 +120,7 @@ def test_overlay_reveals_original_beneath_transparent_black():
         ),
     ],
 )
-def test_sigmoid_alpha_curve_has_transparent_and_opaque_endpoints(cmap):
+def test_sigmoid_alpha_curve_endpoints_are_scaled_by_overlay_alpha(cmap):
     values = torch.tensor([[0.0, 0.25, 0.5, 0.75, 1.0]])
     image = Image.new("RGB", (5, 1), (200, 100, 50))
 
@@ -134,9 +134,42 @@ def test_sigmoid_alpha_curve_has_transparent_and_opaque_endpoints(cmap):
         normalization_range=(0, 1),
     )
     pixels = np.asarray(overlay)[0]
+    expected_high = np.asarray(
+        Image.blend(image, Image.new("RGB", image.size, "white"), alpha=0.1)
+    )[0, -1]
 
     assert np.array_equal(pixels[0], [200, 100, 50])
-    assert np.array_equal(pixels[-1], [255, 255, 255])
+    assert np.allclose(pixels[-1], expected_high, atol=1)
+
+
+def test_overlay_alpha_uniformly_scales_alpha_curve_opacity():
+    values = torch.tensor([[0.0, 0.25, 0.5, 0.75, 1.0]])
+    image = Image.new("RGB", (5, 1), "black")
+
+    full = np.asarray(
+        overlay_attention(
+            image,
+            values,
+            alpha=1,
+            alpha_curve_steepness=10,
+            cmap="gray",
+            normalization="fixed",
+            normalization_range=(0, 1),
+        )
+    )
+    scaled = np.asarray(
+        overlay_attention(
+            image,
+            values,
+            alpha=0.25,
+            alpha_curve_steepness=10,
+            cmap="gray",
+            normalization="fixed",
+            normalization_range=(0, 1),
+        )
+    )
+
+    assert np.allclose(scaled, full * 0.25, atol=1)
 
 
 def test_alpha_curve_steepness_controls_the_sigmoid_transition():
@@ -147,6 +180,7 @@ def test_alpha_curve_steepness_controls_the_sigmoid_transition():
         overlay_attention(
             image,
             values,
+            alpha=1,
             alpha_curve_steepness=2,
             cmap="gray",
             normalization="fixed",
@@ -157,6 +191,7 @@ def test_alpha_curve_steepness_controls_the_sigmoid_transition():
         overlay_attention(
             image,
             values,
+            alpha=1,
             alpha_curve_steepness=12,
             cmap="gray",
             normalization="fixed",
@@ -177,6 +212,7 @@ def test_alpha_curve_midpoint_moves_the_opacity_transition():
         overlay_attention(
             image,
             values,
+            alpha=1,
             alpha_curve_steepness=10,
             alpha_curve_midpoint=0.5,
             cmap="gray",
@@ -188,6 +224,7 @@ def test_alpha_curve_midpoint_moves_the_opacity_transition():
         overlay_attention(
             image,
             values,
+            alpha=1,
             alpha_curve_steepness=10,
             alpha_curve_midpoint=0.25,
             cmap="gray",

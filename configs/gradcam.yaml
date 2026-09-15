@@ -22,7 +22,7 @@ preprocessing:
   resize: stretch
   crop: none
   pad: none
-  interpolation: null
+  interpolation: bilinear
   normalize: true
   mean: null
   std: null

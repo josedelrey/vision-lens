@@ -108,7 +108,7 @@ def overlay_attention(
                 alpha_curve_steepness,
                 alpha_curve_midpoint,
             )
-            overlay_alpha = np.rint(opacity * 255).astype(np.uint8)
+            overlay_alpha = np.rint(opacity * alpha * 255).astype(np.uint8)
 
     if transparent_black:
         visible = np.any(np.asarray(heatmap) != 0, axis=-1)

@@ -245,8 +245,8 @@ visualization:
 | `dpi` | `null` | Output DPI; `null` retains workflow behavior. | `150` |
 | `match_input_size` | `false` | Resize each standalone visualization to its original input dimensions. Video uses the source frame dimensions when enabled. | `true` |
 | `interpolation` | `bilinear` | Visualization upscaling mode: `nearest`, `bilinear`, or `mask`. | `mask` |
-| `overlay_alpha` | `0.45` | Heatmap opacity from 0 to 1. | `0.8` |
-| `overlay_alpha_curve` | `null` | Optional sigmoid-like, value-dependent overlay opacity. `steepness` must be positive; `midpoint` defaults to `0.5` and moves the transition within the normalized 0–1 range. | `{steepness: 10, midpoint: 0.25}` |
+| `overlay_alpha` | `0.45` | Uniform heatmap opacity from 0 to 1. When an alpha curve is enabled, this scales the curve's per-pixel opacity. | `0.8` |
+| `overlay_alpha_curve` | `null` | Optional sigmoid-like, value-dependent overlay opacity applied before `overlay_alpha`. `steepness` must be positive; `midpoint` defaults to `0.5` and moves the transition within the normalized 0–1 range. | `{steepness: 10, midpoint: 0.25}` |
 | `cmap` | `viridis` | Matplotlib colormap. | `magma` |
 | `cmap_black` | `null` | Optional black start using 0–255 palette positions. `threshold` stays black through that position; `blend_width` controls the linear transition; `transparent` reveals the source beneath pure black in overlays. | `{threshold: 20, blend_width: 35, transparent: true}` |
 | `grid_format` | `png` | `png`, `pdf`, or `svg`. | `pdf` |
@@ -270,13 +270,14 @@ grid layout and `tile_size`. For video, this setting takes precedence over
 `video.output_resolution` and uses codec-compatible even source dimensions.
 Disable it to retain the model-sized image outputs and configured video
 resolution.
-Set `overlay_alpha_curve` to `null` to retain the constant `overlay_alpha`.
-When enabled, the normalized map value controls opacity through an
-endpoint-normalized sigmoid: the lowest value is exactly transparent, the
-highest is exactly opaque, and `overlay_alpha` is ignored. The curve is
-centered at `midpoint`; lowering it makes smaller values opaque sooner, while
-increasing `steepness` makes the transition sharper. The curve is applied
-after the colormap and optional `cmap_black` processing. If
+Set `overlay_alpha_curve` to `null` to use the constant `overlay_alpha` alone.
+When the curve is enabled, the normalized map value first controls per-pixel
+opacity through an endpoint-normalized sigmoid. `overlay_alpha` then uniformly
+scales that opacity, so the lowest map value remains exactly transparent and
+the highest has opacity `overlay_alpha`. The curve is centered at `midpoint`;
+lowering it makes smaller values opaque sooner, while increasing `steepness`
+makes the transition sharper. The curve is applied after the colormap and
+optional `cmap_black` processing. If
 `cmap_black.transparent` is also enabled, its pure-black pixels remain fully
 transparent; all other pixels use the sigmoid opacity.
 Set `cmap_black` to `null` to use the selected colormap unchanged. With a

@@ -19,7 +19,7 @@ preprocessing:
   resize: stretch
   crop: none
   pad: none
-  interpolation: null
+  interpolation: bilinear
   normalize: true
   mean: null
   std: null
@@ -49,7 +49,7 @@ visualization:
   background: null
   dpi: null
   match_input_size: true
-  interpolation: mask
+  interpolation: bilinear
   overlay_alpha: 0.45
   overlay_alpha_curve:
     steepness: 15
