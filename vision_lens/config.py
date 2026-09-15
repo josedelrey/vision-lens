@@ -13,6 +13,7 @@ AttentionLayers = Literal["all"] | tuple[int, ...]
 AnalysisMethod = Literal["attention", "rollout", "gradcam", "patch_pca"]
 Precision = Literal["float32", "float16", "bfloat16"]
 NormalizationMode = Literal["per_map", "shared", "fixed"]
+VisualizationOutputSize = Literal["match"] | tuple[int, int] | None
 VisualizationInterpolation = Literal[
     "nearest",
     "bilinear",
@@ -56,7 +57,7 @@ SECTION_KEYS = {
         "labels",
         "background",
         "dpi",
-        "match_input_size",
+        "output_size",
         "interpolation",
         "overlay_alpha",
         "overlay_alpha_curve",
@@ -81,7 +82,6 @@ SECTION_KEYS = {
         "end_time",
         "sampling_rate",
         "frame_limit",
-        "output_resolution",
         "pca_fit_frames",
         "temporal_smoothing",
         "codec",
@@ -228,7 +228,7 @@ class VisualizationConfig:
     labels: bool | None = None
     background: str | None = None
     dpi: int | None = None
-    match_input_size: bool = False
+    output_size: VisualizationOutputSize = None
     interpolation: VisualizationInterpolation = "bilinear"
     overlay_alpha: float = 0.45
     cmap: str = "viridis"
@@ -264,7 +264,6 @@ class VideoConfig:
     end_time: float | None = None
     sampling_rate: float | Literal["auto"] = 5.0
     frame_limit: int | None = None
-    output_resolution: tuple[int, int] | None = None
     pca_fit_frames: int = 32
     temporal_smoothing: float = 0.0
     codec: str = "libx264"
@@ -466,9 +465,8 @@ def parse_config(
                 visualization_section.get("dpi"),
                 "visualization.dpi",
             ),
-            match_input_size=_bool(
-                visualization_section.get("match_input_size", False),
-                "visualization.match_input_size",
+            output_size=_visualization_output_size(
+                visualization_section.get("output_size"),
             ),
             interpolation=_choice(
                 visualization_section.get("interpolation", "bilinear"),
@@ -546,10 +544,6 @@ def parse_config(
                     video_section.get("frame_limit"),
                     "video.frame_limit",
                 ),
-                output_resolution=_optional_size(
-                    video_section.get("output_resolution"),
-                    "video.output_resolution",
-                ),
                 pca_fit_frames=_positive_int(
                     video_section.get("pca_fit_frames", 32),
                     "video.pca_fit_frames",
@@ -587,10 +581,12 @@ def validate_config(config: VisionLensConfig) -> None:
             and config.video.end_time <= config.video.start_time
         ):
             raise ValueError("video.end_time must be greater than video.start_time.")
-        if config.video.output_resolution is not None and any(
-            value % 2 for value in config.video.output_resolution
+        if isinstance(config.visualization.output_size, tuple) and any(
+            value % 2 for value in config.visualization.output_size
         ):
-            raise ValueError("video.output_resolution values must be even numbers.")
+            raise ValueError(
+                "visualization.output_size values must be even numbers for video."
+            )
     actual_pair = (config.model.architecture, config.model.backend)
     expected_pair = ("cnn", "torchvision") if method == "gradcam" else ("vit", "timm")
     if actual_pair != expected_pair:
@@ -725,7 +721,11 @@ def config_to_dict(config: VisionLensConfig) -> dict[str, Any]:
         "labels": config.visualization.labels,
         "background": config.visualization.background,
         "dpi": config.visualization.dpi,
-        "match_input_size": config.visualization.match_input_size,
+        "output_size": (
+            list(config.visualization.output_size)
+            if isinstance(config.visualization.output_size, tuple)
+            else config.visualization.output_size
+        ),
         "interpolation": config.visualization.interpolation,
         "overlay_alpha": config.visualization.overlay_alpha,
         "overlay_alpha_curve": (
@@ -770,11 +770,6 @@ def config_to_dict(config: VisionLensConfig) -> dict[str, Any]:
             "end_time": config.video.end_time,
             "sampling_rate": config.video.sampling_rate,
             "frame_limit": config.video.frame_limit,
-            "output_resolution": (
-                None
-                if config.video.output_resolution is None
-                else list(config.video.output_resolution)
-            ),
             "pca_fit_frames": config.video.pca_fit_frames,
             "temporal_smoothing": config.video.temporal_smoothing,
             "codec": config.video.codec,
@@ -1197,6 +1192,18 @@ def _optional_size(value: Any, field_name: str) -> tuple[int, int] | None:
     raise ValueError(
         f"{field_name} must be a positive integer, [width, height], or null."
     )
+
+
+def _visualization_output_size(value: Any) -> VisualizationOutputSize:
+    if value == "match":
+        return "match"
+    try:
+        return _optional_size(value, "visualization.output_size")
+    except ValueError as error:
+        raise ValueError(
+            "visualization.output_size must be 'match', a positive integer, "
+            "[width, height], or null."
+        ) from error
 
 
 def _optional_range(value: Any, field_name: str) -> tuple[float, float] | None:

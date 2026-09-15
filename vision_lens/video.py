@@ -199,9 +199,12 @@ def representative_frame_indices(
 def resolved_output_resolution(
     metadata: VideoMetadata,
     configured: tuple[int, int] | None,
+    default: tuple[int, int] | None = None,
 ) -> tuple[int, int]:
     if configured is not None:
         return configured
+    if default is not None:
+        return (_even(default[0]), _even(default[1]))
     return (_even(metadata.width), _even(metadata.height))
 
 

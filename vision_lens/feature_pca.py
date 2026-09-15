@@ -61,6 +61,7 @@ def extract_patch_pca(
     projection: PatchPCAProjection | None = None,
     interpolation: Interpolation = "bilinear",
     guidance_image: Any | None = None,
+    output_size: tuple[int, int] | None = None,
 ) -> PatchPCAResult:
     """Extract ViT patch tokens and render their shared PCA projection as RGB."""
     if metadata.patch_size is None:
@@ -73,7 +74,7 @@ def extract_patch_pca(
     return project_patch_embeddings(
         patch_embeddings,
         patch_grid=patch_grid,
-        image_size=image_size,
+        image_size=output_size or image_size,
         foreground_threshold=foreground_threshold,
         foreground_side=foreground_side,
         rgb_fit_scope=rgb_fit_scope,

@@ -57,7 +57,7 @@ def test_parse_config_applies_documented_defaults():
     assert config.preprocessing.normalize is True
     assert config.visualization.overlay_alpha == 0.45
     assert config.visualization.overlay_alpha_curve is None
-    assert config.visualization.match_input_size is False
+    assert config.visualization.output_size is None
     assert config.visualization.interpolation == "bilinear"
     assert config.visualization.cmap == "viridis"
     assert config.visualization.grid_format == "png"
@@ -77,12 +77,12 @@ def test_video_settings_are_strict_and_resolved(tmp_path):
     source.touch()
     raw = _minimal_config()
     raw["input"] = {"files": [str(source)]}
+    raw["visualization"] = {"output_size": [640, 360]}
     raw["video"] = {
         "start_time": 1.5,
         "end_time": 4,
         "sampling_rate": 2.5,
         "frame_limit": 7,
-        "output_resolution": [640, 360],
         "pca_fit_frames": 5,
         "temporal_smoothing": 0.25,
         "codec": "libx264",
@@ -95,7 +95,7 @@ def test_video_settings_are_strict_and_resolved(tmp_path):
     assert config.video.start_time == 1.5
     assert config.video.end_time == 4
     assert config.video.sampling_rate == 2.5
-    assert config.video.output_resolution == (640, 360)
+    assert config.visualization.output_size == (640, 360)
     assert resolved["temporal_smoothing"] == 0.25
 
     raw["video"]["unknown"] = True
@@ -117,7 +117,6 @@ def test_video_settings_apply_documented_defaults(tmp_path):
     assert config.video.end_time is None
     assert config.video.sampling_rate == 5
     assert config.video.frame_limit is None
-    assert config.video.output_resolution is None
     assert config.video.pca_fit_frames == 32
     assert config.video.temporal_smoothing == 0
     assert config.video.codec == "libx264"
@@ -155,7 +154,7 @@ def test_video_sampling_rate_accepts_auto_and_rejects_other_strings(tmp_path):
         parse_config(raw)
 
 
-def test_video_rejects_invalid_time_range_and_odd_resolution(tmp_path):
+def test_video_rejects_invalid_time_range_and_odd_output_size(tmp_path):
     source = tmp_path / "clip.mp4"
     source.touch()
     raw = _minimal_config()
@@ -164,7 +163,8 @@ def test_video_rejects_invalid_time_range_and_odd_resolution(tmp_path):
     with pytest.raises(ValueError, match="end_time must be greater"):
         parse_config(raw)
 
-    raw["video"] = {"output_resolution": [641, 360]}
+    raw["video"] = {}
+    raw["visualization"] = {"output_size": [641, 360]}
     with pytest.raises(ValueError, match="must be even"):
         parse_config(raw)
 
@@ -173,7 +173,7 @@ def test_parse_config_reads_visualization_values():
     config = parse_config(
         _minimal_config(
             {
-                "match_input_size": True,
+                "output_size": "match",
                 "overlay_alpha": 0.35,
                 "cmap": "magma",
                 "grid_format": "svg",
@@ -182,10 +182,27 @@ def test_parse_config_reads_visualization_values():
     )
 
     assert config.visualization.overlay_alpha == 0.35
-    assert config.visualization.match_input_size is True
+    assert config.visualization.output_size == "match"
     assert config.visualization.cmap == "magma"
     assert config.visualization.grid_format == "svg"
-    assert config_to_dict(config)["visualization"]["match_input_size"] is True
+    assert config_to_dict(config)["visualization"]["output_size"] == "match"
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [([320, 180], (320, 180)), (256, (256, 256)), (None, None)],
+)
+def test_visualization_output_size_accepts_fixed_square_and_null(value, expected):
+    config = parse_config(_minimal_config({"output_size": value}))
+
+    assert config.visualization.output_size == expected
+    serialized = config_to_dict(config)["visualization"]["output_size"]
+    assert serialized == (list(expected) if isinstance(expected, tuple) else expected)
+
+
+def test_removed_match_input_size_is_rejected():
+    with pytest.raises(ValueError, match="Unknown key.*match_input_size"):
+        parse_config(_minimal_config({"match_input_size": True}))
 
 
 def test_colormap_black_settings_parse_and_round_trip():

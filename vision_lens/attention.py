@@ -57,6 +57,7 @@ def extract_attention_maps(
     normalize: bool = True,
     interpolation: Interpolation = "bilinear",
     guidance_image: Any | None = None,
+    output_size: tuple[int, int] | None = None,
 ) -> AttentionExtractionResult:
     blocks = _vit_blocks(model)
     layer_indices = _select_layers(layers, total_layers=len(blocks))
@@ -92,6 +93,7 @@ def extract_attention_maps(
                 guidance_image=(
                     model_inputs if guidance_image is None else guidance_image
                 ),
+                output_size=output_size,
             ),
             head_indices=head_indices,
             head_fusion=head_fusion,
@@ -107,7 +109,7 @@ def extract_attention_maps(
     return AttentionExtractionResult(
         logits=logits.detach().cpu(),
         layers=layer_maps,
-        image_size=metadata.image_size,
+        image_size=output_size or metadata.image_size,
     )
 
 
@@ -119,6 +121,7 @@ def extract_attention_rollout(
     normalize: bool = True,
     interpolation: Interpolation = "bilinear",
     guidance_image: Any | None = None,
+    output_size: tuple[int, int] | None = None,
 ) -> AttentionExtractionResult:
     blocks = _vit_blocks(model)
     layer_indices = _select_layers(layers, total_layers=len(blocks))
@@ -155,6 +158,7 @@ def extract_attention_rollout(
                 guidance_image=(
                     model_inputs if guidance_image is None else guidance_image
                 ),
+                output_size=output_size,
             ),
             head_indices=None,
             head_fusion="mean",
@@ -170,7 +174,7 @@ def extract_attention_rollout(
     return AttentionExtractionResult(
         logits=logits.detach().cpu(),
         layers=layer_maps,
-        image_size=metadata.image_size,
+        image_size=output_size or metadata.image_size,
     )
 
 
@@ -206,6 +210,7 @@ def token_attention_to_map(
     normalize: bool = True,
     interpolation: Interpolation = "bilinear",
     guidance_image: Any | None = None,
+    output_size: tuple[int, int] | None = None,
 ) -> Any:
     if len(token_attention.shape) != 3:
         raise ValueError("token_attention must have shape (batch, tokens, tokens).")
@@ -226,7 +231,7 @@ def token_attention_to_map(
     )
     resized_maps = _interpolate_maps(
         patch_maps,
-        image_size,
+        output_size or image_size,
         interpolation,
         guidance_image=guidance_image,
     )
@@ -244,6 +249,7 @@ def extract_gradcam(
     normalize: bool = True,
     interpolation: Interpolation = "bilinear",
     guidance_image: Any | None = None,
+    output_size: tuple[int, int] | None = None,
 ) -> GradCamResult:
     resolved_layer_name, layer_module = _resolve_gradcam_layer(model, target_layer)
     activations = None
@@ -286,7 +292,7 @@ def extract_gradcam(
     maps = functional.relu(maps)
     maps = _interpolate_maps(
         maps,
-        metadata.image_size,
+        output_size or metadata.image_size,
         interpolation,
         guidance_image=model_inputs if guidance_image is None else guidance_image,
     )
@@ -298,7 +304,7 @@ def extract_gradcam(
         ),
         target_layer=resolved_layer_name,
         target_classes=tuple(class_tensor.detach().cpu().tolist()),
-        image_size=metadata.image_size,
+        image_size=output_size or metadata.image_size,
     )
 
 
@@ -311,6 +317,7 @@ def class_token_attention_to_map(
     normalize: bool = True,
     interpolation: Interpolation = "bilinear",
     guidance_image: Any | None = None,
+    output_size: tuple[int, int] | None = None,
 ) -> Any:
     _validate_attention_tensor(attention)
     selected_heads = _select_heads(attention, heads)
@@ -329,7 +336,7 @@ def class_token_attention_to_map(
     )
     resized_maps = _interpolate_maps(
         patch_maps,
-        image_size,
+        output_size or image_size,
         interpolation,
         guidance_image=guidance_image,
     )

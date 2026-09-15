@@ -190,7 +190,7 @@ def test_short_pca_video_uses_frozen_projection_and_bounded_batches(
                 "foreground_side": "low",
             },
             "runtime": {"device": "cpu", "batch_size": 2},
-            "visualization": {},
+            "visualization": {"output_size": [64, 48]},
             "output": {
                 "directory": str(output_dir),
                 "overwrite": "error",
@@ -198,7 +198,6 @@ def test_short_pca_video_uses_frozen_projection_and_bounded_batches(
             "video": {
                 "sampling_rate": 3,
                 "pca_fit_frames": 2,
-                "output_resolution": [64, 48],
             },
         }
     )
@@ -298,7 +297,7 @@ def test_gradcam_video_exports_overlays_with_one_fixed_class(
                 "target_class": 1,
             },
             "runtime": {"device": "cpu", "batch_size": 1},
-            "visualization": {},
+            "visualization": {"output_size": [64, 48]},
             "output": {
                 "directory": str(output_dir),
                 "heatmaps": False,
@@ -307,7 +306,6 @@ def test_gradcam_video_exports_overlays_with_one_fixed_class(
             },
             "video": {
                 "sampling_rate": sampling_rate,
-                "output_resolution": [64, 48],
                 "temporal_smoothing": 0.5,
             },
         }
@@ -328,6 +326,7 @@ def test_gradcam_video_exports_overlays_with_one_fixed_class(
         ),
     )
     target_classes = []
+    output_sizes = []
     overlay_sizes = []
     original_overlay = video_pipeline.overlay_attention
 
@@ -337,6 +336,7 @@ def test_gradcam_video_exports_overlays_with_one_fixed_class(
 
     def fake_gradcam(_model, inputs, _metadata, **kwargs):
         target_classes.append(kwargs["target_classes"])
+        output_sizes.append(kwargs["output_size"])
         return GradCamResult(
             logits=torch.zeros(len(inputs), 2),
             maps=torch.arange(len(inputs) * 16, dtype=torch.float32).reshape(
@@ -365,6 +365,7 @@ def test_gradcam_video_exports_overlays_with_one_fixed_class(
     result = run_pipeline_from_config(config)
 
     assert target_classes == [[1]] * expected_frames
+    assert output_sizes == [(48, 64)] * expected_frames
     assert overlay_sizes == [(64, 48)] * expected_frames
     assert result.processed_frames == expected_frames
     assert result.frame_rate == (4 if sampling_rate == "auto" else 2)
@@ -409,14 +410,14 @@ def test_multiple_videos_have_independent_outputs_and_sampling_rates(
                 "target_class": 1,
             },
             "runtime": {"device": "cpu", "batch_size": 1},
-            "visualization": {},
+            "visualization": {"output_size": [64, 48]},
             "output": {
                 "directory": str(output_dir),
                 "heatmaps": False,
                 "overlays": True,
                 "grids": False,
             },
-            "video": {"sampling_rate": "auto", "output_resolution": [64, 48]},
+            "video": {"sampling_rate": "auto"},
         }
     )
     loaded_model = LoadedModel(

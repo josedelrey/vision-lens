@@ -48,7 +48,7 @@ visualization:
   labels: null
   background: null
   dpi: null
-  match_input_size: true
+  output_size: match
   interpolation: anyup
   overlay_alpha: 1.0
   overlay_alpha_curve:

@@ -219,7 +219,7 @@ visualization:
   labels: true
   background: white
   dpi: 150
-  match_input_size: true
+  output_size: match
   interpolation: bilinear_mask
   overlay_alpha: 0.6
   overlay_alpha_curve:
@@ -245,7 +245,7 @@ visualization:
 | `labels` | `null` | Show labels; `null` keeps workflow behavior. | `false` |
 | `background` | `null` | Pillow/Matplotlib color. | `"#101010"` |
 | `dpi` | `null` | Output DPI; `null` retains workflow behavior. | `150` |
-| `match_input_size` | `false` | Resize each standalone visualization to its original input dimensions. Video uses the source frame dimensions when enabled. | `true` |
+| `output_size` | `null` | Standalone visualization size: `null` keeps the model-processed size, `match` uses each source's dimensions, a positive integer produces a square output, and `[width, height]` sets an exact size. Video dimensions must be even. | `[1280, 720]` |
 | `interpolation` | `bilinear` | Visualization upscaling mode: `nearest`, `bilinear`, `bilinear_mask`, `anyup`, or `anyup_mask`. | `anyup_mask` |
 | `overlay_alpha` | `0.45` | Uniform heatmap opacity from 0 to 1. When an alpha curve is enabled, this scales the curve's per-pixel opacity. | `0.8` |
 | `overlay_alpha_curve` | `null` | Optional sigmoid-like, value-dependent overlay opacity applied before `overlay_alpha`. `steepness` must be positive; `midpoint` defaults to `0.5` and moves the transition within the normalized 0–1 range. | `{steepness: 10, midpoint: 0.25}` |
@@ -282,13 +282,13 @@ AnyUp implementation, so NATTEN is not required. The reusable adapter is
 available as `vision_lens.anyup`, including the model loader, ImageNet
 guidance-image preparation, and generic `upsample_features` function.
 
-When `match_input_size` is enabled, image heatmaps, overlays, and patch PCA
-images use the source image width and height with the configured visualization
-interpolation. Composite grid dimensions remain controlled by the
-grid layout and `tile_size`. For video, this setting takes precedence over
-`video.output_resolution` and uses codec-compatible even source dimensions.
-Disable it to retain the model-sized image outputs and configured video
-resolution.
+`output_size: match` makes image heatmaps, overlays, and patch PCA images use
+the dimensions of each source image. For video it uses codec-compatible even
+source dimensions. An explicit integer or `[width, height]` renders every
+standalone output at that size; choosing a smaller size also reduces the memory
+needed by learned `anyup` interpolation. `null` retains the model-processed
+dimensions. Composite grid dimensions remain controlled by the grid layout and
+`tile_size`.
 Set `overlay_alpha_curve` to `null` to use the constant `overlay_alpha` alone.
 When the curve is enabled, the normalized map value first controls per-pixel
 opacity through an endpoint-normalized sigmoid. `overlay_alpha` then uniformly
@@ -364,8 +364,9 @@ nearest multiples of the model patch size. For example, a 1920×1080 video with
 `image_size: 672` and 14×14 patches runs at 672×378. CNNs use the proportional
 dimensions directly. Video frames are not cropped or padded, so set
 `preprocessing.crop` and `preprocessing.pad` to `none`. Image preprocessing
-keeps its configured resize behavior. Spatial maps are rendered against the
-decoded source frame, and the manifest records the rectangular model input.
+keeps its configured resize behavior. Spatial maps are rendered at
+`visualization.output_size`; the manifest records both the rectangular model
+input and resolved output resolution.
 
 When multiple videos are selected, each runs independently in a subdirectory
 of `output.directory` named after its source file. Each subdirectory has its
@@ -378,7 +379,6 @@ video:
   end_time: null
   sampling_rate: auto
   frame_limit: null
-  output_resolution: [1280, 720]
   pca_fit_frames: 32
   temporal_smoothing: 0.0
   codec: libx264
@@ -390,7 +390,6 @@ video:
 | `end_time` | `null` | Exclusive ending timestamp in seconds; `null` reads to the end. | `12.0` |
 | `sampling_rate` | `5.0` | Frames sampled per second and output playback FPS. Set `auto` to match the source video's reported average FPS. | `auto` |
 | `frame_limit` | `null` | Maximum sampled frames after applying the time range. | `120` |
-| `output_resolution` | `null` | Even `[width, height]` for single-view output videos; `null` uses the source size, rounded down to even dimensions when needed. Comparison videos use approximately twice the width. | `[1280, 720]` |
 | `pca_fit_frames` | `32` | Maximum evenly distributed representative frames used to fit video PCA. | `64` |
 | `temporal_smoothing` | `0.0` | Previous-frame blend strength from `0` (off) to `1` (strongest). | `0.35` |
 | `codec` | `libx264` | PyAV/FFmpeg encoder name for MP4 outputs. | `libx264` |

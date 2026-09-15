@@ -60,7 +60,7 @@ def test_vit_pipeline_exports_figures_with_mocked_model(monkeypatch, tmp_path):
                 "device": "cpu",
             },
             "visualization": {
-                "match_input_size": True,
+                "output_size": "match",
                 "overlay_alpha": 0.35,
                 "cmap": "viridis",
                 "grid_format": "svg",
@@ -251,10 +251,10 @@ def test_gradcam_export_preserves_heatmap_overlay_and_grid_layout(tmp_path):
         assert grid.size == (460, 256)
 
 
-def test_match_input_size_applies_to_all_image_exporters(tmp_path):
+def test_matching_output_size_applies_to_all_image_exporters(tmp_path):
     input_size = (9, 5)
     image = Image.new("RGB", input_size, "white")
-    visualization = VisualizationConfig(match_input_size=True)
+    visualization = VisualizationConfig(output_size="match")
     attention = _attention_result(layer_indices=(0,))
     gradcam = GradCamResult(
         logits=torch.zeros(1, 2),
@@ -330,7 +330,7 @@ def test_match_input_size_applies_to_all_image_exporters(tmp_path):
         cmap="viridis",
         grid_format="png",
         output_config=OutputConfig(native_dir, overlays=False, grids=False),
-        visualization_config=VisualizationConfig(match_input_size=False),
+        visualization_config=VisualizationConfig(output_size=None),
     )
     with Image.open(native_paths[0]) as rendered:
         assert rendered.size == (4, 4)
@@ -878,6 +878,7 @@ def test_gradcam_pipeline_passes_fixed_class_workers_and_batch_size(
                 "target_class": 1,
             },
             "runtime": {"device": "cpu", "workers": 2, "batch_size": 1},
+            "visualization": {"output_size": [6, 2]},
         }
     )
     loaded_model = LoadedModel(
@@ -929,6 +930,7 @@ def test_gradcam_pipeline_passes_fixed_class_workers_and_batch_size(
     assert worker_counts == [2, 2]
     assert [call["target_classes"] for call in received] == [[1], [1]]
     assert all(call["target_layer"] == "features.0" for call in received)
+    assert all(call["output_size"] == (2, 6) for call in received)
     assert len(result.output_paths) == 2
 
 
