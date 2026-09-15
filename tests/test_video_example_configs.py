@@ -18,28 +18,25 @@ REPO_ROOT = Path(__file__).parents[1]
         ("patch_pca.dinov2.video.yaml", "patch_pca"),
     ],
 )
-def test_video_example_config_selects_all_mp4_inputs_and_video_mode(
+def test_video_example_config_selects_second_video_and_video_mode(
     tmp_path, config_name, method
 ):
-    sources = tuple(tmp_path / f"{index}.mp4" for index in range(1, 3))
-    for source in sources:
-        source.touch()
-    (tmp_path / "ignore.txt").touch()
+    source = REPO_ROOT / "videos/2.mp4"
     output = tmp_path / "outputs"
     example = REPO_ROOT / "configs" / config_name
     raw = yaml.safe_load(example.read_text())
-    assert raw["input"]["folders"] == ["videos"]
+    assert raw["input"]["files"] == ["videos/2.mp4"]
+    assert raw["input"]["folders"] == []
     assert raw["input"]["patterns"] == ["*.mp4"]
 
     config = load_config(
         example,
         overrides={
-            "input": {"folders": [str(tmp_path)]},
             "output": {"directory": str(output)},
         },
     )
 
-    assert config.input.paths == sources
+    assert config.input.paths == (source,)
     assert config.analysis.method == method
     assert config.video is not None
     assert config.video.sampling_rate == "auto"

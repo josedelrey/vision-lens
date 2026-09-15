@@ -169,6 +169,39 @@ def test_alpha_curve_steepness_controls_the_sigmoid_transition():
     assert abs(int(steep[2]) - int(gentle[2])) <= 1
 
 
+def test_alpha_curve_midpoint_moves_the_opacity_transition():
+    values = torch.tensor([[0.0, 0.25, 0.5, 0.75, 1.0]])
+    image = Image.new("RGB", (5, 1), "black")
+
+    centered = np.asarray(
+        overlay_attention(
+            image,
+            values,
+            alpha_curve_steepness=10,
+            alpha_curve_midpoint=0.5,
+            cmap="gray",
+            normalization="fixed",
+            normalization_range=(0, 1),
+        )
+    )[0, :, 0]
+    shifted = np.asarray(
+        overlay_attention(
+            image,
+            values,
+            alpha_curve_steepness=10,
+            alpha_curve_midpoint=0.25,
+            cmap="gray",
+            normalization="fixed",
+            normalization_range=(0, 1),
+        )
+    )[0, :, 0]
+
+    assert shifted[1] > centered[1]
+    assert shifted[2] > centered[2]
+    assert shifted[0] == centered[0] == 0
+    assert shifted[-1] == centered[-1] == 255
+
+
 def test_overlay_attention_matches_input_image_dimensions():
     image = Image.new("RGB", (12, 8), "white")
     overlay = overlay_attention(image, torch.rand(1, 1, 4, 4), cmap="viridis")

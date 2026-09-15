@@ -322,7 +322,10 @@ class _VideoExports:
                     stream.maps,
                     alpha=self.config.visualization.overlay_alpha,
                     alpha_curve_steepness=(
-                        self.config.visualization.overlay_alpha_curve
+                        self.config.visualization.overlay_alpha_curve_steepness
+                    ),
+                    alpha_curve_midpoint=(
+                        self.config.visualization.overlay_alpha_curve_midpoint
                     ),
                     cmap=self.config.visualization.render_cmap,
                     batch_index=frame_index,

@@ -16,6 +16,7 @@ from vision_lens.config import (
 from vision_lens.feature_pca import PatchPCAResult
 from vision_lens.image_pipeline import (
     export_gradcam_outputs,
+    export_patch_pca_outputs,
     run_gradcam_from_config,
     run_patch_pca_from_config,
     run_vit_attention_from_config,
@@ -323,6 +324,48 @@ def test_patch_pca_pipeline_exports_reference_style_images(monkeypatch, tmp_path
     assert all(path.is_file() for path in result.output_paths)
     with Image.open(tmp_path / "patch_pca_comparison.png") as comparison:
         assert comparison.size == (56, 36)
+
+
+def test_patch_pca_single_image_run_skips_redundant_comparison(tmp_path):
+    patch_pca = PatchPCAResult(
+        patch_embeddings=torch.rand(1, 4, 3),
+        foreground_mask=torch.ones(1, 4, dtype=torch.bool),
+        images=(Image.new("RGB", (4, 4), "red"),),
+        patch_grid=(2, 2),
+        image_size=(4, 4),
+    )
+
+    paths = export_patch_pca_outputs(
+        patch_pca,
+        image_paths=(Path("horse.jpg"),),
+        output_dir=tmp_path,
+    )
+
+    assert [path.name for path in paths] == ["horse_patch_pca.png"]
+    assert not (tmp_path / "patch_pca_comparison.png").exists()
+
+
+def test_patch_pca_keeps_single_image_page_in_larger_run(tmp_path):
+    patch_pca = PatchPCAResult(
+        patch_embeddings=torch.rand(1, 4, 3),
+        foreground_mask=torch.ones(1, 4, dtype=torch.bool),
+        images=(Image.new("RGB", (4, 4), "red"),),
+        patch_grid=(2, 2),
+        image_size=(4, 4),
+    )
+
+    paths = export_patch_pca_outputs(
+        patch_pca,
+        image_paths=(Path("horse.jpg"),),
+        output_dir=tmp_path,
+        grid_page_offset=1,
+        total_grid_pages=2,
+    )
+
+    assert [path.name for path in paths] == [
+        "horse_patch_pca.png",
+        "patch_pca_comparison_part-002.png",
+    ]
 
 
 def test_patch_pca_pipeline_fits_and_transforms_multiple_bounded_batches(

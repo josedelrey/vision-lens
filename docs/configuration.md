@@ -220,6 +220,7 @@ visualization:
   overlay_alpha: 0.6
   overlay_alpha_curve:
     steepness: 10
+    midpoint: 0.25
   cmap: magma
   cmap_black:
     threshold: 20
@@ -241,7 +242,7 @@ visualization:
 | `background` | `null` | Pillow/Matplotlib color. | `"#101010"` |
 | `dpi` | `null` | Output DPI; `null` retains workflow behavior. | `150` |
 | `overlay_alpha` | `0.45` | Heatmap opacity from 0 to 1. | `0.8` |
-| `overlay_alpha_curve` | `null` | Optional sigmoid-like, value-dependent overlay opacity. `steepness` must be positive; larger values make the transition around 0.5 sharper. | `{steepness: 10}` |
+| `overlay_alpha_curve` | `null` | Optional sigmoid-like, value-dependent overlay opacity. `steepness` must be positive; `midpoint` defaults to `0.5` and moves the transition within the normalized 0–1 range. | `{steepness: 10, midpoint: 0.25}` |
 | `cmap` | `viridis` | Matplotlib colormap. | `magma` |
 | `cmap_black` | `null` | Optional black start using 0–255 palette positions. `threshold` stays black through that position; `blend_width` controls the linear transition; `transparent` reveals the source beneath pure black in overlays. | `{threshold: 20, blend_width: 35, transparent: true}` |
 | `grid_format` | `png` | `png`, `pdf`, or `svg`. | `pdf` |
@@ -254,7 +255,9 @@ Set `overlay_alpha_curve` to `null` to retain the constant `overlay_alpha`.
 When enabled, the normalized map value controls opacity through an
 endpoint-normalized sigmoid: the lowest value is exactly transparent, the
 highest is exactly opaque, and `overlay_alpha` is ignored. The curve is
-applied after the colormap and optional `cmap_black` processing. If
+centered at `midpoint`; lowering it makes smaller values opaque sooner, while
+increasing `steepness` makes the transition sharper. The curve is applied
+after the colormap and optional `cmap_black` processing. If
 `cmap_black.transparent` is also enabled, its pure-black pixels remain fully
 transparent; all other pixels use the sigmoid opacity.
 Set `cmap_black` to `null` to use the selected colormap unchanged. With a
@@ -287,7 +290,7 @@ output:
 | `directory` | required | Output folder. | `outputs/run-1` |
 | `heatmaps` | `true` | Export heatmaps or PCA color maps. | `false` |
 | `overlays` | `true` (`false` for PCA) | Export overlays where supported. | `false` |
-| `grids` | `true` | Export comparison grids. | `false` |
+| `grids` | `true` | Export comparison grids. A single-image PCA run skips its redundant one-tile comparison. | `false` |
 | `raw_arrays` | `false` | Export analysis arrays without rendering. | `true` |
 | `image_format` | `png` | `png`, `jpeg`, `tiff`, or `webp`. | `webp` |
 | `raw_format` | `npy` | `npy` or compressed `npz`. | `npz` |
