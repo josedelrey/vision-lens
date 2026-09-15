@@ -7,6 +7,7 @@ import pytest
 import torch
 from PIL import Image
 
+from vision_lens.config import ColormapSpec
 from vision_lens.visualization import (
     attention_map_to_array,
     image_grid,
@@ -14,6 +15,7 @@ from vision_lens.visualization import (
     overlay_attention,
     render_heatmap,
     save_grid_figure,
+    save_image,
     shared_value_range,
 )
 
@@ -23,6 +25,81 @@ def test_render_heatmap_accepts_configurable_cmap():
 
     assert heatmap.mode == "RGB"
     assert heatmap.size == (8, 8)
+
+
+def test_render_heatmap_can_hold_low_palette_values_at_black_then_blend():
+    values = torch.tensor([[0.0, 19 / 255, 20 / 255, 30 / 255, 40 / 255, 1.0]])
+    cmap = ColormapSpec(
+        "viridis",
+        black_threshold=20,
+        black_blend_width=20,
+        black_transparent=False,
+    )
+
+    pixels = np.asarray(
+        render_heatmap(
+            values, cmap=cmap, normalization="fixed", normalization_range=(0, 1)
+        )
+    )[0]
+    original = np.asarray(
+        render_heatmap(
+            values, cmap="viridis", normalization="fixed", normalization_range=(0, 1)
+        )
+    )[0]
+
+    assert np.all(pixels[:3] == 0)
+    assert np.allclose(pixels[3], original[3] * 0.5, atol=1)
+    assert np.array_equal(pixels[4:], original[4:])
+
+
+def test_black_colormap_transparency_does_not_change_standalone_heatmap(tmp_path):
+    values = torch.tensor([[0.0, 20 / 255, 21 / 255, 1.0]])
+    cmap = ColormapSpec(
+        "viridis",
+        black_threshold=20,
+        black_blend_width=20,
+        black_transparent=True,
+    )
+
+    heatmap = render_heatmap(
+        values, cmap=cmap, normalization="fixed", normalization_range=(0, 1)
+    )
+    pixels = np.asarray(heatmap)
+
+    assert heatmap.mode == "RGB"
+    assert np.all(pixels[0, 0] == 0)
+    assert np.all(pixels[0, 1] == 0)
+    assert np.any(pixels[0, 2] != 0)
+    assert np.any(pixels[0, 3] != 0)
+
+    path = tmp_path / "transparent.png"
+    save_image(heatmap, path)
+    with Image.open(path) as saved:
+        assert saved.mode == "RGB"
+        assert np.all(np.asarray(saved)[0, 0] == 0)
+
+
+def test_overlay_reveals_original_beneath_transparent_black():
+    values = torch.tensor([[0.0, 1.0]])
+    image = Image.new("RGB", (2, 1), (200, 100, 50))
+    cmap = ColormapSpec(
+        "viridis",
+        black_threshold=20,
+        black_blend_width=20,
+        black_transparent=True,
+    )
+
+    overlay = overlay_attention(
+        image,
+        values,
+        alpha=1,
+        cmap=cmap,
+        normalization="fixed",
+        normalization_range=(0, 1),
+    )
+
+    assert np.array_equal(np.asarray(overlay)[0, 0], [200, 100, 50])
+    assert not np.array_equal(np.asarray(overlay)[0, 1], [200, 100, 50])
 
 
 def test_overlay_attention_matches_input_image_dimensions():

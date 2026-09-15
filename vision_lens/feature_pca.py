@@ -13,6 +13,9 @@ from PIL import Image
 from vision_lens.attention import infer_patch_grid_from_image
 from vision_lens.models import ModelMetadata
 
+ForegroundThreshold = float | Literal["auto"]
+_OTSU_BINS = 256
+
 
 @dataclass(frozen=True)
 class PatchPCAResult:
@@ -40,7 +43,7 @@ def extract_patch_pca(
     model: Any,
     inputs: Any,
     metadata: ModelMetadata,
-    foreground_threshold: float = 0.5,
+    foreground_threshold: ForegroundThreshold = 0.5,
     foreground_side: Literal["high", "low"] = "high",
     projection: PatchPCAProjection | None = None,
 ) -> PatchPCAResult:
@@ -86,13 +89,12 @@ def project_patch_embeddings(
     patch_embeddings: Any,
     patch_grid: tuple[int, int],
     image_size: tuple[int, int],
-    foreground_threshold: float = 0.5,
+    foreground_threshold: ForegroundThreshold = 0.5,
     foreground_side: Literal["high", "low"] = "high",
     projection: PatchPCAProjection | None = None,
 ) -> PatchPCAResult:
     """Project a batch of patch embeddings into one shared RGB PCA space."""
-    if not 0 <= foreground_threshold <= 1:
-        raise ValueError("foreground_threshold must be between 0 and 1.")
+    _validate_foreground_threshold(foreground_threshold)
     if foreground_side not in {"high", "low"}:
         raise ValueError("foreground_side must be one of: high, low.")
 
@@ -125,9 +127,9 @@ def project_patch_embeddings(
             projection.foreground_minimum,
             projection.foreground_maximum,
         )
-        foreground_threshold = projection.foreground_threshold
         foreground_side = projection.foreground_side
 
+    foreground_threshold = projection.foreground_threshold
     if foreground_side == "high":
         foreground_mask = first_component[:, 0] > foreground_threshold
     else:
@@ -178,12 +180,11 @@ def project_patch_embeddings(
 def fit_patch_pca_projection_batches(
     batch_factory: Callable[[], Iterable[Any]],
     *,
-    foreground_threshold: float = 0.5,
+    foreground_threshold: ForegroundThreshold = 0.5,
     foreground_side: Literal["high", "low"] = "high",
 ) -> PatchPCAProjection:
     """Fit one approximate PCA projection from all embedding batches."""
-    if not 0 <= foreground_threshold <= 1:
-        raise ValueError("foreground_threshold must be between 0 and 1.")
+    _validate_foreground_threshold(foreground_threshold)
     if foreground_side not in {"high", "low"}:
         raise ValueError("foreground_side must be one of: high, low.")
 
@@ -192,6 +193,18 @@ def fit_patch_pca_projection_batches(
         batch_factory,
         foreground_components,
     )
+    if foreground_threshold == "auto":
+        histogram = np.zeros(_OTSU_BINS, dtype=np.int64)
+        for embeddings in batch_factory():
+            flattened = _flatten_embedding_batch(embeddings)
+            normalized = _apply_projection(
+                flattened,
+                foreground_components,
+                foreground_minimum,
+                foreground_maximum,
+            )
+            histogram += _foreground_histogram(normalized[:, 0])
+        foreground_threshold = _otsu_threshold(histogram)
 
     def foreground_batches() -> Iterable[Any]:
         for embeddings in batch_factory():
@@ -325,7 +338,7 @@ def _patch_tokens_from_features(features: Any, patch_count: int) -> Any:
 
 def _fit_projection(
     values: Any,
-    foreground_threshold: float,
+    foreground_threshold: ForegroundThreshold,
     foreground_side: Literal["high", "low"],
 ) -> tuple[PatchPCAProjection, Any]:
     first_projected, first_components = _fit_pca_projection(values, components=1)
@@ -335,6 +348,10 @@ def _fit_projection(
         first_minimum,
         first_maximum,
     )
+    if foreground_threshold == "auto":
+        foreground_threshold = _otsu_threshold(
+            _foreground_histogram(normalized_first[:, 0])
+        )
     if foreground_side == "high":
         foreground_mask = normalized_first[:, 0] > foreground_threshold
     else:
@@ -366,6 +383,41 @@ def _fit_projection(
         foreground_side=foreground_side,
     )
     return projection, normalized_first
+
+
+def _validate_foreground_threshold(value: ForegroundThreshold) -> None:
+    if value == "auto":
+        return
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int | float)
+        or not 0 <= value <= 1
+    ):
+        raise ValueError("foreground_threshold must be between 0 and 1 or 'auto'.")
+
+
+def _foreground_histogram(values: Any) -> Any:
+    histogram, _ = np.histogram(_as_numpy(values), bins=_OTSU_BINS, range=(0.0, 1.0))
+    return histogram
+
+
+def _otsu_threshold(histogram: Any) -> float:
+    occupied = np.flatnonzero(histogram)
+    if len(occupied) < 2:
+        return 0.5
+
+    weights = histogram.astype(np.float64)
+    counts = np.cumsum(weights)[:-1]
+    weighted = np.cumsum(weights * np.arange(_OTSU_BINS))[:-1]
+    total = weights.sum()
+    total_weighted = np.dot(weights, np.arange(_OTSU_BINS))
+    valid = (counts > 0) & (counts < total)
+    between = np.zeros(_OTSU_BINS - 1)
+    between[valid] = (total_weighted * counts[valid] - total * weighted[valid]) ** 2 / (
+        counts[valid] * (total - counts[valid])
+    )
+    best = np.flatnonzero(np.isclose(between, between.max(), rtol=1e-12, atol=0))
+    return float((best[0] + best[-1] + 2) / (2 * _OTSU_BINS))
 
 
 def _fit_pca_projection(values: Any, components: int) -> tuple[Any, Any]:

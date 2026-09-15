@@ -148,7 +148,7 @@ analysis:
 | Setting | Parser default | Description | Example |
 |---|---|---|---|
 | `method` | required | Must be `patch_pca`. | `patch_pca` |
-| `foreground_threshold` | `0.5` | Normalized first-component cutoff. | `0.6` |
+| `foreground_threshold` | `0.5` | Normalized first-component cutoff, or `auto` to choose an Otsu split from the fit data. | `auto` |
 | `foreground_side` | `high` | Keep the `high` or `low` side. | `low` |
 | `projection` | `fit` | Fit a shared projection or `load` one. | `load` |
 | `projection_path` | `null` | Saved `.npz` loaded when `projection: load`. | `pca.npz` |
@@ -156,6 +156,12 @@ analysis:
 
 A loaded projection reuses its fitted foreground rule and color ranges, so new
 images remain in the same PCA color space.
+With `foreground_threshold: auto`, PCA fits one threshold from the normalized
+first component and stores the resulting number in the projection. Video uses
+the representative fit frames, so the threshold stays fixed throughout the
+clip. A flat component uses `0.5`. `foreground_side` remains explicit because
+PCA cannot identify which side of the split is the subject. An automatic split
+is most useful when the first-component values form two distinct groups.
 PCA components use the approximate low-rank method. All images selected by one
 configuration share a PCA fit, threshold, and foreground side. The image example
 selects `examples/5.jpg` and `examples/6.jpg` with `foreground_side: low` to
@@ -213,6 +219,10 @@ visualization:
   dpi: 150
   overlay_alpha: 0.6
   cmap: magma
+  cmap_black:
+    threshold: 20
+    blend_width: 35
+    transparent: true
   grid_format: pdf
   normalization: shared
   normalization_range: null
@@ -230,12 +240,23 @@ visualization:
 | `dpi` | `null` | Output DPI; `null` retains workflow behavior. | `150` |
 | `overlay_alpha` | `0.45` | Heatmap opacity from 0 to 1. | `0.8` |
 | `cmap` | `viridis` | Matplotlib colormap. | `magma` |
+| `cmap_black` | `null` | Optional black start using 0–255 palette positions. `threshold` stays black through that position; `blend_width` controls the linear transition; `transparent` reveals the source beneath pure black in overlays. | `{threshold: 20, blend_width: 35, transparent: true}` |
 | `grid_format` | `png` | `png`, `pdf`, or `svg`. | `pdf` |
 | `normalization` | `per_map` | `per_map`, `shared`, or `fixed`. | `shared` |
 | `normalization_range` | `null` | Required `[min, max]` for `fixed`; otherwise must be `null`. | `[0, 1]` |
 
 `per_map` is the historical attention and Grad-CAM behavior. `shared` computes
 one range across the run. `fixed` clips to an explicit range.
+Set `cmap_black` to `null` to use the selected colormap unchanged. With a
+threshold of `20` and a blend width of `35`, normalized values through palette
+position 20 are pure black, values from 20 to 55 blend linearly from black into
+the selected colormap, and values from 55 onward use the original colormap.
+The threshold must be from 0 to 254. The blend width must be at least 1 and
+cannot extend past position 255.
+When `transparent: true`, overlays reveal the original image only where the
+final heatmap color is exactly pure black. Near-black pixels in the blend still
+use the configured overlay opacity. Standalone heatmaps and heatmap videos
+remain RGB outputs and keep those pixels solid black.
 
 ## Output
 

@@ -50,6 +50,7 @@ visualization:
   dpi: null
   overlay_alpha: 0.8
   cmap: viridis
+  cmap_black: null
   grid_format: png
   normalization: per_map
   normalization_range: null

@@ -312,7 +312,7 @@ class _VideoExports:
             for frame_index, original in enumerate(originals):
                 heatmap = render_heatmap(
                     stream.maps,
-                    cmap=self.config.visualization.cmap,
+                    cmap=self.config.visualization.render_cmap,
                     batch_index=frame_index,
                     normalization=normalization,
                     normalization_range=normalization_range,
@@ -321,7 +321,7 @@ class _VideoExports:
                     original,
                     stream.maps,
                     alpha=self.config.visualization.overlay_alpha,
-                    cmap=self.config.visualization.cmap,
+                    cmap=self.config.visualization.render_cmap,
                     batch_index=frame_index,
                     normalization=normalization,
                     normalization_range=normalization_range,

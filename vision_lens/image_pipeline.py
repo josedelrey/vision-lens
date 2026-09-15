@@ -20,6 +20,7 @@ from vision_lens.attention import (
     infer_patch_grid_from_image,
 )
 from vision_lens.config import (
+    ColormapSpec,
     OutputConfig,
     VisionLensConfig,
     VisualizationConfig,
@@ -401,7 +402,7 @@ def run_vit_rollout_comparison_from_config(
                 rollout=rollout,
                 output_dir=resolved_output_dir,
                 alpha=config.visualization.overlay_alpha,
-                cmap=config.visualization.cmap,
+                cmap=config.visualization.render_cmap,
                 grid_format=config.visualization.grid_format,
                 output_config=config.output,
                 visualization_config=rendering,
@@ -513,7 +514,7 @@ def run_gradcam_from_config(config: VisionLensConfig) -> GradCamPipelineResult:
                 gradcam=gradcam,
                 output_dir=config.output.directory,
                 alpha=config.visualization.overlay_alpha,
-                cmap=config.visualization.cmap,
+                cmap=config.visualization.render_cmap,
                 grid_format=config.visualization.grid_format,
                 output_config=config.output,
                 visualization_config=rendering,
@@ -598,7 +599,7 @@ def run_vit_attention_from_config(config: VisionLensConfig) -> PipelineResult:
                 attention=attention,
                 output_dir=config.output.directory,
                 alpha=config.visualization.overlay_alpha,
-                cmap=config.visualization.cmap,
+                cmap=config.visualization.render_cmap,
                 grid_format=config.visualization.grid_format,
                 output_config=config.output,
                 visualization_config=rendering,
@@ -631,7 +632,7 @@ def export_attention_outputs(
     attention: AttentionExtractionResult,
     output_dir: Path,
     alpha: float,
-    cmap: str,
+    cmap: str | ColormapSpec,
     grid_format: str,
     output_config: OutputConfig | None = None,
     visualization_config: VisualizationConfig | None = None,
@@ -642,7 +643,12 @@ def export_attention_outputs(
     output = output_config or OutputConfig(output_dir)
     visualization = visualization_config or VisualizationConfig(
         overlay_alpha=alpha,
-        cmap=cmap,
+        cmap=cmap.name if isinstance(cmap, ColormapSpec) else cmap,
+        cmap_black=(
+            (cmap.black_threshold, cmap.black_blend_width, cmap.black_transparent)
+            if isinstance(cmap, ColormapSpec)
+            else None
+        ),
         grid_format=grid_format,
     )
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -859,7 +865,7 @@ def export_rollout_comparison_outputs(
     rollout: AttentionExtractionResult,
     output_dir: Path,
     alpha: float,
-    cmap: str,
+    cmap: str | ColormapSpec,
     grid_format: str,
     output_config: OutputConfig | None = None,
     visualization_config: VisualizationConfig | None = None,
@@ -868,7 +874,12 @@ def export_rollout_comparison_outputs(
     output = output_config or OutputConfig(output_dir)
     visualization = visualization_config or VisualizationConfig(
         overlay_alpha=alpha,
-        cmap=cmap,
+        cmap=cmap.name if isinstance(cmap, ColormapSpec) else cmap,
+        cmap_black=(
+            (cmap.black_threshold, cmap.black_blend_width, cmap.black_transparent)
+            if isinstance(cmap, ColormapSpec)
+            else None
+        ),
         grid_format=grid_format,
     )
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -978,7 +989,7 @@ def export_gradcam_outputs(
     gradcam: GradCamResult,
     output_dir: Path,
     alpha: float,
-    cmap: str,
+    cmap: str | ColormapSpec,
     grid_format: str,
     output_config: OutputConfig | None = None,
     visualization_config: VisualizationConfig | None = None,
@@ -989,7 +1000,12 @@ def export_gradcam_outputs(
     output = output_config or OutputConfig(output_dir)
     visualization = visualization_config or VisualizationConfig(
         overlay_alpha=alpha,
-        cmap=cmap,
+        cmap=cmap.name if isinstance(cmap, ColormapSpec) else cmap,
+        cmap_black=(
+            (cmap.black_threshold, cmap.black_blend_width, cmap.black_transparent)
+            if isinstance(cmap, ColormapSpec)
+            else None
+        ),
         grid_format=grid_format,
     )
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -1122,7 +1138,7 @@ def _rollout_grid_items(
     rollout: AttentionExtractionResult,
     image_index: int,
     alpha: float,
-    cmap: str,
+    cmap: str | ColormapSpec,
     columns: int | None = None,
     normalization: str = "per_map",
     normalization_range: tuple[float, float] | None = None,

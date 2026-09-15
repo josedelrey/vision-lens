@@ -50,6 +50,7 @@ SECTION_KEYS = {
         "dpi",
         "overlay_alpha",
         "cmap",
+        "cmap_black",
         "grid_format",
         "normalization",
         "normalization_range",
@@ -149,7 +150,7 @@ class AttentionConfig:
 
 @dataclass(frozen=True)
 class PatchPCAConfig:
-    foreground_threshold: float = 0.5
+    foreground_threshold: float | Literal["auto"] = 0.5
     foreground_side: Literal["high", "low"] = "high"
 
 
@@ -161,7 +162,7 @@ class AnalysisConfig:
     head_fusion: HeadFusion | None = None
     target_layer: str | None = None
     target_class: int | None = None
-    foreground_threshold: float | None = None
+    foreground_threshold: float | Literal["auto"] | None = None
     foreground_side: Literal["high", "low"] | None = None
     projection: Literal["fit", "load"] | None = None
     projection_path: Path | None = None
@@ -190,6 +191,14 @@ class RuntimeConfig:
 
 
 @dataclass(frozen=True)
+class ColormapSpec:
+    name: str
+    black_threshold: int
+    black_blend_width: int
+    black_transparent: bool
+
+
+@dataclass(frozen=True)
 class VisualizationConfig:
     tile_size: tuple[int, int] | None = None
     columns: int | None = None
@@ -201,9 +210,17 @@ class VisualizationConfig:
     dpi: int | None = None
     overlay_alpha: float = 0.45
     cmap: str = "viridis"
+    cmap_black: tuple[int, int, bool] | None = None
     grid_format: str = "png"
     normalization: NormalizationMode = "per_map"
     normalization_range: tuple[float, float] | None = None
+
+    @property
+    def render_cmap(self) -> str | ColormapSpec:
+        if self.cmap_black is None:
+            return self.cmap
+        threshold, blend_width, transparent = self.cmap_black
+        return ColormapSpec(self.cmap, threshold, blend_width, transparent)
 
 
 @dataclass(frozen=True)
@@ -420,6 +437,7 @@ def parse_config(
                 visualization_section.get("cmap", "viridis"),
                 "visualization.cmap",
             ),
+            cmap_black=_cmap_black(visualization_section.get("cmap_black")),
             grid_format=_grid_format(visualization_section.get("grid_format", "png")),
             normalization=_choice(
                 visualization_section.get("normalization", "per_map"),
@@ -654,6 +672,15 @@ def config_to_dict(config: VisionLensConfig) -> dict[str, Any]:
         "dpi": config.visualization.dpi,
         "overlay_alpha": config.visualization.overlay_alpha,
         "cmap": config.visualization.cmap,
+        "cmap_black": (
+            None
+            if config.visualization.cmap_black is None
+            else {
+                "threshold": config.visualization.cmap_black[0],
+                "blend_width": config.visualization.cmap_black[1],
+                "transparent": config.visualization.cmap_black[2],
+            }
+        ),
         "grid_format": config.visualization.grid_format,
         "normalization": config.visualization.normalization,
         "normalization_range": (
@@ -781,9 +808,8 @@ def _parse_analysis(
         )
     return AnalysisConfig(
         method=method,
-        foreground_threshold=_unit_interval(
+        foreground_threshold=_foreground_threshold(
             section.get("foreground_threshold", 0.5),
-            "analysis.foreground_threshold",
         ),
         foreground_side=_foreground_side(section.get("foreground_side", "high")),
         projection=_choice(
@@ -1157,6 +1183,44 @@ def _unit_interval(value: Any, field_name: str) -> float:
     ):
         raise ValueError(f"{field_name} must be between 0 and 1.")
     return float(value)
+
+
+def _foreground_threshold(value: Any) -> float | Literal["auto"]:
+    if value == "auto":
+        return "auto"
+    return _unit_interval(value, "analysis.foreground_threshold")
+
+
+def _cmap_black(value: Any) -> tuple[int, int, bool] | None:
+    if value is None:
+        return None
+    required = {"threshold", "blend_width", "transparent"}
+    if not isinstance(value, dict) or set(value) != required:
+        raise ValueError(
+            "visualization.cmap_black must be null or contain exactly "
+            "threshold, blend_width, and transparent."
+        )
+    threshold = value["threshold"]
+    blend_width = value["blend_width"]
+    transparent = value["transparent"]
+    if (
+        isinstance(threshold, bool)
+        or not isinstance(threshold, int)
+        or not 0 <= threshold <= 254
+    ):
+        raise ValueError("visualization.cmap_black.threshold must be from 0 to 254.")
+    if (
+        isinstance(blend_width, bool)
+        or not isinstance(blend_width, int)
+        or not 1 <= blend_width <= 255 - threshold
+    ):
+        raise ValueError(
+            "visualization.cmap_black.blend_width must be from 1 to "
+            "255 minus threshold."
+        )
+    if not isinstance(transparent, bool):
+        raise ValueError("visualization.cmap_black.transparent must be a boolean.")
+    return threshold, blend_width, transparent
 
 
 def _non_negative_number(value: Any, field_name: str) -> float:

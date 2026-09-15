@@ -182,6 +182,51 @@ def test_parse_config_reads_visualization_values():
     assert config.visualization.grid_format == "svg"
 
 
+def test_colormap_black_settings_parse_and_round_trip():
+    raw = _minimal_config()
+    raw["visualization"] = {
+        "cmap": "magma",
+        "cmap_black": {
+            "threshold": 20,
+            "blend_width": 35,
+            "transparent": True,
+        },
+    }
+
+    config = parse_config(raw)
+
+    assert config.visualization.cmap_black == (20, 35, True)
+    assert config.visualization.render_cmap.name == "magma"
+    assert config.visualization.render_cmap.black_threshold == 20
+    assert config.visualization.render_cmap.black_blend_width == 35
+    assert config.visualization.render_cmap.black_transparent is True
+    assert config_to_dict(config)["visualization"]["cmap_black"] == {
+        "threshold": 20,
+        "blend_width": 35,
+        "transparent": True,
+    }
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        {},
+        {"threshold": 20},
+        {"threshold": -1, "blend_width": 20},
+        {"threshold": 255, "blend_width": 1},
+        {"threshold": 20, "blend_width": 0},
+        {"threshold": 250, "blend_width": 6},
+        {"threshold": 20, "blend_width": 35, "transparent": "yes"},
+    ],
+)
+def test_colormap_black_rejects_invalid_settings(value):
+    raw = _minimal_config()
+    raw["visualization"] = {"cmap_black": value}
+
+    with pytest.raises(ValueError, match="visualization.cmap_black"):
+        parse_config(raw)
+
+
 def test_patch_pca_defaults_and_overrides_are_in_analysis_section():
     raw_config = _minimal_config(method="patch_pca")
     config = parse_config(raw_config)
@@ -196,6 +241,20 @@ def test_patch_pca_defaults_and_overrides_are_in_analysis_section():
     overridden = parse_config(raw_config)
     assert overridden.analysis.foreground_threshold == 0.65
     assert overridden.analysis.foreground_side == "low"
+
+
+def test_patch_pca_accepts_auto_threshold_and_rejects_other_strings():
+    raw_config = _minimal_config(method="patch_pca")
+    raw_config["analysis"]["foreground_threshold"] = "auto"
+
+    config = parse_config(raw_config)
+
+    assert config.patch_pca.foreground_threshold == "auto"
+    assert config_to_dict(config)["analysis"]["foreground_threshold"] == "auto"
+
+    raw_config["analysis"]["foreground_threshold"] = "otsu"
+    with pytest.raises(ValueError, match="analysis.foreground_threshold"):
+        parse_config(raw_config)
 
 
 def test_load_config_resolves_yaml_and_overrides_from_project_root(
