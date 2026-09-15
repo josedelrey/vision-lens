@@ -221,6 +221,7 @@ visualization:
   dpi: 150
   output_size: match
   interpolation: bilinear_mask
+  anyup_query_chunk_size: null
   overlay_alpha: 0.6
   overlay_alpha_curve:
     steepness: 10
@@ -247,6 +248,7 @@ visualization:
 | `dpi` | `null` | Output DPI; `null` retains workflow behavior. | `150` |
 | `output_size` | `null` | Standalone visualization size: `null` keeps the model-processed size, `match` uses each source's dimensions, a positive integer produces a square output, and `[width, height]` sets an exact size. Video dimensions must be even. | `[1280, 720]` |
 | `interpolation` | `bilinear` | Visualization upscaling mode: `nearest`, `bilinear`, `bilinear_mask`, `anyup`, or `anyup_mask`. | `anyup_mask` |
+| `anyup_query_chunk_size` | `null` | Positive number of output queries processed per AnyUp attention chunk. Smaller values lower peak memory but increase runtime; `null` disables chunking. Requires `anyup` or `anyup_mask`. | `4096` |
 | `overlay_alpha` | `0.45` | Uniform heatmap opacity from 0 to 1. When an alpha curve is enabled, this scales the curve's per-pixel opacity. | `0.8` |
 | `overlay_alpha_curve` | `null` | Optional sigmoid-like, value-dependent overlay opacity applied before `overlay_alpha`. `steepness` must be positive; `midpoint` defaults to `0.5` and moves the transition within the normalized 0–1 range. | `{steepness: 10, midpoint: 0.25}` |
 | `cmap` | `viridis` | Matplotlib colormap. | `magma` |
@@ -281,6 +283,19 @@ runs use PyTorch's local cache. Vision Lens uses the original attention-based
 AnyUp implementation, so NATTEN is not required. The reusable adapter is
 available as `vision_lens.anyup`, including the model loader, ImageNet
 guidance-image preparation, and generic `upsample_features` function.
+
+Set `anyup_query_chunk_size` when a full AnyUp attention operation does not fit
+in VRAM. Chunking preserves the requested output resolution and attention
+calculation while processing fewer output queries at once. The included video
+configurations use conservative chunk sizes; lower them further if memory is
+still exhausted, or raise them for better throughput when more VRAM is
+available. For patch PCA, the configured chunking path projects the
+low-resolution values to RGB before AnyUp,
+generates query features and locality masks one chunk at a time, and transfers
+finished RGB chunks away from the execution device. This avoids materializing
+both the global attention mask and a full-resolution embedding tensor. The
+original embeddings are still used to produce AnyUp's keys, so this reorders a
+linear projection without changing the intended attention calculation.
 
 `output_size: match` makes image heatmaps, overlays, and patch PCA images use
 the dimensions of each source image. For video it uses codec-compatible even

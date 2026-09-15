@@ -201,8 +201,8 @@ def test_anyup_attention_upscaling_uses_guidance_image(
 ):
     calls = []
 
-    def fake_upsample(image, features, output_size):
-        calls.append((image, features, output_size))
+    def fake_upsample(image, features, output_size, *, q_chunk_size=None):
+        calls.append((image, features, output_size, q_chunk_size))
         return torch.full((1, 1, *output_size), 0.25)
 
     monkeypatch.setattr("vision_lens.attention.upsample_features", fake_upsample)
@@ -217,6 +217,7 @@ def test_anyup_attention_upscaling_uses_guidance_image(
         interpolation=interpolation,
         guidance_image=guidance_image,
         output_size=(3, 5),
+        anyup_query_chunk_size=7,
     )
 
     assert torch.equal(maps, torch.full((1, 1, 3, 5), 0.25))
@@ -224,6 +225,7 @@ def test_anyup_attention_upscaling_uses_guidance_image(
     assert calls[0][0] is guidance_image
     assert calls[0][1].shape == (1, 1, 2, 2)
     assert calls[0][2] == (3, 5)
+    assert calls[0][3] == 7
 
 
 def test_class_token_attention_to_map_mean_fusion_values():

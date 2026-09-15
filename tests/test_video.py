@@ -297,7 +297,11 @@ def test_gradcam_video_exports_overlays_with_one_fixed_class(
                 "target_class": 1,
             },
             "runtime": {"device": "cpu", "batch_size": 1},
-            "visualization": {"output_size": [64, 48]},
+            "visualization": {
+                "output_size": [64, 48],
+                "interpolation": "anyup",
+                "anyup_query_chunk_size": 7,
+            },
             "output": {
                 "directory": str(output_dir),
                 "heatmaps": False,
@@ -327,6 +331,7 @@ def test_gradcam_video_exports_overlays_with_one_fixed_class(
     )
     target_classes = []
     output_sizes = []
+    query_chunk_sizes = []
     overlay_sizes = []
     original_overlay = video_pipeline.overlay_attention
 
@@ -337,6 +342,7 @@ def test_gradcam_video_exports_overlays_with_one_fixed_class(
     def fake_gradcam(_model, inputs, _metadata, **kwargs):
         target_classes.append(kwargs["target_classes"])
         output_sizes.append(kwargs["output_size"])
+        query_chunk_sizes.append(kwargs["anyup_query_chunk_size"])
         return GradCamResult(
             logits=torch.zeros(len(inputs), 2),
             maps=torch.arange(len(inputs) * 16, dtype=torch.float32).reshape(
@@ -366,6 +372,7 @@ def test_gradcam_video_exports_overlays_with_one_fixed_class(
 
     assert target_classes == [[1]] * expected_frames
     assert output_sizes == [(48, 64)] * expected_frames
+    assert query_chunk_sizes == [7] * expected_frames
     assert overlay_sizes == [(64, 48)] * expected_frames
     assert result.processed_frames == expected_frames
     assert result.frame_rate == (4 if sampling_rate == "auto" else 2)

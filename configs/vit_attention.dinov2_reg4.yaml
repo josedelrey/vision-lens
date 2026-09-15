@@ -55,6 +55,7 @@ visualization:
   dpi: null
   output_size: match
   interpolation: anyup
+  anyup_query_chunk_size: null
   overlay_alpha: 1.0
   overlay_alpha_curve:
     steepness: 15

@@ -10,7 +10,11 @@ import torch
 import torch.nn.functional as functional
 from PIL import Image
 
-from vision_lens.anyup import is_anyup_interpolation, upsample_features
+from vision_lens.anyup import (
+    is_anyup_interpolation,
+    upsample_features,
+    upsample_values_streaming,
+)
 from vision_lens.attention import infer_patch_grid_from_image
 from vision_lens.models import ModelMetadata
 
@@ -62,6 +66,7 @@ def extract_patch_pca(
     interpolation: Interpolation = "bilinear",
     guidance_image: Any | None = None,
     output_size: tuple[int, int] | None = None,
+    anyup_query_chunk_size: int | None = None,
 ) -> PatchPCAResult:
     """Extract ViT patch tokens and render their shared PCA projection as RGB."""
     if metadata.patch_size is None:
@@ -81,6 +86,7 @@ def extract_patch_pca(
         projection=projection,
         interpolation=interpolation,
         guidance_image=inputs if guidance_image is None else guidance_image,
+        anyup_query_chunk_size=anyup_query_chunk_size,
     )
 
 
@@ -114,6 +120,7 @@ def project_patch_embeddings(
     projection: PatchPCAProjection | None = None,
     interpolation: Interpolation = "bilinear",
     guidance_image: Any | None = None,
+    anyup_query_chunk_size: int | None = None,
 ) -> PatchPCAResult:
     """Project a batch of patch embeddings into one shared RGB PCA space."""
     _validate_foreground_threshold(foreground_threshold)
@@ -200,6 +207,7 @@ def project_patch_embeddings(
             projection,
             interpolation,
             guidance_image,
+            anyup_query_chunk_size,
         )
     else:
         images = render_patch_pca_images(
@@ -272,6 +280,7 @@ def _render_anyup_pca_images(
     projection: PatchPCAProjection,
     interpolation: Interpolation,
     guidance_image: Any,
+    anyup_query_chunk_size: int | None,
 ) -> tuple[Image.Image, ...]:
     batch_size, _patch_count, feature_count = embeddings.shape
     feature_map = embeddings.reshape(
@@ -280,15 +289,43 @@ def _render_anyup_pca_images(
         patch_grid[1],
         feature_count,
     ).permute(0, 3, 1, 2)
-    upsampled = upsample_features(guidance_image, feature_map, image_size)
-    flattened = upsampled.permute(0, 2, 3, 1).reshape(-1, feature_count)
-
-    rendered = _apply_projection(
-        flattened,
-        projection.rgb_components,
-        projection.rgb_minimum,
-        projection.rgb_maximum,
-    )[:, :3]
+    if anyup_query_chunk_size is None:
+        upsampled = upsample_features(
+            guidance_image,
+            feature_map,
+            image_size,
+        )
+        flattened = upsampled.permute(0, 2, 3, 1).reshape(-1, feature_count)
+        rendered = _apply_projection(
+            flattened,
+            projection.rgb_components,
+            projection.rgb_minimum,
+            projection.rgb_maximum,
+        )[:, :3]
+    else:
+        projected_values = (
+            (embeddings @ projection.rgb_components)
+            .reshape(
+                batch_size,
+                patch_grid[0],
+                patch_grid[1],
+                3,
+            )
+            .permute(0, 3, 1, 2)
+        )
+        upsampled_projection = upsample_values_streaming(
+            guidance_image,
+            feature_map,
+            image_size,
+            values=projected_values,
+            q_chunk_size=anyup_query_chunk_size,
+        )
+        flattened = upsampled_projection.permute(0, 2, 3, 1).reshape(-1, 3)
+        rendered = _normalize_with_bounds(
+            flattened,
+            projection.rgb_minimum,
+            projection.rgb_maximum,
+        )
     rendered = rendered.reshape(batch_size, *image_size, 3).permute(0, 3, 1, 2)
 
     patch_masks = foreground_mask.reshape(batch_size, 1, *patch_grid).float()
@@ -299,10 +336,19 @@ def _render_anyup_pca_images(
             mode="nearest",
         )
     else:
-        upsampled_mask = upsample_features(
-            guidance_image,
-            patch_masks,
-            image_size,
+        upsampled_mask = (
+            upsample_features(
+                guidance_image,
+                patch_masks,
+                image_size,
+            )
+            if anyup_query_chunk_size is None
+            else upsample_values_streaming(
+                guidance_image,
+                patch_masks,
+                image_size,
+                q_chunk_size=anyup_query_chunk_size,
+            )
         ).clamp(0, 1)
     rendered = rendered * upsampled_mask
 
