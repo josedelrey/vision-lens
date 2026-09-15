@@ -50,7 +50,7 @@ visualization:
   background: null
   dpi: null
   match_input_size: true
-  interpolation: mask
+  interpolation: bilinear_mask
   overlay_alpha: 1.0
   overlay_alpha_curve:
     steepness: 15

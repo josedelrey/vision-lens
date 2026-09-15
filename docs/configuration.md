@@ -220,7 +220,7 @@ visualization:
   background: white
   dpi: 150
   match_input_size: true
-  interpolation: mask
+  interpolation: bilinear_mask
   overlay_alpha: 0.6
   overlay_alpha_curve:
     steepness: 10
@@ -246,7 +246,7 @@ visualization:
 | `background` | `null` | Pillow/Matplotlib color. | `"#101010"` |
 | `dpi` | `null` | Output DPI; `null` retains workflow behavior. | `150` |
 | `match_input_size` | `false` | Resize each standalone visualization to its original input dimensions. Video uses the source frame dimensions when enabled. | `true` |
-| `interpolation` | `bilinear` | Visualization upscaling mode: `nearest`, `bilinear`, or `mask`. | `mask` |
+| `interpolation` | `bilinear` | Visualization upscaling mode: `nearest`, `bilinear`, or `bilinear_mask`. | `bilinear_mask` |
 | `overlay_alpha` | `0.45` | Uniform heatmap opacity from 0 to 1. When an alpha curve is enabled, this scales the curve's per-pixel opacity. | `0.8` |
 | `overlay_alpha_curve` | `null` | Optional sigmoid-like, value-dependent overlay opacity applied before `overlay_alpha`. `steepness` must be positive; `midpoint` defaults to `0.5` and moves the transition within the normalized 0–1 range. | `{steepness: 10, midpoint: 0.25}` |
 | `cmap` | `viridis` | Matplotlib colormap. | `magma` |
@@ -259,11 +259,12 @@ visualization:
 one range across the run. `fixed` clips to an explicit range.
 `nearest` preserves one constant-color block per attention, Grad-CAM activation,
 or PCA patch. `bilinear` smoothly interpolates all maps. For attention, rollout,
-and Grad-CAM, `mask` is identical to `bilinear`. For patch PCA, `mask` fits the
-RGB PCA basis and scaling bounds from foreground patches, projects every patch
-through that foreground basis, bilinearly interpolates those colors, and then
-applies the foreground mask with nearest-neighbor upscaling. This avoids blending
-foreground colors with black while keeping a sharp foreground boundary.
+and Grad-CAM, `bilinear_mask` is identical to `bilinear`. For patch PCA,
+`bilinear_mask` fits the RGB PCA basis and scaling bounds from foreground patches,
+projects every patch through that foreground basis, bilinearly interpolates those
+colors, and then applies the foreground mask with nearest-neighbor upscaling. This
+avoids blending foreground colors with black while keeping a sharp foreground
+boundary.
 
 When `match_input_size` is enabled, image heatmaps, overlays, and patch PCA
 images use the source image width and height with the configured visualization

@@ -12,7 +12,7 @@ from vision_lens.models import ModelMetadata
 
 LayerSelection = Literal["all"] | int | Iterable[int]
 HeadFusion = Literal["mean", "max", "none"]
-Interpolation = Literal["nearest", "bilinear", "mask"]
+Interpolation = Literal["nearest", "bilinear", "bilinear_mask"]
 
 
 @dataclass(frozen=True)
@@ -311,8 +311,10 @@ def _interpolate_maps(
     image_size: tuple[int, int],
     interpolation: Interpolation,
 ) -> Any:
-    if interpolation not in {"nearest", "bilinear", "mask"}:
-        raise ValueError("interpolation must be one of: nearest, bilinear, mask.")
+    if interpolation not in {"nearest", "bilinear", "bilinear_mask"}:
+        raise ValueError(
+            "interpolation must be one of: nearest, bilinear, bilinear_mask."
+        )
     mode = "nearest" if interpolation == "nearest" else "bilinear"
     options = {} if mode == "nearest" else {"align_corners": False}
     return functional.interpolate(maps, size=image_size, mode=mode, **options)
