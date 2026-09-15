@@ -62,6 +62,7 @@ def overlay_attention(
     normalization: str = "per_map",
     normalization_range: tuple[float, float] | None = None,
     alpha_curve_steepness: float | None = None,
+    alpha_curve_midpoint: float = 0.5,
 ) -> Any:
     if not 0 <= alpha <= 1:
         raise ValueError("alpha must be between 0 and 1.")
@@ -72,6 +73,13 @@ def overlay_attention(
         or alpha_curve_steepness <= 0
     ):
         raise ValueError("alpha_curve_steepness must be a positive finite number.")
+    if (
+        isinstance(alpha_curve_midpoint, bool)
+        or not isinstance(alpha_curve_midpoint, int | float)
+        or not np.isfinite(alpha_curve_midpoint)
+        or not 0 <= alpha_curve_midpoint <= 1
+    ):
+        raise ValueError("alpha_curve_midpoint must be between 0 and 1.")
 
     base_image = _as_rgb_image(image)
     array = attention_map_to_array(
@@ -98,6 +106,7 @@ def overlay_attention(
             opacity = _sigmoid_alpha_curve(
                 np.asarray(positions, dtype=np.float32) / 255,
                 alpha_curve_steepness,
+                alpha_curve_midpoint,
             )
             overlay_alpha = np.rint(opacity * 255).astype(np.uint8)
 
@@ -132,6 +141,7 @@ def make_layer_comparison_grid(
     normalization: str = "per_map",
     normalization_range: tuple[float, float] | None = None,
     alpha_curve_steepness: float | None = None,
+    alpha_curve_midpoint: float = 0.5,
 ) -> Any:
     labels = [f"layer {layer.layer_index}" for layer in layers]
     overlays = [
@@ -140,6 +150,7 @@ def make_layer_comparison_grid(
             layer.maps,
             alpha=alpha,
             alpha_curve_steepness=alpha_curve_steepness,
+            alpha_curve_midpoint=alpha_curve_midpoint,
             cmap=cmap,
             batch_index=batch_index,
             head_index=head_index,
@@ -196,6 +207,7 @@ def make_image_comparison_grid(
     normalization: str = "per_map",
     normalization_range: tuple[float, float] | None = None,
     alpha_curve_steepness: float | None = None,
+    alpha_curve_midpoint: float = 0.5,
 ) -> Any:
     if len(images) != len(attention_maps):
         raise ValueError("images and attention_maps must have the same length.")
@@ -211,6 +223,7 @@ def make_image_comparison_grid(
             attention_map,
             alpha=alpha,
             alpha_curve_steepness=alpha_curve_steepness,
+            alpha_curve_midpoint=alpha_curve_midpoint,
             cmap=cmap,
             batch_index=batch_index,
             head_index=head_index,
@@ -469,13 +482,15 @@ def _colormap(array: Any, cmap: str | ColormapSpec) -> Any:
     return (colorized * 255).astype(np.uint8)
 
 
-def _sigmoid_alpha_curve(array: Any, steepness: float) -> Any:
+def _sigmoid_alpha_curve(array: Any, steepness: float, midpoint: float) -> Any:
     """Return a sigmoid-shaped opacity curve rescaled to exact 0 and 1 endpoints."""
-    endpoint = np.tanh(steepness / 4)
-    if endpoint == 0:
+    lower = np.tanh(-steepness * midpoint / 2)
+    upper = np.tanh(steepness * (1 - midpoint) / 2)
+    scale = upper - lower
+    if scale == 0:
         return np.asarray(array)
-    curved = np.tanh(steepness * (np.asarray(array) - 0.5) / 2)
-    return np.clip((curved + endpoint) / (2 * endpoint), 0, 1)
+    curved = np.tanh(steepness * (np.asarray(array) - midpoint) / 2)
+    return np.clip((curved - lower) / scale, 0, 1)
 
 
 def _image_from_array(array: Any) -> Any:

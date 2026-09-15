@@ -201,6 +201,12 @@ class ColormapSpec:
 
 
 @dataclass(frozen=True)
+class OverlayAlphaCurveSpec:
+    steepness: float
+    midpoint: float = 0.5
+
+
+@dataclass(frozen=True)
 class VisualizationConfig:
     tile_size: tuple[int, int] | None = None
     columns: int | None = None
@@ -216,7 +222,7 @@ class VisualizationConfig:
     grid_format: str = "png"
     normalization: NormalizationMode = "per_map"
     normalization_range: tuple[float, float] | None = None
-    overlay_alpha_curve: float | None = None
+    overlay_alpha_curve: OverlayAlphaCurveSpec | None = None
 
     @property
     def render_cmap(self) -> str | ColormapSpec:
@@ -224,6 +230,18 @@ class VisualizationConfig:
             return self.cmap
         threshold, blend_width, transparent = self.cmap_black
         return ColormapSpec(self.cmap, threshold, blend_width, transparent)
+
+    @property
+    def overlay_alpha_curve_steepness(self) -> float | None:
+        if self.overlay_alpha_curve is None:
+            return None
+        return self.overlay_alpha_curve.steepness
+
+    @property
+    def overlay_alpha_curve_midpoint(self) -> float:
+        if self.overlay_alpha_curve is None:
+            return 0.5
+        return self.overlay_alpha_curve.midpoint
 
 
 @dataclass(frozen=True)
@@ -680,7 +698,10 @@ def config_to_dict(config: VisionLensConfig) -> dict[str, Any]:
         "overlay_alpha_curve": (
             None
             if config.visualization.overlay_alpha_curve is None
-            else {"steepness": config.visualization.overlay_alpha_curve}
+            else {
+                "steepness": config.visualization.overlay_alpha_curve.steepness,
+                "midpoint": config.visualization.overlay_alpha_curve.midpoint,
+            }
         ),
         "cmap": config.visualization.cmap,
         "cmap_black": (
@@ -1202,13 +1223,17 @@ def _foreground_threshold(value: Any) -> float | Literal["auto"]:
     return _unit_interval(value, "analysis.foreground_threshold")
 
 
-def _overlay_alpha_curve(value: Any) -> float | None:
+def _overlay_alpha_curve(value: Any) -> OverlayAlphaCurveSpec | None:
     if value is None:
         return None
-    if not isinstance(value, dict) or set(value) != {"steepness"}:
+    if (
+        not isinstance(value, dict)
+        or "steepness" not in value
+        or not set(value) <= {"steepness", "midpoint"}
+    ):
         raise ValueError(
-            "visualization.overlay_alpha_curve must be null or contain exactly "
-            "steepness."
+            "visualization.overlay_alpha_curve must be null or contain steepness "
+            "and optional midpoint."
         )
     steepness = _positive_number(
         value["steepness"],
@@ -1218,7 +1243,11 @@ def _overlay_alpha_curve(value: Any) -> float | None:
         raise ValueError(
             "visualization.overlay_alpha_curve.steepness must be finite."
         )
-    return steepness
+    midpoint = _unit_interval(
+        value.get("midpoint", 0.5),
+        "visualization.overlay_alpha_curve.midpoint",
+    )
+    return OverlayAlphaCurveSpec(steepness=steepness, midpoint=midpoint)
 
 
 def _cmap_black(value: Any) -> tuple[int, int, bool] | None:

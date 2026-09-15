@@ -212,16 +212,28 @@ def test_overlay_alpha_curve_parses_and_round_trips():
     raw = _minimal_config(
         {
             "overlay_alpha": 0.35,
-            "overlay_alpha_curve": {"steepness": 12},
+            "overlay_alpha_curve": {"steepness": 12, "midpoint": 0.25},
         }
     )
 
     config = parse_config(raw)
 
-    assert config.visualization.overlay_alpha_curve == 12
+    assert config.visualization.overlay_alpha_curve is not None
+    assert config.visualization.overlay_alpha_curve.steepness == 12
+    assert config.visualization.overlay_alpha_curve.midpoint == 0.25
     assert config_to_dict(config)["visualization"]["overlay_alpha_curve"] == {
-        "steepness": 12
+        "steepness": 12,
+        "midpoint": 0.25,
     }
+
+
+def test_overlay_alpha_curve_midpoint_defaults_to_half():
+    config = parse_config(
+        _minimal_config({"overlay_alpha_curve": {"steepness": 12}})
+    )
+
+    assert config.visualization.overlay_alpha_curve is not None
+    assert config.visualization.overlay_alpha_curve.midpoint == 0.5
 
 
 @pytest.mark.parametrize(
@@ -233,7 +245,10 @@ def test_overlay_alpha_curve_parses_and_round_trips():
         {"steepness": True},
         {"steepness": float("inf")},
         {"steepness": float("nan")},
-        {"steepness": 10, "midpoint": 0.5},
+        {"steepness": 10, "midpoint": -0.1},
+        {"steepness": 10, "midpoint": 1.1},
+        {"steepness": 10, "midpoint": True},
+        {"steepness": 10, "unknown": 0.5},
     ],
 )
 def test_overlay_alpha_curve_rejects_invalid_settings(value):

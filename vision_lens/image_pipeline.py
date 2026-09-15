@@ -684,7 +684,12 @@ def export_attention_outputs(
                             image,
                             image_layer.maps,
                             alpha=alpha,
-                            alpha_curve_steepness=visualization.overlay_alpha_curve,
+                            alpha_curve_steepness=(
+                                visualization.overlay_alpha_curve_steepness
+                            ),
+                            alpha_curve_midpoint=(
+                                visualization.overlay_alpha_curve_midpoint
+                            ),
                             cmap=cmap,
                             head_index=head_index,
                             normalization=visualization.normalization,
@@ -724,7 +729,10 @@ def export_attention_outputs(
                     layer_page,
                     output_path=output_path,
                     alpha=alpha,
-                    alpha_curve_steepness=visualization.overlay_alpha_curve,
+                    alpha_curve_steepness=(
+                        visualization.overlay_alpha_curve_steepness
+                    ),
+                    alpha_curve_midpoint=visualization.overlay_alpha_curve_midpoint,
                     cmap=cmap,
                     head_index=head_index,
                     columns=visualization.columns,
@@ -763,7 +771,10 @@ def export_attention_outputs(
                     labels=[labels[index] for index in indices],
                     output_path=output_path,
                     alpha=alpha,
-                    alpha_curve_steepness=visualization.overlay_alpha_curve,
+                    alpha_curve_steepness=(
+                        visualization.overlay_alpha_curve_steepness
+                    ),
+                    alpha_curve_midpoint=visualization.overlay_alpha_curve_midpoint,
                     cmap=cmap,
                     head_index=head_index,
                     columns=visualization.columns,
@@ -818,7 +829,8 @@ def export_patch_pca_outputs(
                 output_paths.append(
                     _save_array(patch_pca.foreground_mask[index], mask_path)
                 )
-    if not output.grids:
+    single_image_run = len(patch_pca.images) == 1 and total_grid_pages in {None, 1}
+    if not output.grids or single_image_run:
         return tuple(output_paths)
 
     indices_pages = _chunks(
@@ -928,7 +940,10 @@ def export_rollout_comparison_outputs(
                                 rollout_for_image.maps,
                                 alpha=alpha,
                                 alpha_curve_steepness=(
-                                    visualization.overlay_alpha_curve
+                                    visualization.overlay_alpha_curve_steepness
+                                ),
+                                alpha_curve_midpoint=(
+                                    visualization.overlay_alpha_curve_midpoint
                                 ),
                                 cmap=cmap,
                                 normalization=visualization.normalization,
@@ -965,7 +980,10 @@ def export_rollout_comparison_outputs(
                     rollout=rollout_page,
                     image_index=image_index,
                     alpha=alpha,
-                    alpha_curve_steepness=visualization.overlay_alpha_curve,
+                    alpha_curve_steepness=(
+                        visualization.overlay_alpha_curve_steepness
+                    ),
+                    alpha_curve_midpoint=visualization.overlay_alpha_curve_midpoint,
                     cmap=cmap,
                     columns=visualization.columns,
                     normalization=visualization.normalization,
@@ -1046,7 +1064,12 @@ def export_gradcam_outputs(
                             image,
                             maps,
                             alpha=alpha,
-                            alpha_curve_steepness=visualization.overlay_alpha_curve,
+                            alpha_curve_steepness=(
+                                visualization.overlay_alpha_curve_steepness
+                            ),
+                            alpha_curve_midpoint=(
+                                visualization.overlay_alpha_curve_midpoint
+                            ),
                             cmap=cmap,
                             normalization=visualization.normalization,
                             normalization_range=normalization_range,
@@ -1078,7 +1101,10 @@ def export_gradcam_outputs(
                 labels=[labels[index] for index in indices],
                 output_path=grid_path,
                 alpha=alpha,
-                alpha_curve_steepness=visualization.overlay_alpha_curve,
+                alpha_curve_steepness=(
+                    visualization.overlay_alpha_curve_steepness
+                ),
+                alpha_curve_midpoint=visualization.overlay_alpha_curve_midpoint,
                 cmap=cmap,
                 columns=visualization.columns,
                 tile_size=visualization.tile_size,
@@ -1152,6 +1178,7 @@ def _rollout_grid_items(
     normalization: str = "per_map",
     normalization_range: tuple[float, float] | None = None,
     alpha_curve_steepness: float | None = None,
+    alpha_curve_midpoint: float = 0.5,
 ) -> tuple[list[Any], list[str], int]:
     pairs = tuple(zip(layer_attention.layers, rollout.layers, strict=True))
     if not pairs:
@@ -1184,6 +1211,7 @@ def _rollout_grid_items(
                     layer_for_image.maps,
                     alpha=alpha,
                     alpha_curve_steepness=alpha_curve_steepness,
+                    alpha_curve_midpoint=alpha_curve_midpoint,
                     cmap=cmap,
                     normalization=normalization,
                     normalization_range=normalization_range,
@@ -1196,6 +1224,7 @@ def _rollout_grid_items(
                     rollout_for_image.maps,
                     alpha=alpha,
                     alpha_curve_steepness=alpha_curve_steepness,
+                    alpha_curve_midpoint=alpha_curve_midpoint,
                     cmap=cmap,
                     normalization=normalization,
                     normalization_range=normalization_range,

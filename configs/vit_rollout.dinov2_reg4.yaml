@@ -54,7 +54,9 @@ visualization:
   background: null
   dpi: null
   overlay_alpha: 0.8
-  overlay_alpha_curve: null
+  overlay_alpha_curve:
+    steepness: 10
+    midpoint: 0.25
   cmap: viridis
   cmap_black:
     threshold: 20
