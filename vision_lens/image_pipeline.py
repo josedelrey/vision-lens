@@ -183,6 +183,7 @@ def run_patch_pca_from_config(
                 interpolation=config.visualization.interpolation,
                 guidance_image=_anyup_guidance(config, loaded_model, batch.inputs),
                 output_size=_analysis_output_size(config, loaded_model),
+                anyup_query_chunk_size=(config.visualization.anyup_query_chunk_size),
             )
             if len(config.images.paths) <= config.runtime.batch_size:
                 retained_patch_pca = patch_pca
@@ -217,6 +218,7 @@ def run_patch_pca_from_config(
                 interpolation=config.visualization.interpolation,
                 guidance_image=_anyup_guidance(config, loaded_model, batch.inputs),
                 output_size=_analysis_output_size(config, loaded_model),
+                anyup_query_chunk_size=(config.visualization.anyup_query_chunk_size),
             )
             projection = patch_pca.projection
             retained_patch_pca = patch_pca
@@ -320,6 +322,9 @@ def run_patch_pca_from_config(
                     image_size=_analysis_output_size(config, loaded_model),
                     projection=projection,
                     interpolation=config.visualization.interpolation,
+                    anyup_query_chunk_size=(
+                        config.visualization.anyup_query_chunk_size
+                    ),
                     guidance_image=(
                         None
                         if guidance_path is None
@@ -414,6 +419,7 @@ def run_vit_rollout_comparison_from_config(
                 interpolation=config.visualization.interpolation,
                 guidance_image=_anyup_guidance(config, loaded_model, batch.inputs),
                 output_size=_analysis_output_size(config, loaded_model),
+                anyup_query_chunk_size=(config.visualization.anyup_query_chunk_size),
             )
             fitted_attention = _extract_attention(
                 loaded_model=loaded_model,
@@ -445,6 +451,7 @@ def run_vit_rollout_comparison_from_config(
             interpolation=config.visualization.interpolation,
             guidance_image=_anyup_guidance(config, loaded_model, batch.inputs),
             output_size=_analysis_output_size(config, loaded_model),
+            anyup_query_chunk_size=config.visualization.anyup_query_chunk_size,
         )
         layer_attention = _extract_attention(
             loaded_model=loaded_model,
@@ -539,6 +546,7 @@ def run_gradcam_from_config(config: VisionLensConfig) -> GradCamPipelineResult:
                 interpolation=config.visualization.interpolation,
                 guidance_image=_anyup_guidance(config, loaded_model, batch.inputs),
                 output_size=_analysis_output_size(config, loaded_model),
+                anyup_query_chunk_size=(config.visualization.anyup_query_chunk_size),
             )
             normalization_range = _extend_value_range(
                 normalization_range,
@@ -572,6 +580,7 @@ def run_gradcam_from_config(config: VisionLensConfig) -> GradCamPipelineResult:
             interpolation=config.visualization.interpolation,
             guidance_image=_anyup_guidance(config, loaded_model, batch.inputs),
             output_size=_analysis_output_size(config, loaded_model),
+            anyup_query_chunk_size=config.visualization.anyup_query_chunk_size,
         )
         if len(config.images.paths) <= config.runtime.batch_size:
             retained_gradcam = gradcam
@@ -1235,6 +1244,7 @@ def _extract_attention(
         interpolation=config.visualization.interpolation,
         guidance_image=_anyup_guidance(config, loaded_model, inputs),
         output_size=_analysis_output_size(config, loaded_model),
+        anyup_query_chunk_size=config.visualization.anyup_query_chunk_size,
     )
 
 

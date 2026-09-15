@@ -107,7 +107,9 @@ audio is not included in exports. Pretrained weights require network access on
 first use, and an optional `HF_TOKEN` only improves Hugging Face download rate
 limits. The `anyup` and `anyup_mask` visualization modes additionally download
 the official multi-backbone AnyUp model and checkpoint through PyTorch Hub on
-first use. Custom timm and torchvision models are not guaranteed to expose the
+first use. The video examples use query chunking to reduce AnyUp's peak VRAM
+usage while retaining their requested output size. Custom timm and torchvision
+models are not guaranteed to expose the
 internals required by each analysis.
 
 ## License

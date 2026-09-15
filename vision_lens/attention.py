@@ -58,6 +58,7 @@ def extract_attention_maps(
     interpolation: Interpolation = "bilinear",
     guidance_image: Any | None = None,
     output_size: tuple[int, int] | None = None,
+    anyup_query_chunk_size: int | None = None,
 ) -> AttentionExtractionResult:
     blocks = _vit_blocks(model)
     layer_indices = _select_layers(layers, total_layers=len(blocks))
@@ -94,6 +95,7 @@ def extract_attention_maps(
                     model_inputs if guidance_image is None else guidance_image
                 ),
                 output_size=output_size,
+                anyup_query_chunk_size=anyup_query_chunk_size,
             ),
             head_indices=head_indices,
             head_fusion=head_fusion,
@@ -122,6 +124,7 @@ def extract_attention_rollout(
     interpolation: Interpolation = "bilinear",
     guidance_image: Any | None = None,
     output_size: tuple[int, int] | None = None,
+    anyup_query_chunk_size: int | None = None,
 ) -> AttentionExtractionResult:
     blocks = _vit_blocks(model)
     layer_indices = _select_layers(layers, total_layers=len(blocks))
@@ -159,6 +162,7 @@ def extract_attention_rollout(
                     model_inputs if guidance_image is None else guidance_image
                 ),
                 output_size=output_size,
+                anyup_query_chunk_size=anyup_query_chunk_size,
             ),
             head_indices=None,
             head_fusion="mean",
@@ -211,6 +215,7 @@ def token_attention_to_map(
     interpolation: Interpolation = "bilinear",
     guidance_image: Any | None = None,
     output_size: tuple[int, int] | None = None,
+    anyup_query_chunk_size: int | None = None,
 ) -> Any:
     if len(token_attention.shape) != 3:
         raise ValueError("token_attention must have shape (batch, tokens, tokens).")
@@ -234,6 +239,7 @@ def token_attention_to_map(
         output_size or image_size,
         interpolation,
         guidance_image=guidance_image,
+        anyup_query_chunk_size=anyup_query_chunk_size,
     )
     if normalize:
         return normalize_maps(resized_maps)
@@ -250,6 +256,7 @@ def extract_gradcam(
     interpolation: Interpolation = "bilinear",
     guidance_image: Any | None = None,
     output_size: tuple[int, int] | None = None,
+    anyup_query_chunk_size: int | None = None,
 ) -> GradCamResult:
     resolved_layer_name, layer_module = _resolve_gradcam_layer(model, target_layer)
     activations = None
@@ -295,6 +302,7 @@ def extract_gradcam(
         output_size or metadata.image_size,
         interpolation,
         guidance_image=model_inputs if guidance_image is None else guidance_image,
+        anyup_query_chunk_size=anyup_query_chunk_size,
     )
 
     return GradCamResult(
@@ -318,6 +326,7 @@ def class_token_attention_to_map(
     interpolation: Interpolation = "bilinear",
     guidance_image: Any | None = None,
     output_size: tuple[int, int] | None = None,
+    anyup_query_chunk_size: int | None = None,
 ) -> Any:
     _validate_attention_tensor(attention)
     selected_heads = _select_heads(attention, heads)
@@ -339,6 +348,7 @@ def class_token_attention_to_map(
         output_size or image_size,
         interpolation,
         guidance_image=guidance_image,
+        anyup_query_chunk_size=anyup_query_chunk_size,
     )
 
     if normalize:
@@ -352,6 +362,7 @@ def _interpolate_maps(
     interpolation: Interpolation,
     *,
     guidance_image: Any | None = None,
+    anyup_query_chunk_size: int | None = None,
 ) -> Any:
     choices = {"nearest", "bilinear", "bilinear_mask", "anyup", "anyup_mask"}
     if interpolation not in choices:
@@ -364,7 +375,12 @@ def _interpolate_maps(
             raise ValueError(
                 f"guidance_image is required for interpolation={interpolation!r}."
             )
-        return upsample_features(guidance_image, maps, image_size)
+        return upsample_features(
+            guidance_image,
+            maps,
+            image_size,
+            q_chunk_size=anyup_query_chunk_size,
+        )
     mode = "nearest" if interpolation == "nearest" else "bilinear"
     options = {} if mode == "nearest" else {"align_corners": False}
     return functional.interpolate(maps, size=image_size, mode=mode, **options)

@@ -256,7 +256,7 @@ def test_patch_pca_bilinear_mask_interpolates_colors_then_applies_sharp_mask():
 
 
 @pytest.mark.parametrize("interpolation", ["anyup", "anyup_mask"])
-def test_patch_pca_anyup_projects_features_after_upsampling(
+def test_patch_pca_anyup_streams_projected_values(
     monkeypatch,
     interpolation,
 ):
@@ -264,21 +264,35 @@ def test_patch_pca_anyup_projects_features_after_upsampling(
     guidance_image = torch.rand(1, 3, 2, 4)
     calls = []
 
-    def fake_upsample(image, features, output_size):
-        calls.append((image, features.clone(), output_size))
-        if features.shape[1] == 1:
-            return torch.nn.functional.interpolate(
-                features,
-                size=output_size,
-                mode="bilinear",
-                align_corners=False,
+    def fake_stream(
+        image,
+        features,
+        output_size,
+        *,
+        values=None,
+        q_chunk_size,
+    ):
+        calls.append(
+            (
+                image,
+                features.clone(),
+                None if values is None else values.clone(),
+                output_size,
+                q_chunk_size,
             )
-        upsampled = torch.zeros(1, 3, *output_size)
-        upsampled[:, 0, :, 2:] = 2.0
-        upsampled[:, 1, :, 2:] = 1.0
-        return upsampled
+        )
+        source = features if values is None else values
+        return torch.nn.functional.interpolate(
+            source,
+            size=output_size,
+            mode="bilinear",
+            align_corners=False,
+        )
 
-    monkeypatch.setattr("vision_lens.feature_pca.upsample_features", fake_upsample)
+    monkeypatch.setattr(
+        "vision_lens.feature_pca.upsample_values_streaming",
+        fake_stream,
+    )
 
     result = project_patch_embeddings(
         embeddings,
@@ -287,6 +301,7 @@ def test_patch_pca_anyup_projects_features_after_upsampling(
         projection=_two_patch_projection(),
         interpolation=interpolation,
         guidance_image=guidance_image,
+        anyup_query_chunk_size=7,
     )
 
     pixels = np.asarray(result.images[0])
@@ -295,16 +310,16 @@ def test_patch_pca_anyup_projects_features_after_upsampling(
         calls[0][1],
         embeddings.reshape(1, 1, 2, 3).permute(0, 3, 1, 2),
     )
-    assert calls[0][2] == (2, 4)
-    assert np.all(pixels[:, :2] == 0)
-    assert np.all(pixels[:, 3] == np.array([170, 85, 0]))
+    assert torch.equal(calls[0][2], calls[0][1])
+    assert calls[0][3] == (2, 4)
+    assert calls[0][4] == 7
+    assert pixels.shape == (2, 4, 3)
     if interpolation == "anyup":
         assert len(calls) == 2
         assert calls[1][1].shape == (1, 1, 1, 2)
-        assert np.all(pixels[:, 2] == np.array([128, 64, 0]))
+        assert calls[1][2] is None
     else:
         assert len(calls) == 1
-        assert np.all(pixels[:, 2] == np.array([170, 85, 0]))
 
 
 def test_patch_pca_anyup_fits_projection_from_original_features(monkeypatch):
@@ -320,15 +335,24 @@ def test_patch_pca_anyup_fits_projection_from_original_features(monkeypatch):
         fitted_values.append(values.clone())
         return original_fit(values, *args)
 
-    def nearest_upsample(_image, features, output_size):
+    def nearest_upsample(
+        _image,
+        features,
+        output_size,
+        *,
+        values=None,
+        q_chunk_size,
+    ):
+        assert q_chunk_size == 5
+        source = features if values is None else values
         return torch.nn.functional.interpolate(
-            features,
+            source,
             size=output_size,
             mode="nearest",
         )
 
     monkeypatch.setattr(feature_pca, "_fit_projection", recording_fit)
-    monkeypatch.setattr(feature_pca, "upsample_features", nearest_upsample)
+    monkeypatch.setattr(feature_pca, "upsample_values_streaming", nearest_upsample)
 
     project_patch_embeddings(
         embeddings,
@@ -336,6 +360,7 @@ def test_patch_pca_anyup_fits_projection_from_original_features(monkeypatch):
         image_size=(4, 4),
         interpolation="anyup",
         guidance_image=torch.rand(1, 3, 4, 4),
+        anyup_query_chunk_size=5,
     )
 
     assert len(fitted_values) == 1

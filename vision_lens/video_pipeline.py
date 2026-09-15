@@ -231,6 +231,9 @@ def _run_single_video_from_config(
                     image_size=(resolution[1], resolution[0]),
                     projection=projection,
                     interpolation=config.visualization.interpolation,
+                    anyup_query_chunk_size=(
+                        config.visualization.anyup_query_chunk_size
+                    ),
                     guidance_image=_anyup_guidance(
                         config,
                         loaded_model,
@@ -619,6 +622,7 @@ def _analyze_maps(
             interpolation=config.visualization.interpolation,
             guidance_image=guidance_image,
             output_size=output_size,
+            anyup_query_chunk_size=config.visualization.anyup_query_chunk_size,
         )
     if config.analysis.method == "rollout":
         return extract_attention_rollout(
@@ -630,6 +634,7 @@ def _analyze_maps(
             interpolation=config.visualization.interpolation,
             guidance_image=guidance_image,
             output_size=output_size,
+            anyup_query_chunk_size=config.visualization.anyup_query_chunk_size,
         )
     target_classes = (
         None
@@ -646,6 +651,7 @@ def _analyze_maps(
         interpolation=config.visualization.interpolation,
         guidance_image=guidance_image,
         output_size=output_size,
+        anyup_query_chunk_size=config.visualization.anyup_query_chunk_size,
     )
 
 

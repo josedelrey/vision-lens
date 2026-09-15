@@ -59,6 +59,7 @@ def test_parse_config_applies_documented_defaults():
     assert config.visualization.overlay_alpha_curve is None
     assert config.visualization.output_size is None
     assert config.visualization.interpolation == "bilinear"
+    assert config.visualization.anyup_query_chunk_size is None
     assert config.visualization.cmap == "viridis"
     assert config.visualization.grid_format == "png"
     assert config.visualization.columns is None
@@ -174,6 +175,8 @@ def test_parse_config_reads_visualization_values():
         _minimal_config(
             {
                 "output_size": "match",
+                "interpolation": "anyup",
+                "anyup_query_chunk_size": 4096,
                 "overlay_alpha": 0.35,
                 "cmap": "magma",
                 "grid_format": "svg",
@@ -183,9 +186,11 @@ def test_parse_config_reads_visualization_values():
 
     assert config.visualization.overlay_alpha == 0.35
     assert config.visualization.output_size == "match"
+    assert config.visualization.anyup_query_chunk_size == 4096
     assert config.visualization.cmap == "magma"
     assert config.visualization.grid_format == "svg"
     assert config_to_dict(config)["visualization"]["output_size"] == "match"
+    assert config_to_dict(config)["visualization"]["anyup_query_chunk_size"] == 4096
 
 
 @pytest.mark.parametrize(
@@ -203,6 +208,16 @@ def test_visualization_output_size_accepts_fixed_square_and_null(value, expected
 def test_removed_match_input_size_is_rejected():
     with pytest.raises(ValueError, match="Unknown key.*match_input_size"):
         parse_config(_minimal_config({"match_input_size": True}))
+
+
+def test_anyup_query_chunk_size_requires_anyup_interpolation():
+    with pytest.raises(ValueError, match="requires.*interpolation"):
+        parse_config(_minimal_config({"anyup_query_chunk_size": 4096}))
+
+    with pytest.raises(ValueError, match="positive integer"):
+        parse_config(
+            _minimal_config({"interpolation": "anyup", "anyup_query_chunk_size": 0})
+        )
 
 
 def test_colormap_black_settings_parse_and_round_trip():

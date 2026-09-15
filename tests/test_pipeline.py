@@ -878,7 +878,11 @@ def test_gradcam_pipeline_passes_fixed_class_workers_and_batch_size(
                 "target_class": 1,
             },
             "runtime": {"device": "cpu", "workers": 2, "batch_size": 1},
-            "visualization": {"output_size": [6, 2]},
+            "visualization": {
+                "output_size": [6, 2],
+                "interpolation": "anyup",
+                "anyup_query_chunk_size": 7,
+            },
         }
     )
     loaded_model = LoadedModel(
@@ -931,6 +935,7 @@ def test_gradcam_pipeline_passes_fixed_class_workers_and_batch_size(
     assert [call["target_classes"] for call in received] == [[1], [1]]
     assert all(call["target_layer"] == "features.0" for call in received)
     assert all(call["output_size"] == (2, 6) for call in received)
+    assert all(call["anyup_query_chunk_size"] == 7 for call in received)
     assert len(result.output_paths) == 2
 
 

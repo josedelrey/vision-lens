@@ -59,6 +59,7 @@ SECTION_KEYS = {
         "dpi",
         "output_size",
         "interpolation",
+        "anyup_query_chunk_size",
         "overlay_alpha",
         "overlay_alpha_curve",
         "cmap",
@@ -230,6 +231,7 @@ class VisualizationConfig:
     dpi: int | None = None
     output_size: VisualizationOutputSize = None
     interpolation: VisualizationInterpolation = "bilinear"
+    anyup_query_chunk_size: int | None = None
     overlay_alpha: float = 0.45
     cmap: str = "viridis"
     cmap_black: tuple[int, int, bool] | None = None
@@ -479,6 +481,10 @@ def parse_config(
                     "anyup_mask",
                 },
             ),
+            anyup_query_chunk_size=_optional_positive_int(
+                visualization_section.get("anyup_query_chunk_size"),
+                "visualization.anyup_query_chunk_size",
+            ),
             overlay_alpha=_unit_interval(
                 visualization_section.get("overlay_alpha", 0.45),
                 "visualization.overlay_alpha",
@@ -626,6 +632,14 @@ def validate_config(config: VisionLensConfig) -> None:
             "crop and pad must be 'none'."
         )
     if (
+        config.visualization.anyup_query_chunk_size is not None
+        and config.visualization.interpolation not in {"anyup", "anyup_mask"}
+    ):
+        raise ValueError(
+            "visualization.anyup_query_chunk_size requires "
+            "visualization.interpolation to be 'anyup' or 'anyup_mask'."
+        )
+    if (
         config.visualization.normalization == "fixed"
         and config.visualization.normalization_range is None
     ):
@@ -727,6 +741,7 @@ def config_to_dict(config: VisionLensConfig) -> dict[str, Any]:
             else config.visualization.output_size
         ),
         "interpolation": config.visualization.interpolation,
+        "anyup_query_chunk_size": config.visualization.anyup_query_chunk_size,
         "overlay_alpha": config.visualization.overlay_alpha,
         "overlay_alpha_curve": (
             None
