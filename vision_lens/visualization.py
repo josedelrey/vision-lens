@@ -14,6 +14,7 @@ from matplotlib.figure import Figure
 from PIL import Image, ImageDraw
 
 from vision_lens.attention import LayerAttentionMaps
+from vision_lens.config import ColormapSpec
 
 GRID_TILE_SIZE = (224, 224)
 GRID_LABEL_HEIGHT = 32
@@ -34,7 +35,7 @@ RASTER_GRID_FORMATS = {
 
 def render_heatmap(
     attention_map: Any,
-    cmap: str = "viridis",
+    cmap: str | ColormapSpec = "viridis",
     batch_index: int = 0,
     head_index: int = 0,
     normalization: str = "per_map",
@@ -55,7 +56,7 @@ def overlay_attention(
     image: Any,
     attention_map: Any,
     alpha: float = 0.45,
-    cmap: str = "viridis",
+    cmap: str | ColormapSpec = "viridis",
     batch_index: int = 0,
     head_index: int = 0,
     normalization: str = "per_map",
@@ -74,6 +75,14 @@ def overlay_attention(
         normalization_range=normalization_range,
     ).resize(base_image.size)
 
+    if isinstance(cmap, ColormapSpec) and cmap.black_transparent:
+        visible = np.any(np.asarray(heatmap) != 0, axis=-1)
+        overlay_alpha = np.where(visible, round(alpha * 255), 0).astype(np.uint8)
+        transparent_heatmap = heatmap.convert("RGBA")
+        transparent_heatmap.putalpha(Image.fromarray(overlay_alpha, mode="L"))
+        return Image.alpha_composite(
+            base_image.convert("RGBA"), transparent_heatmap
+        ).convert("RGB")
     return Image.blend(base_image, heatmap, alpha=alpha)
 
 
@@ -82,7 +91,7 @@ def make_layer_comparison_grid(
     layers: Sequence[LayerAttentionMaps],
     output_path: str | Path | None = None,
     alpha: float = 0.45,
-    cmap: str = "viridis",
+    cmap: str | ColormapSpec = "viridis",
     batch_index: int = 0,
     head_index: int = 0,
     columns: int | None = None,
@@ -144,7 +153,7 @@ def make_image_comparison_grid(
     labels: Sequence[str] | None = None,
     output_path: str | Path | None = None,
     alpha: float = 0.45,
-    cmap: str = "viridis",
+    cmap: str | ColormapSpec = "viridis",
     batch_index: int = 0,
     head_index: int = 0,
     columns: int | None = None,
@@ -414,8 +423,17 @@ def _to_numpy(value: Any) -> Any:
     return np.asarray(value)
 
 
-def _colormap(array: Any, cmap: str) -> Any:
-    colorized = matplotlib.colormaps[cmap](array)[..., :3]
+def _colormap(array: Any, cmap: str | ColormapSpec) -> Any:
+    name = cmap.name if isinstance(cmap, ColormapSpec) else cmap
+    colorized = matplotlib.colormaps[name](array)[..., :3]
+    if isinstance(cmap, ColormapSpec):
+        position = np.asarray(array) * 255
+        blend = np.clip(
+            (position - cmap.black_threshold) / cmap.black_blend_width,
+            0,
+            1,
+        )
+        colorized = colorized * blend[..., np.newaxis]
     return (colorized * 255).astype(np.uint8)
 
 

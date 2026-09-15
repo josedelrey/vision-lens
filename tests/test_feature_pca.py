@@ -101,6 +101,59 @@ def test_batched_pca_uses_the_same_approximate_fit_for_every_batch_size():
     )
 
 
+def test_auto_threshold_matches_single_and_batched_fits_and_survives_save(tmp_path):
+    embeddings = torch.tensor(
+        [[[0.0, 0.0], [0.1, 0.0], [0.2, 0.0], [4.0, 0.0], [4.1, 0.0], [4.2, 0.0]]]
+    )
+    direct = project_patch_embeddings(
+        embeddings,
+        patch_grid=(2, 3),
+        image_size=(2, 3),
+        foreground_threshold="auto",
+    )
+    batched = fit_patch_pca_projection_batches(
+        lambda: (embeddings[:, start : start + 2] for start in range(0, 6, 2)),
+        foreground_threshold="auto",
+    )
+
+    assert direct.projection is not None
+    assert direct.projection.foreground_threshold == pytest.approx(
+        batched.foreground_threshold
+    )
+    assert 0.4 < batched.foreground_threshold < 0.6
+    assert direct.foreground_mask.sum() == 3
+
+    path = tmp_path / "auto-projection.npz"
+    save_patch_pca_projection(batched, path)
+    loaded = load_patch_pca_projection(path)
+    reused = project_patch_embeddings(
+        embeddings,
+        patch_grid=(2, 3),
+        image_size=(2, 3),
+        foreground_threshold="auto",
+        projection=loaded,
+    )
+    assert loaded.foreground_threshold == batched.foreground_threshold
+    assert torch.equal(reused.foreground_mask, direct.foreground_mask)
+
+
+def test_auto_threshold_falls_back_for_flat_component():
+    embeddings = torch.ones((1, 4, 2))
+    direct = project_patch_embeddings(
+        embeddings,
+        patch_grid=(2, 2),
+        image_size=(2, 2),
+        foreground_threshold="auto",
+    )
+    batched = fit_patch_pca_projection_batches(
+        lambda: (embeddings,), foreground_threshold="auto"
+    )
+
+    assert direct.projection is not None
+    assert direct.projection.foreground_threshold == 0.5
+    assert batched.foreground_threshold == 0.5
+
+
 def test_patch_pca_returns_rgb_images_and_a_shared_mask():
     embeddings = torch.tensor(
         [
