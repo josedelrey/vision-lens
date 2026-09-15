@@ -33,6 +33,7 @@ from vision_lens.feature_pca import (
     fit_patch_pca_projection_batches,
     load_patch_pca_projection,
     project_patch_embeddings,
+    render_patch_pca_images,
     save_patch_pca_projection,
 )
 from vision_lens.manifest import (
@@ -173,6 +174,7 @@ def run_patch_pca_from_config(
                 batch.inputs,
                 loaded_model.metadata,
                 projection=projection,
+                interpolation=config.visualization.interpolation,
             )
             if len(config.images.paths) <= config.runtime.batch_size:
                 retained_patch_pca = patch_pca
@@ -203,6 +205,7 @@ def run_patch_pca_from_config(
                 loaded_model.metadata,
                 foreground_threshold=config.patch_pca.foreground_threshold,
                 foreground_side=config.patch_pca.foreground_side,
+                interpolation=config.visualization.interpolation,
             )
             projection = patch_pca.projection
             retained_patch_pca = patch_pca
@@ -287,6 +290,7 @@ def run_patch_pca_from_config(
                     patch_grid=patch_grid,
                     image_size=loaded_model.metadata.image_size,
                     projection=projection,
+                    interpolation=config.visualization.interpolation,
                 )
                 output_paths.extend(
                     export_patch_pca_outputs(
@@ -371,6 +375,7 @@ def run_vit_rollout_comparison_from_config(
                 loaded_model.metadata,
                 layers=config.attention.layers,
                 normalize=False,
+                interpolation=config.visualization.interpolation,
             )
             fitted_attention = _extract_attention(
                 loaded_model=loaded_model,
@@ -399,6 +404,7 @@ def run_vit_rollout_comparison_from_config(
             loaded_model.metadata,
             layers=config.attention.layers,
             normalize=config.visualization.normalization == "per_map",
+            interpolation=config.visualization.interpolation,
         )
         layer_attention = _extract_attention(
             loaded_model=loaded_model,
@@ -490,6 +496,7 @@ def run_gradcam_from_config(config: VisionLensConfig) -> GradCamPipelineResult:
                     else [config.analysis.target_class] * len(input_batch.paths)
                 ),
                 normalize=False,
+                interpolation=config.visualization.interpolation,
             )
             normalization_range = _extend_value_range(
                 normalization_range,
@@ -520,6 +527,7 @@ def run_gradcam_from_config(config: VisionLensConfig) -> GradCamPipelineResult:
                 else [config.analysis.target_class] * len(input_batch.paths)
             ),
             normalize=config.visualization.normalization == "per_map",
+            interpolation=config.visualization.interpolation,
         )
         if len(config.images.paths) <= config.runtime.batch_size:
             retained_gradcam = gradcam
@@ -834,8 +842,9 @@ def export_patch_pca_outputs(
     if visualization.match_input_size and input_sizes is None:
         raise ValueError("input_sizes are required when match_input_size is enabled.")
     rendered_images = tuple(
-        _resize_visualization(
-            image,
+        _render_pca_at_output_size(
+            patch_pca,
+            index,
             input_sizes[index] if input_sizes is not None else image.size,
             visualization,
         )
@@ -1180,6 +1189,7 @@ def _extract_attention(
         heads=config.attention.heads,
         head_fusion=config.attention.head_fusion,
         normalize=config.visualization.normalization == "per_map",
+        interpolation=config.visualization.interpolation,
     )
 
 
@@ -1311,7 +1321,32 @@ def _resize_visualization(
 ) -> Image.Image:
     if not visualization.match_input_size or image.size == size:
         return image
-    return image.resize(size, Image.Resampling.BILINEAR)
+    resampling = (
+        Image.Resampling.NEAREST
+        if visualization.interpolation == "nearest"
+        else Image.Resampling.BILINEAR
+    )
+    return image.resize(size, resampling)
+
+
+def _render_pca_at_output_size(
+    patch_pca: PatchPCAResult,
+    index: int,
+    size: tuple[int, int],
+    visualization: VisualizationConfig,
+) -> Image.Image:
+    image = patch_pca.images[index]
+    if not visualization.match_input_size or image.size == size:
+        return image
+    if patch_pca.rgb_patches is None:
+        return _resize_visualization(image, size, visualization)
+    return render_patch_pca_images(
+        patch_pca.rgb_patches[index : index + 1],
+        patch_pca.foreground_mask[index : index + 1],
+        patch_pca.patch_grid,
+        (size[1], size[0]),
+        visualization.interpolation,
+    )[0]
 
 
 def _chunks(values: Any, size: int | None) -> tuple[Any, ...]:

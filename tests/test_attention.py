@@ -47,6 +47,47 @@ def test_gradcam_preserves_rectangular_input_geometry():
     assert result.maps.shape == (1, 1, 12, 20)
 
 
+def test_gradcam_nearest_upscaling_preserves_activation_blocks():
+    class DownsamplingCNN(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.features = nn.Conv2d(1, 1, kernel_size=1, stride=2, bias=False)
+            self.pool = nn.AdaptiveAvgPool2d(1)
+            self.classifier = nn.Linear(1, 1, bias=False)
+            nn.init.ones_(self.features.weight)
+            nn.init.ones_(self.classifier.weight)
+
+        def forward(self, inputs):
+            return self.classifier(self.pool(self.features(inputs)).flatten(1))
+
+    metadata = ModelMetadata(
+        architecture="cnn",
+        backend="torchvision",
+        name="downsampling",
+        pretrained=False,
+        device="cpu",
+        input_size=(1, 8, 8),
+        image_size=(8, 8),
+        patch_size=None,
+        num_classes=1,
+        data_config={},
+    )
+    result = extract_gradcam(
+        DownsamplingCNN(),
+        torch.arange(64, dtype=torch.float32)
+        .reshape(1, 1, 8, 8)
+        .requires_grad_(),
+        metadata,
+        target_layer="features",
+        target_classes=[0],
+        interpolation="nearest",
+    )
+
+    assert torch.equal(result.maps[:, :, 0::2, 0::2], result.maps[:, :, 1::2, 1::2])
+    assert torch.equal(result.maps[:, :, 0::2, 0::2], result.maps[:, :, 0::2, 1::2])
+    assert torch.equal(result.maps[:, :, 0::2, 0::2], result.maps[:, :, 1::2, 0::2])
+
+
 def test_infer_patch_grid_from_patch_size():
     assert infer_patch_grid(
         num_patches=196,
@@ -104,6 +145,55 @@ def test_class_token_attention_to_map_fuses_and_resizes_heads():
     assert maps.shape == (1, 1, 4, 4)
     assert torch.all(maps >= 0)
     assert torch.all(maps <= 1)
+
+
+def test_nearest_attention_upscaling_preserves_patch_blocks():
+    attention = torch.zeros(1, 1, 5, 5)
+    attention[:, 0, 0, 1:] = torch.tensor([1.0, 2.0, 3.0, 4.0])
+
+    maps = class_token_attention_to_map(
+        attention,
+        image_size=(4, 4),
+        patch_size=(2, 2),
+        normalize=False,
+        interpolation="nearest",
+    )
+
+    expected = torch.tensor(
+        [
+            [
+                [
+                    [1.0, 1.0, 2.0, 2.0],
+                    [1.0, 1.0, 2.0, 2.0],
+                    [3.0, 3.0, 4.0, 4.0],
+                    [3.0, 3.0, 4.0, 4.0],
+                ]
+            ]
+        ]
+    )
+    assert torch.equal(maps, expected)
+
+
+def test_mask_attention_upscaling_is_bilinear():
+    token_attention = torch.zeros(1, 5, 5)
+    token_attention[:, 0, 1:] = torch.tensor([0.0, 1.0, 1.0, 0.0])
+
+    bilinear = token_attention_to_map(
+        token_attention,
+        image_size=(6, 6),
+        patch_size=(3, 3),
+        normalize=False,
+        interpolation="bilinear",
+    )
+    masked = token_attention_to_map(
+        token_attention,
+        image_size=(6, 6),
+        patch_size=(3, 3),
+        normalize=False,
+        interpolation="mask",
+    )
+
+    assert torch.equal(masked, bilinear)
 
 
 def test_class_token_attention_to_map_mean_fusion_values():

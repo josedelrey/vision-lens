@@ -14,6 +14,7 @@ from vision_lens.attention import infer_patch_grid_from_image
 from vision_lens.models import ModelMetadata
 
 ForegroundThreshold = float | Literal["auto"]
+Interpolation = Literal["nearest", "bilinear", "mask"]
 _OTSU_BINS = 256
 
 
@@ -25,6 +26,8 @@ class PatchPCAResult:
     patch_grid: tuple[int, int]
     image_size: tuple[int, int]
     projection: PatchPCAProjection | None = None
+    rgb_patches: Any | None = None
+    interpolation: Interpolation = "bilinear"
 
 
 @dataclass(frozen=True)
@@ -46,6 +49,7 @@ def extract_patch_pca(
     foreground_threshold: ForegroundThreshold = 0.5,
     foreground_side: Literal["high", "low"] = "high",
     projection: PatchPCAProjection | None = None,
+    interpolation: Interpolation = "bilinear",
 ) -> PatchPCAResult:
     """Extract ViT patch tokens and render their shared PCA projection as RGB."""
     if metadata.patch_size is None:
@@ -62,6 +66,7 @@ def extract_patch_pca(
         foreground_threshold=foreground_threshold,
         foreground_side=foreground_side,
         projection=projection,
+        interpolation=interpolation,
     )
 
 
@@ -92,11 +97,14 @@ def project_patch_embeddings(
     foreground_threshold: ForegroundThreshold = 0.5,
     foreground_side: Literal["high", "low"] = "high",
     projection: PatchPCAProjection | None = None,
+    interpolation: Interpolation = "bilinear",
 ) -> PatchPCAResult:
     """Project a batch of patch embeddings into one shared RGB PCA space."""
     _validate_foreground_threshold(foreground_threshold)
     if foreground_side not in {"high", "low"}:
         raise ValueError("foreground_side must be one of: high, low.")
+    if interpolation not in {"nearest", "bilinear", "mask"}:
+        raise ValueError("interpolation must be one of: nearest, bilinear, mask.")
 
     embeddings = torch.as_tensor(patch_embeddings).detach().float().cpu()
     if embeddings.ndim != 3:
@@ -139,41 +147,78 @@ def project_patch_embeddings(
         (batch_size * patch_count, 3),
         dtype=flattened.dtype,
     )
-    foreground_embeddings = flattened[foreground_mask]
-    if foreground_embeddings.numel():
-        foreground_rgb = _apply_projection(
-            foreground_embeddings,
+    projected_mask = (
+        torch.ones_like(foreground_mask) if interpolation == "mask" else foreground_mask
+    )
+    projected_embeddings = flattened[projected_mask]
+    if projected_embeddings.numel():
+        projected_rgb = _apply_projection(
+            projected_embeddings,
             projection.rgb_components,
             projection.rgb_minimum,
             projection.rgb_maximum,
         )
-        rgb_patches[foreground_mask] = foreground_rgb[:, :3]
+        rgb_patches[projected_mask] = projected_rgb[:, :3]
 
-    patch_images = rgb_patches.reshape(
-        batch_size,
-        patch_grid[0],
-        patch_grid[1],
-        3,
-    ).permute(0, 3, 1, 2)
-    rendered = functional.interpolate(
-        patch_images,
-        size=image_size,
-        mode="bilinear",
-        align_corners=False,
-    )
-    rendered = rendered.clamp(0, 1).permute(0, 2, 3, 1).numpy()
-    images = tuple(
-        Image.fromarray((array * 255).round().astype(np.uint8), mode="RGB")
-        for array in rendered
+    batched_rgb_patches = rgb_patches.reshape(batch_size, patch_count, 3)
+    batched_foreground_mask = foreground_mask.reshape(batch_size, patch_count)
+    images = render_patch_pca_images(
+        batched_rgb_patches,
+        batched_foreground_mask,
+        patch_grid,
+        image_size,
+        interpolation,
     )
 
     return PatchPCAResult(
         patch_embeddings=embeddings,
-        foreground_mask=foreground_mask.reshape(batch_size, patch_count),
+        foreground_mask=batched_foreground_mask,
         images=images,
         patch_grid=patch_grid,
         image_size=image_size,
         projection=projection,
+        rgb_patches=batched_rgb_patches,
+        interpolation=interpolation,
+    )
+
+
+def render_patch_pca_images(
+    rgb_patches: Any,
+    foreground_mask: Any,
+    patch_grid: tuple[int, int],
+    image_size: tuple[int, int],
+    interpolation: Interpolation,
+) -> tuple[Image.Image, ...]:
+    """Render projected patch colors, applying mask-mode edges after interpolation."""
+    colors = torch.as_tensor(rgb_patches).detach().float().cpu()
+    masks = torch.as_tensor(foreground_mask).detach().bool().cpu()
+    batch_size, patch_count, channels = colors.shape
+    if channels != 3 or patch_count != patch_grid[0] * patch_grid[1]:
+        raise ValueError("rgb_patches shape does not match the patch grid.")
+    if tuple(masks.shape) != (batch_size, patch_count):
+        raise ValueError("foreground_mask shape does not match rgb_patches.")
+    if interpolation not in {"nearest", "bilinear", "mask"}:
+        raise ValueError("interpolation must be one of: nearest, bilinear, mask.")
+
+    patch_images = colors.reshape(batch_size, patch_grid[0], patch_grid[1], 3).permute(
+        0, 3, 1, 2
+    )
+    mode = "nearest" if interpolation == "nearest" else "bilinear"
+    options = {} if mode == "nearest" else {"align_corners": False}
+    rendered = functional.interpolate(
+        patch_images, size=image_size, mode=mode, **options
+    )
+    if interpolation == "mask":
+        patch_masks = masks.reshape(batch_size, 1, *patch_grid).float()
+        sharp_mask = functional.interpolate(
+            patch_masks, size=image_size, mode="nearest"
+        )
+        rendered = rendered * sharp_mask
+
+    arrays = rendered.clamp(0, 1).permute(0, 2, 3, 1).numpy()
+    return tuple(
+        Image.fromarray((array * 255).round().astype(np.uint8), mode="RGB")
+        for array in arrays
     )
 
 

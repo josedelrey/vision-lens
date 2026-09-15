@@ -3,6 +3,7 @@ import pytest
 import torch
 
 from vision_lens.feature_pca import (
+    PatchPCAProjection,
     _fit_pca_projection,
     _patch_tokens_from_features,
     fit_patch_pca_projection_batches,
@@ -185,6 +186,59 @@ def test_patch_pca_keeps_rejected_patches_black():
 
     assert not result.foreground_mask.any()
     assert np.asarray(result.images[0]).max() == 0
+
+
+def test_patch_pca_nearest_preserves_constant_patch_blocks():
+    result = project_patch_embeddings(
+        torch.tensor([[[0.0, 1.0, 0.0], [3.0, 0.0, 0.0]]]),
+        patch_grid=(1, 2),
+        image_size=(2, 8),
+        projection=_two_patch_projection(),
+        interpolation="nearest",
+    )
+
+    pixels = np.asarray(result.images[0])
+    assert np.all(pixels[:, :4] == 0)
+    assert np.all(pixels[:, 4:] == np.array([255, 0, 0]))
+
+
+def test_patch_pca_mask_interpolates_all_colors_then_applies_sharp_mask():
+    embeddings = torch.tensor([[[0.0, 3.0, 0.0], [3.0, 0.0, 0.0]]])
+    projection = _two_patch_projection()
+    bilinear = project_patch_embeddings(
+        embeddings,
+        patch_grid=(1, 2),
+        image_size=(2, 8),
+        projection=projection,
+        interpolation="bilinear",
+    )
+    masked = project_patch_embeddings(
+        embeddings,
+        patch_grid=(1, 2),
+        image_size=(2, 8),
+        projection=projection,
+        interpolation="mask",
+    )
+
+    bilinear_pixels = np.asarray(bilinear.images[0])
+    masked_pixels = np.asarray(masked.images[0])
+    assert np.all(masked_pixels[:, :4] == 0)
+    assert np.all(masked_pixels[:, 4, 1] > 0)
+    assert np.all(bilinear_pixels[:, 4, 1] == 0)
+    assert np.all(masked_pixels[:, 4, 0] > 0)
+
+
+def _two_patch_projection() -> PatchPCAProjection:
+    return PatchPCAProjection(
+        foreground_components=torch.tensor([[1.0], [0.0], [0.0]]),
+        foreground_minimum=torch.tensor([0.0]),
+        foreground_maximum=torch.tensor([3.0]),
+        rgb_components=torch.eye(3),
+        rgb_minimum=torch.zeros(3),
+        rgb_maximum=torch.full((3,), 3.0),
+        foreground_threshold=0.5,
+        foreground_side="high",
+    )
 
 
 def test_patch_pca_can_select_the_low_side_as_foreground():

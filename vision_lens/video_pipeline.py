@@ -210,8 +210,9 @@ def _run_single_video_from_config(
                 pca = project_patch_embeddings(
                     embeddings,
                     patch_grid=_patch_grid(loaded_model),
-                    image_size=loaded_model.metadata.image_size,
+                    image_size=(resolution[1], resolution[0]),
                     projection=projection,
+                    interpolation=config.visualization.interpolation,
                 )
                 pca_images = _smooth_images(
                     pca.images,
@@ -389,6 +390,10 @@ class _VideoExports:
         if name.endswith("_comparison"):
             width = round(image.width * resolution[1] / image.height)
             resolution = (width + width % 2, resolution[1])
+        if self.config.visualization.interpolation == "nearest" and name.endswith(
+            "_heatmap"
+        ):
+            image = image.resize(resolution, Image.Resampling.NEAREST)
         writer = self._writer(path, resolution)
         if writer is not None:
             writer.write(image)
@@ -574,6 +579,7 @@ def _analyze_maps(
             heads=config.analysis.heads,
             head_fusion=config.analysis.head_fusion,
             normalize=False,
+            interpolation=config.visualization.interpolation,
         )
     if config.analysis.method == "rollout":
         return extract_attention_rollout(
@@ -582,6 +588,7 @@ def _analyze_maps(
             loaded_model.metadata,
             layers=config.analysis.layers,
             normalize=False,
+            interpolation=config.visualization.interpolation,
         )
     target_classes = (
         None
@@ -595,6 +602,7 @@ def _analyze_maps(
         target_layer=config.analysis.target_layer,
         target_classes=target_classes,
         normalize=False,
+        interpolation=config.visualization.interpolation,
     )
 
 
