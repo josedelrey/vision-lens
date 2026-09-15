@@ -102,6 +102,73 @@ def test_overlay_reveals_original_beneath_transparent_black():
     assert not np.array_equal(np.asarray(overlay)[0, 1], [200, 100, 50])
 
 
+@pytest.mark.parametrize(
+    "cmap",
+    [
+        "gray",
+        ColormapSpec(
+            "gray",
+            black_threshold=20,
+            black_blend_width=20,
+            black_transparent=False,
+        ),
+        ColormapSpec(
+            "gray",
+            black_threshold=20,
+            black_blend_width=20,
+            black_transparent=True,
+        ),
+    ],
+)
+def test_sigmoid_alpha_curve_has_transparent_and_opaque_endpoints(cmap):
+    values = torch.tensor([[0.0, 0.25, 0.5, 0.75, 1.0]])
+    image = Image.new("RGB", (5, 1), (200, 100, 50))
+
+    overlay = overlay_attention(
+        image,
+        values,
+        alpha=0.1,
+        alpha_curve_steepness=10,
+        cmap=cmap,
+        normalization="fixed",
+        normalization_range=(0, 1),
+    )
+    pixels = np.asarray(overlay)[0]
+
+    assert np.array_equal(pixels[0], [200, 100, 50])
+    assert np.array_equal(pixels[-1], [255, 255, 255])
+
+
+def test_alpha_curve_steepness_controls_the_sigmoid_transition():
+    values = torch.tensor([[0.0, 0.25, 0.5, 0.75, 1.0]])
+    image = Image.new("RGB", (5, 1), "black")
+
+    gentle = np.asarray(
+        overlay_attention(
+            image,
+            values,
+            alpha_curve_steepness=2,
+            cmap="gray",
+            normalization="fixed",
+            normalization_range=(0, 1),
+        )
+    )[0, :, 0]
+    steep = np.asarray(
+        overlay_attention(
+            image,
+            values,
+            alpha_curve_steepness=12,
+            cmap="gray",
+            normalization="fixed",
+            normalization_range=(0, 1),
+        )
+    )[0, :, 0]
+
+    assert steep[1] < gentle[1]
+    assert steep[3] > gentle[3]
+    assert abs(int(steep[2]) - int(gentle[2])) <= 1
+
+
 def test_overlay_attention_matches_input_image_dimensions():
     image = Image.new("RGB", (12, 8), "white")
     overlay = overlay_attention(image, torch.rand(1, 1, 4, 4), cmap="viridis")

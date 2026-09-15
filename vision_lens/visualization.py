@@ -61,23 +61,51 @@ def overlay_attention(
     head_index: int = 0,
     normalization: str = "per_map",
     normalization_range: tuple[float, float] | None = None,
+    alpha_curve_steepness: float | None = None,
 ) -> Any:
     if not 0 <= alpha <= 1:
         raise ValueError("alpha must be between 0 and 1.")
+    if alpha_curve_steepness is not None and (
+        isinstance(alpha_curve_steepness, bool)
+        or not isinstance(alpha_curve_steepness, int | float)
+        or not np.isfinite(alpha_curve_steepness)
+        or alpha_curve_steepness <= 0
+    ):
+        raise ValueError("alpha_curve_steepness must be a positive finite number.")
 
     base_image = _as_rgb_image(image)
-    heatmap = render_heatmap(
+    array = attention_map_to_array(
         attention_map,
-        cmap=cmap,
         batch_index=batch_index,
         head_index=head_index,
         normalization=normalization,
         normalization_range=normalization_range,
-    ).resize(base_image.size)
+    )
+    heatmap = _image_from_array(_colormap(array, cmap)).resize(base_image.size)
 
-    if isinstance(cmap, ColormapSpec) and cmap.black_transparent:
+    transparent_black = isinstance(cmap, ColormapSpec) and cmap.black_transparent
+    if alpha_curve_steepness is not None or transparent_black:
+        if alpha_curve_steepness is None:
+            overlay_alpha = np.full(
+                (base_image.height, base_image.width),
+                round(alpha * 255),
+                dtype=np.uint8,
+            )
+        else:
+            positions = Image.fromarray(
+                np.rint(array * 255).astype(np.uint8), mode="L"
+            ).resize(base_image.size)
+            opacity = _sigmoid_alpha_curve(
+                np.asarray(positions, dtype=np.float32) / 255,
+                alpha_curve_steepness,
+            )
+            overlay_alpha = np.rint(opacity * 255).astype(np.uint8)
+
+    if transparent_black:
         visible = np.any(np.asarray(heatmap) != 0, axis=-1)
-        overlay_alpha = np.where(visible, round(alpha * 255), 0).astype(np.uint8)
+        overlay_alpha = np.where(visible, overlay_alpha, 0).astype(np.uint8)
+
+    if alpha_curve_steepness is not None or transparent_black:
         transparent_heatmap = heatmap.convert("RGBA")
         transparent_heatmap.putalpha(Image.fromarray(overlay_alpha, mode="L"))
         return Image.alpha_composite(
@@ -103,6 +131,7 @@ def make_layer_comparison_grid(
     dpi: int | None = None,
     normalization: str = "per_map",
     normalization_range: tuple[float, float] | None = None,
+    alpha_curve_steepness: float | None = None,
 ) -> Any:
     labels = [f"layer {layer.layer_index}" for layer in layers]
     overlays = [
@@ -110,6 +139,7 @@ def make_layer_comparison_grid(
             image,
             layer.maps,
             alpha=alpha,
+            alpha_curve_steepness=alpha_curve_steepness,
             cmap=cmap,
             batch_index=batch_index,
             head_index=head_index,
@@ -165,6 +195,7 @@ def make_image_comparison_grid(
     dpi: int | None = None,
     normalization: str = "per_map",
     normalization_range: tuple[float, float] | None = None,
+    alpha_curve_steepness: float | None = None,
 ) -> Any:
     if len(images) != len(attention_maps):
         raise ValueError("images and attention_maps must have the same length.")
@@ -179,6 +210,7 @@ def make_image_comparison_grid(
             image,
             attention_map,
             alpha=alpha,
+            alpha_curve_steepness=alpha_curve_steepness,
             cmap=cmap,
             batch_index=batch_index,
             head_index=head_index,
@@ -435,6 +467,15 @@ def _colormap(array: Any, cmap: str | ColormapSpec) -> Any:
         )
         colorized = colorized * blend[..., np.newaxis]
     return (colorized * 255).astype(np.uint8)
+
+
+def _sigmoid_alpha_curve(array: Any, steepness: float) -> Any:
+    """Return a sigmoid-shaped opacity curve rescaled to exact 0 and 1 endpoints."""
+    endpoint = np.tanh(steepness / 4)
+    if endpoint == 0:
+        return np.asarray(array)
+    curved = np.tanh(steepness * (np.asarray(array) - 0.5) / 2)
+    return np.clip((curved + endpoint) / (2 * endpoint), 0, 1)
 
 
 def _image_from_array(array: Any) -> Any:

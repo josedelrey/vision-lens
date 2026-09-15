@@ -37,7 +37,7 @@ def test_cli_hides_individual_output_paths_by_default(monkeypatch, capsys):
 
     monkeypatch.setattr(cli, "run_pipeline_from_config", lambda _config: _result())
 
-    assert main(["--config", "configs/patch_pca.dinov2.example.yaml"]) == 0
+    assert main(["--config", "configs/patch_pca.dinov2.yaml"]) == 0
 
     output_dir = Path("outputs/example")
     assert capsys.readouterr().out.splitlines() == [
@@ -54,7 +54,7 @@ def test_cli_validates_without_running_a_model(monkeypatch, capsys):
         lambda _config: pytest.fail("model pipeline should not run"),
     )
 
-    assert main(["validate", "--config", "configs/patch_pca.dinov2.example.yaml"]) == 0
+    assert main(["validate", "--config", "configs/patch_pca.dinov2.yaml"]) == 0
     assert capsys.readouterr().out == "configuration is valid\n"
 
 
@@ -64,7 +64,7 @@ def test_cli_prints_resolved_configuration(capsys):
             [
                 "resolve",
                 "--config",
-                "configs/patch_pca.dinov2.example.yaml",
+                "configs/patch_pca.dinov2.yaml",
                 "--set",
                 "runtime.device=cpu",
             ]
@@ -84,7 +84,7 @@ def test_cli_reports_configuration_errors_without_a_traceback(capsys):
             [
                 "validate",
                 "--config",
-                "configs/patch_pca.dinov2.example.yaml",
+                "configs/patch_pca.dinov2.yaml",
                 "--set",
                 "visualization.colrmap=viridis",
             ]

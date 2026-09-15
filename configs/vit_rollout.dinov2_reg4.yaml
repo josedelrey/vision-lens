@@ -1,16 +1,19 @@
 input:
   files: []
   folders:
-    - videos
+    - examples
   patterns:
-    - '*.mp4'
+    - '*.jpg'
+    - '*.jpeg'
+    - '*.png'
+    - '*.webp'
   recursive: false
   limit: null
 
 model:
   architecture: vit
   backend: timm
-  name: hf_hub:timm/vit_base_patch14_dinov2.lvd142m
+  name: hf_hub:timm/vit_small_patch14_reg4_dinov2.lvd142m
   pretrained: true
   options: {}
 
@@ -25,15 +28,17 @@ preprocessing:
   std: null
 
 analysis:
-  method: patch_pca
-  foreground_threshold: 0.5
-  foreground_side: high
-  projection: fit
-  projection_path: null
-  save_projection: null
+  method: rollout
+  layers:
+    - 2
+    - 5
+    - 8
+    - 11
+  heads: null
+  head_fusion: mean
 
 runtime:
-  batch_size: 1
+  batch_size: 8
   device: auto
   workers: 0
   precision: float32
@@ -48,29 +53,23 @@ visualization:
   labels: null
   background: null
   dpi: null
-  overlay_alpha: 0.45
+  overlay_alpha: 0.8
+  overlay_alpha_curve: null
   cmap: viridis
-  cmap_black: null
+  cmap_black:
+    threshold: 20
+    blend_width: 35
+    transparent: true
   grid_format: png
   normalization: per_map
   normalization_range: null
 
 output:
-  directory: outputs/video/dinov2_pca
+  directory: outputs/dinov2_reg4_attention/rollout
   heatmaps: true
-  overlays: false
+  overlays: true
   grids: true
   raw_arrays: false
   image_format: png
   raw_format: npy
   overwrite: replace
-
-video:
-  start_time: 0.0
-  end_time: null
-  sampling_rate: auto
-  frame_limit: null
-  output_resolution: null
-  pca_fit_frames: 32
-  temporal_smoothing: 0.0
-  codec: libx264

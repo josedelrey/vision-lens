@@ -1,8 +1,7 @@
 input:
-  files:
-    - examples/5.jpg
-    - examples/6.jpg
-  folders: []
+  files: []
+  folders:
+    - examples
   patterns:
     - '*.jpg'
     - '*.jpeg'
@@ -14,12 +13,12 @@ input:
 model:
   architecture: vit
   backend: timm
-  name: hf_hub:timm/vit_base_patch14_dinov2.lvd142m
+  name: vit_small_patch8_224.dino
   pretrained: true
   options: {}
 
 preprocessing:
-  image_size: 672
+  image_size: 224
   resize: stretch
   crop: none
   pad: none
@@ -29,12 +28,14 @@ preprocessing:
   std: null
 
 analysis:
-  method: patch_pca
-  foreground_threshold: 0.5
-  foreground_side: low
-  projection: fit
-  projection_path: null
-  save_projection: null
+  method: attention
+  layers:
+    - 2
+    - 5
+    - 8
+    - 11
+  heads: null
+  head_fusion: mean
 
 runtime:
   batch_size: 8
@@ -52,17 +53,21 @@ visualization:
   labels: null
   background: null
   dpi: null
-  overlay_alpha: 0.45
+  overlay_alpha: 0.8
+  overlay_alpha_curve: null
   cmap: viridis
-  cmap_black: null
+  cmap_black:
+    threshold: 20
+    blend_width: 35
+    transparent: true
   grid_format: png
   normalization: per_map
   normalization_range: null
 
 output:
-  directory: outputs/dinov2_patch_pca
+  directory: outputs/dino_vits8_attention
   heatmaps: true
-  overlays: false
+  overlays: true
   grids: true
   raw_arrays: false
   image_format: png

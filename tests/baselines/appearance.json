@@ -2,7 +2,7 @@
   "description": "Renderer pixel baselines and a PCA foreground mask recorded for regression checks.",
   "recorded_examples": {
     "dinov2_pca": {
-      "config": "patch_pca.dinov2.example.yaml",
+      "config": "patch_pca.dinov2.yaml",
       "files": {
         "5_patch_pca.png": "55262c3cd1ee62477b8f64c320564d7a61a099a26e0584f693a42c71ab4db61d",
         "6_patch_pca.png": "f65a26c7451d9b4ae7225a02b538ada1d27acebb3b5340acb5986ae369a37b29",

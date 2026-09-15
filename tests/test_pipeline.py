@@ -188,7 +188,7 @@ def test_rollout_config_dispatches_to_rollout_pipeline(monkeypatch):
     from vision_lens import pipeline
 
     config = load_config(
-        Path(__file__).parents[1] / "configs/vit_rollout.dinov2_reg4.example.yaml"
+        Path(__file__).parents[1] / "configs/vit_rollout.dinov2_reg4.yaml"
     )
     sentinel = object()
     monkeypatch.setattr(

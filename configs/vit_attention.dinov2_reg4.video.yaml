@@ -8,9 +8,9 @@ input:
   limit: null
 
 model:
-  architecture: cnn
-  backend: torchvision
-  name: resnet50
+  architecture: vit
+  backend: timm
+  name: hf_hub:timm/vit_small_patch14_reg4_dinov2.lvd142m
   pretrained: true
   options: {}
 
@@ -25,9 +25,11 @@ preprocessing:
   std: null
 
 analysis:
-  method: gradcam
-  target_layer: layer4
-  target_class: null
+  method: attention
+  layers:
+    - 11
+  heads: null
+  head_fusion: mean
 
 runtime:
   batch_size: 1
@@ -46,14 +48,18 @@ visualization:
   background: null
   dpi: null
   overlay_alpha: 0.8
+  overlay_alpha_curve: null
   cmap: viridis
-  cmap_black: null
+  cmap_black:
+    threshold: 20
+    blend_width: 35
+    transparent: true
   grid_format: png
   normalization: per_map
   normalization_range: null
 
 output:
-  directory: outputs/video/resnet50_gradcam
+  directory: outputs/video/dinov2_reg4_attention
   heatmaps: false
   overlays: true
   grids: true

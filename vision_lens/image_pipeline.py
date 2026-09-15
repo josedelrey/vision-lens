@@ -117,14 +117,14 @@ class PatchPCAPipelineResult:
 
 
 def run_vit_attention(
-    config_path: str | Path = "configs/vit_attention.example.yaml",
+    config_path: str | Path = "configs/vit_attention.yaml",
 ) -> PipelineResult:
     config = load_config(config_path)
     return run_vit_attention_from_config(config)
 
 
 def run_patch_pca(
-    config_path: str | Path = "configs/patch_pca.dinov2.example.yaml",
+    config_path: str | Path = "configs/patch_pca.dinov2.yaml",
 ) -> PatchPCAPipelineResult:
     config = load_config(config_path)
     return run_patch_pca_from_config(config)
@@ -313,7 +313,7 @@ def run_patch_pca_from_config(
 
 
 def run_vit_rollout_comparison(
-    config_path: str | Path = "configs/vit_attention.example.yaml",
+    config_path: str | Path = "configs/vit_attention.yaml",
     output_dir: str | Path | None = None,
 ) -> PipelineResult:
     config = load_config(config_path)
@@ -428,7 +428,7 @@ def run_vit_rollout_comparison_from_config(
 
 
 def run_gradcam(
-    config_path: str | Path = "configs/gradcam.example.yaml",
+    config_path: str | Path = "configs/gradcam.yaml",
 ) -> GradCamPipelineResult:
     config = load_config(config_path)
     return run_gradcam_from_config(config)
@@ -684,6 +684,7 @@ def export_attention_outputs(
                             image,
                             image_layer.maps,
                             alpha=alpha,
+                            alpha_curve_steepness=visualization.overlay_alpha_curve,
                             cmap=cmap,
                             head_index=head_index,
                             normalization=visualization.normalization,
@@ -723,6 +724,7 @@ def export_attention_outputs(
                     layer_page,
                     output_path=output_path,
                     alpha=alpha,
+                    alpha_curve_steepness=visualization.overlay_alpha_curve,
                     cmap=cmap,
                     head_index=head_index,
                     columns=visualization.columns,
@@ -761,6 +763,7 @@ def export_attention_outputs(
                     labels=[labels[index] for index in indices],
                     output_path=output_path,
                     alpha=alpha,
+                    alpha_curve_steepness=visualization.overlay_alpha_curve,
                     cmap=cmap,
                     head_index=head_index,
                     columns=visualization.columns,
@@ -924,6 +927,9 @@ def export_rollout_comparison_outputs(
                                 image,
                                 rollout_for_image.maps,
                                 alpha=alpha,
+                                alpha_curve_steepness=(
+                                    visualization.overlay_alpha_curve
+                                ),
                                 cmap=cmap,
                                 normalization=visualization.normalization,
                                 normalization_range=normalization_range,
@@ -959,6 +965,7 @@ def export_rollout_comparison_outputs(
                     rollout=rollout_page,
                     image_index=image_index,
                     alpha=alpha,
+                    alpha_curve_steepness=visualization.overlay_alpha_curve,
                     cmap=cmap,
                     columns=visualization.columns,
                     normalization=visualization.normalization,
@@ -1039,6 +1046,7 @@ def export_gradcam_outputs(
                             image,
                             maps,
                             alpha=alpha,
+                            alpha_curve_steepness=visualization.overlay_alpha_curve,
                             cmap=cmap,
                             normalization=visualization.normalization,
                             normalization_range=normalization_range,
@@ -1070,6 +1078,7 @@ def export_gradcam_outputs(
                 labels=[labels[index] for index in indices],
                 output_path=grid_path,
                 alpha=alpha,
+                alpha_curve_steepness=visualization.overlay_alpha_curve,
                 cmap=cmap,
                 columns=visualization.columns,
                 tile_size=visualization.tile_size,
@@ -1142,6 +1151,7 @@ def _rollout_grid_items(
     columns: int | None = None,
     normalization: str = "per_map",
     normalization_range: tuple[float, float] | None = None,
+    alpha_curve_steepness: float | None = None,
 ) -> tuple[list[Any], list[str], int]:
     pairs = tuple(zip(layer_attention.layers, rollout.layers, strict=True))
     if not pairs:
@@ -1173,6 +1183,7 @@ def _rollout_grid_items(
                     image,
                     layer_for_image.maps,
                     alpha=alpha,
+                    alpha_curve_steepness=alpha_curve_steepness,
                     cmap=cmap,
                     normalization=normalization,
                     normalization_range=normalization_range,
@@ -1184,6 +1195,7 @@ def _rollout_grid_items(
                     image,
                     rollout_for_image.maps,
                     alpha=alpha,
+                    alpha_curve_steepness=alpha_curve_steepness,
                     cmap=cmap,
                     normalization=normalization,
                     normalization_range=normalization_range,

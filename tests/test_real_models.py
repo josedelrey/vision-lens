@@ -22,27 +22,27 @@ pytestmark = [
     ("config_name", "analysis_overrides", "expected_suffix"),
     [
         (
-            "vit_attention.example.yaml",
+            "vit_attention.yaml",
             {"layers": [11], "heads": None, "head_fusion": "mean"},
             "_heatmap.png",
         ),
         (
-            "vit_attention.dinov2_reg4.example.yaml",
+            "vit_attention.dinov2_reg4.yaml",
             {"layers": [11], "heads": None, "head_fusion": "mean"},
             "_heatmap.png",
         ),
         (
-            "vit_rollout.dinov2_reg4.example.yaml",
+            "vit_rollout.dinov2_reg4.yaml",
             {"layers": [11], "heads": None, "head_fusion": "mean"},
             "_heatmap.png",
         ),
         (
-            "gradcam.example.yaml",
+            "gradcam.yaml",
             {"target_layer": "layer4", "target_class": None},
             "_heatmap.png",
         ),
         (
-            "patch_pca.dinov2.example.yaml",
+            "patch_pca.dinov2.yaml",
             {
                 "foreground_threshold": 0.5,
                 "foreground_side": "high",
