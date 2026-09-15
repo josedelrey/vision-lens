@@ -247,8 +247,8 @@ visualization:
 | `background` | `null` | Pillow/Matplotlib color. | `"#101010"` |
 | `dpi` | `null` | Output DPI; `null` retains workflow behavior. | `150` |
 | `output_size` | `null` | Standalone visualization size: `null` keeps the model-processed size, `match` uses each source's dimensions, a positive integer produces a square output, and `[width, height]` sets an exact size. Video dimensions must be even. | `[1280, 720]` |
-| `interpolation` | `bilinear` | Visualization upscaling mode: `nearest`, `bilinear`, `bilinear_mask`, `anyup`, or `anyup_mask`. | `anyup_mask` |
-| `anyup_query_chunk_size` | `null` | Positive number of output queries processed per AnyUp attention chunk. Smaller values lower peak memory but increase runtime; `null` disables chunking. Requires `anyup` or `anyup_mask`. | `4096` |
+| `interpolation` | `bilinear` | Visualization upscaling mode: `nearest`, `bilinear`, `bilinear_mask`, `anyup`, `anyup_mask`, or `anyup_soft`. | `anyup_soft` |
+| `anyup_query_chunk_size` | `null` | Positive number of output queries processed per AnyUp attention chunk. Smaller values lower peak memory but increase runtime; `null` disables chunking. Requires an AnyUp mode and is mandatory for `anyup_soft`. | `4096` |
 | `overlay_alpha` | `0.45` | Uniform heatmap opacity from 0 to 1. When an alpha curve is enabled, this scales the curve's per-pixel opacity. | `0.8` |
 | `overlay_alpha_curve` | `null` | Optional sigmoid-like, value-dependent overlay opacity applied before `overlay_alpha`. `steepness` must be positive; `midpoint` defaults to `0.5` and moves the transition within the normalized 0–1 range. | `{steepness: 10, midpoint: 0.25}` |
 | `cmap` | `viridis` | Matplotlib colormap. | `magma` |
@@ -268,14 +268,17 @@ colors, and then applies the foreground mask with nearest-neighbor upscaling. Th
 avoids blending foreground colors with black while keeping a sharp foreground
 boundary.
 
-`anyup` and `anyup_mask` replace bilinear feature-map upscaling with the
+`anyup`, `anyup_mask`, and `anyup_soft` replace bilinear feature-map upscaling with the
 [official AnyUp model](https://github.com/wimmerth/anyup). For attention,
-rollout, and Grad-CAM, the two AnyUp modes are identical. For patch PCA, the PCA
+rollout, and Grad-CAM, `anyup` and `anyup_mask` are identical. For patch PCA, the PCA
 directions, foreground threshold, and projection bounds are fitted from the
 original patch embeddings. AnyUp then upsamples the embedding map before those
 fixed projections are applied. `anyup` also upsamples the foreground weights with
 AnyUp; `anyup_mask` instead applies the original foreground mask with
-nearest-neighbor upscaling for a sharp boundary.
+nearest-neighbor upscaling for a sharp boundary. `anyup_soft` uses a
+Vision Lens-specific cosine taper at the local attention-window boundary instead
+of AnyUp's hard boolean cutoff. For patch PCA it also preserves the original
+foreground mask like `anyup_mask`. The pretrained AnyUp weights are unchanged.
 
 The first AnyUp run downloads the official multi-backbone implementation and
 checkpoint from its pinned `checkpoint_v2` release through PyTorch Hub; later

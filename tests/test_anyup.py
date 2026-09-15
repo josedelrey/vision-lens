@@ -8,6 +8,8 @@ class _FakeAnyUp(torch.nn.Module):
     def __init__(self):
         super().__init__()
         self.weight = torch.nn.Parameter(torch.tensor(1.0))
+        self.cross_decode = torch.nn.Module()
+        self.cross_decode.window_ratio = 0.1
         self.call = None
 
     def forward(
@@ -107,6 +109,7 @@ def test_load_anyup_uses_official_multi_backbone_model_and_caches(monkeypatch):
         )
     ]
     assert not first.training
+    assert first.cross_decode.window_ratio == 0.1
     anyup.load_anyup.cache_clear()
 
 
@@ -138,8 +141,18 @@ def test_upsample_features_uses_streaming_when_chunked(monkeypatch):
     expected = torch.rand(1, 2, 6, 7)
     calls = []
 
-    def fake_stream(image, features, output_size, *, model, q_chunk_size):
-        calls.append((image, features, output_size, model, q_chunk_size))
+    def fake_stream(
+        image,
+        features,
+        output_size,
+        *,
+        model,
+        q_chunk_size,
+        attention_mode,
+    ):
+        calls.append(
+            (image, features, output_size, model, q_chunk_size, attention_mode)
+        )
         return expected
 
     monkeypatch.setattr(anyup, "upsample_values_streaming", fake_stream)
@@ -150,10 +163,28 @@ def test_upsample_features_uses_streaming_when_chunked(monkeypatch):
         (6, 7),
         model=model,
         q_chunk_size=3,
+        attention_mode="soft",
     )
 
     assert result is expected
-    assert calls == [(image, features, (6, 7), model, 3)]
+    assert calls == [(image, features, (6, 7), model, 3, "soft")]
+
+
+def test_soft_attention_bias_tapers_before_blocking_distant_keys():
+    bias = anyup._soft_attention_bias_rows(
+        (8, 8),
+        (4, 4),
+        0,
+        8,
+        0.2,
+        device=torch.device("cpu"),
+        dtype=torch.float32,
+    )
+
+    assert bias.shape == (64, 16)
+    assert torch.any(bias == 0)
+    assert torch.any(torch.isfinite(bias) & (bias < 0))
+    assert torch.any(torch.isneginf(bias))
 
 
 def test_streaming_anyup_matches_full_attention_with_compact_values():

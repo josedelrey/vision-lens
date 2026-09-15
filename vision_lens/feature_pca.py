@@ -26,6 +26,7 @@ Interpolation = Literal[
     "bilinear_mask",
     "anyup",
     "anyup_mask",
+    "anyup_soft",
 ]
 _OTSU_BINS = 256
 
@@ -128,16 +129,25 @@ def project_patch_embeddings(
         raise ValueError("foreground_side must be one of: high, low.")
     if rgb_fit_scope not in {"foreground", "all"}:
         raise ValueError("rgb_fit_scope must be one of: foreground, all.")
-    choices = {"nearest", "bilinear", "bilinear_mask", "anyup", "anyup_mask"}
+    choices = {
+        "nearest",
+        "bilinear",
+        "bilinear_mask",
+        "anyup",
+        "anyup_mask",
+        "anyup_soft",
+    }
     if interpolation not in choices:
         raise ValueError(
             "interpolation must be one of: nearest, bilinear, bilinear_mask, "
-            "anyup, anyup_mask."
+            "anyup, anyup_mask, anyup_soft."
         )
     if is_anyup_interpolation(interpolation) and guidance_image is None:
         raise ValueError(
             f"guidance_image is required for interpolation={interpolation!r}."
         )
+    if interpolation == "anyup_soft" and anyup_query_chunk_size is None:
+        raise ValueError("anyup_soft interpolation requires anyup_query_chunk_size.")
 
     embeddings = torch.as_tensor(patch_embeddings).detach().float().cpu()
     if embeddings.ndim != 3:
@@ -183,7 +193,7 @@ def project_patch_embeddings(
     )
     projected_mask = (
         torch.ones_like(foreground_mask)
-        if interpolation in {"bilinear_mask", "anyup_mask"}
+        if interpolation in {"bilinear_mask", "anyup_mask", "anyup_soft"}
         else foreground_mask
     )
     projected_embeddings = flattened[projected_mask]
@@ -319,6 +329,7 @@ def _render_anyup_pca_images(
             image_size,
             values=projected_values,
             q_chunk_size=anyup_query_chunk_size,
+            attention_mode="soft" if interpolation == "anyup_soft" else "hard",
         )
         flattened = upsampled_projection.permute(0, 2, 3, 1).reshape(-1, 3)
         rendered = _normalize_with_bounds(
@@ -329,7 +340,7 @@ def _render_anyup_pca_images(
     rendered = rendered.reshape(batch_size, *image_size, 3).permute(0, 3, 1, 2)
 
     patch_masks = foreground_mask.reshape(batch_size, 1, *patch_grid).float()
-    if interpolation == "anyup_mask":
+    if interpolation in {"anyup_mask", "anyup_soft"}:
         upsampled_mask = functional.interpolate(
             patch_masks,
             size=image_size,

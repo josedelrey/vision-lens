@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from functools import cache
-from typing import Any
+from typing import Any, Literal
 
 import torch
 import torch.nn.functional as functional
@@ -27,7 +27,7 @@ __all__ = [
 
 def is_anyup_interpolation(interpolation: str) -> bool:
     """Return whether an interpolation mode uses AnyUp."""
-    return interpolation in {"anyup", "anyup_mask"}
+    return interpolation in {"anyup", "anyup_mask", "anyup_soft"}
 
 
 def prepare_anyup_image(
@@ -92,12 +92,14 @@ def upsample_features(
     *,
     model: Any | None = None,
     q_chunk_size: int | None = None,
+    attention_mode: Literal["hard", "soft"] = "hard",
 ) -> Any:
     """Upsample BCHW features with AnyUp using an ImageNet-normalized image."""
     image_tensor = torch.as_tensor(image)
     feature_tensor = torch.as_tensor(features)
     _validate_image(image_tensor)
     _validate_features(feature_tensor)
+    _validate_attention_mode(attention_mode)
     if image_tensor.shape[0] != feature_tensor.shape[0]:
         raise ValueError("image and features must have the same batch size.")
     if (
@@ -120,6 +122,8 @@ def upsample_features(
     original_dtype = feature_tensor.dtype
     execution_device = image_tensor.device
     upsampler = model if model is not None else load_anyup(str(execution_device))
+    if attention_mode == "soft" and q_chunk_size is None:
+        raise ValueError("soft AnyUp attention requires q_chunk_size.")
     if q_chunk_size is not None:
         return upsample_values_streaming(
             image_tensor,
@@ -127,6 +131,7 @@ def upsample_features(
             output_size,
             model=upsampler,
             q_chunk_size=q_chunk_size,
+            attention_mode=attention_mode,
         )
     parameter = next(iter(upsampler.parameters()), None)
     if parameter is not None:
@@ -171,13 +176,15 @@ def upsample_values_streaming(
     values: Any | None = None,
     model: Any | None = None,
     q_chunk_size: int,
+    attention_mode: Literal["hard", "soft"] = "hard",
 ) -> Any:
     """Run AnyUp in row chunks and aggregate a compact value tensor.
 
     ``features`` still determines AnyUp's keys. ``values`` may use fewer channels
     when a linear projection can be applied before attention. Query features and
     locality masks are generated per chunk, and completed chunks are transferred
-    to the value tensor's original device immediately.
+    to the value tensor's original device immediately. ``attention_mode="soft"``
+    replaces AnyUp's hard spatial cutoff with a cosine-tapered local bias.
     """
     image_tensor = torch.as_tensor(image)
     feature_tensor = torch.as_tensor(features)
@@ -187,6 +194,7 @@ def upsample_values_streaming(
     _validate_features(value_tensor)
     _validate_output_size(output_size)
     _validate_query_chunk_size(q_chunk_size)
+    _validate_attention_mode(attention_mode)
     if image_tensor.shape[0] != feature_tensor.shape[0]:
         raise ValueError("image and features must have the same batch size.")
     if value_tensor.shape[0] != feature_tensor.shape[0]:
@@ -225,6 +233,7 @@ def upsample_values_streaming(
             prepared_values,
             output_size,
             q_chunk_size,
+            attention_mode,
             output_device=original_device,
             output_dtype=original_dtype,
         )
@@ -248,6 +257,7 @@ def _stream_anyup_values(
     values: Any,
     output_size: tuple[int, int],
     q_chunk_size: int,
+    attention_mode: Literal["hard", "soft"],
     *,
     output_device: Any,
     output_dtype: Any,
@@ -329,14 +339,24 @@ def _stream_anyup_values(
             convolved_queries.shape[1],
         )
         normalized_queries = cross_attention.norm_q(query_sequence)
-        attention_mask = _attention_mask_rows(
+        mask_arguments = (
             output_size,
             (feature_height, feature_width),
             row_start,
             row_end,
             float(decoder.window_ratio),
-            device=normalized_queries.device,
         )
+        if attention_mode == "soft":
+            attention_mask = _soft_attention_bias_rows(
+                *mask_arguments,
+                device=normalized_queries.device,
+                dtype=normalized_queries.dtype,
+            )
+        else:
+            attention_mask = _attention_mask_rows(
+                *mask_arguments,
+                device=normalized_queries.device,
+            )
         _ignored, attention = cross_attention.attention(
             normalized_queries,
             normalized_keys,
@@ -422,6 +442,70 @@ def _attention_mask_rows(
     return ~allowed.reshape(-1, feature_height * feature_width)
 
 
+def _soft_attention_bias_rows(
+    output_size: tuple[int, int],
+    feature_size: tuple[int, int],
+    row_start: int,
+    row_end: int,
+    window_ratio: float,
+    *,
+    device: Any,
+    dtype: Any,
+) -> Any | None:
+    """Create a continuous local-attention bias for a range of output rows."""
+    if window_ratio <= 0:
+        return None
+    output_height, output_width = output_size
+    feature_height, feature_width = feature_size
+    output_rows = torch.arange(row_start, row_end, device=device, dtype=torch.float32)
+    output_columns = torch.arange(output_width, device=device, dtype=torch.float32)
+    query_rows = (output_rows + 0.5) / output_height
+    query_columns = (output_columns + 0.5) / output_width
+    query_rows, query_columns = torch.meshgrid(
+        query_rows,
+        query_columns,
+        indexing="ij",
+    )
+    query_rows = query_rows.reshape(-1, 1)
+    query_columns = query_columns.reshape(-1, 1)
+    key_rows = (torch.arange(feature_height, device=device).float() + 0.5) / (
+        feature_height
+    )
+    key_columns = (torch.arange(feature_width, device=device).float() + 0.5) / (
+        feature_width
+    )
+    row_weights = _cosine_window_weights(
+        (query_rows - key_rows).abs(),
+        window_ratio,
+        0.5 / feature_height,
+    )
+    column_weights = _cosine_window_weights(
+        (query_columns - key_columns).abs(),
+        window_ratio,
+        0.5 / feature_width,
+    )
+    weights = row_weights.unsqueeze(2) * column_weights.unsqueeze(1)
+    weights = weights.reshape(-1, feature_height * feature_width)
+    bias = torch.where(
+        weights > 0,
+        weights.log(),
+        torch.full_like(weights, float("-inf")),
+    )
+    return bias.to(dtype=dtype)
+
+
+def _cosine_window_weights(
+    distance: Any,
+    window_ratio: float,
+    half_feature_cell: float,
+) -> Any:
+    inner = max(0.0, window_ratio - half_feature_cell)
+    outer = window_ratio + half_feature_cell
+    progress = ((distance - inner) / (outer - inner)).clamp(0, 1)
+    weights = 0.5 * (1 + torch.cos(torch.pi * progress))
+    return torch.where(distance < outer, weights, torch.zeros_like(weights))
+
+
 def _coordinates(
     height: int,
     width: int,
@@ -468,6 +552,11 @@ def _validate_query_chunk_size(q_chunk_size: int | None) -> None:
         or q_chunk_size <= 0
     ):
         raise ValueError("q_chunk_size must be a positive integer or None.")
+
+
+def _validate_attention_mode(attention_mode: str) -> None:
+    if attention_mode not in {"hard", "soft"}:
+        raise ValueError("attention_mode must be 'hard' or 'soft'.")
 
 
 def _channel_values(values: Iterable[float], name: str, tensor: Any) -> Any:

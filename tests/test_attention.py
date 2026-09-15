@@ -194,15 +194,22 @@ def test_bilinear_mask_attention_upscaling_is_bilinear():
     assert torch.equal(bilinear_masked, bilinear)
 
 
-@pytest.mark.parametrize("interpolation", ["anyup", "anyup_mask"])
+@pytest.mark.parametrize("interpolation", ["anyup", "anyup_mask", "anyup_soft"])
 def test_anyup_attention_upscaling_uses_guidance_image(
     monkeypatch,
     interpolation,
 ):
     calls = []
 
-    def fake_upsample(image, features, output_size, *, q_chunk_size=None):
-        calls.append((image, features, output_size, q_chunk_size))
+    def fake_upsample(
+        image,
+        features,
+        output_size,
+        *,
+        q_chunk_size=None,
+        attention_mode="hard",
+    ):
+        calls.append((image, features, output_size, q_chunk_size, attention_mode))
         return torch.full((1, 1, *output_size), 0.25)
 
     monkeypatch.setattr("vision_lens.attention.upsample_features", fake_upsample)
@@ -226,6 +233,7 @@ def test_anyup_attention_upscaling_uses_guidance_image(
     assert calls[0][1].shape == (1, 1, 2, 2)
     assert calls[0][2] == (3, 5)
     assert calls[0][3] == 7
+    assert calls[0][4] == ("soft" if interpolation == "anyup_soft" else "hard")
 
 
 def test_class_token_attention_to_map_mean_fusion_values():
