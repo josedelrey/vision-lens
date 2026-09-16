@@ -44,7 +44,7 @@ def test_vit_pipeline_exports_figures_with_mocked_model(monkeypatch, tmp_path):
                 "options": {},
             },
             "input": {
-                "paths": ["examples/1.jpg"],
+                "files": ["examples/1.jpg"],
             },
             "output": {
                 "directory": str(tmp_path),
@@ -352,12 +352,13 @@ def test_patch_pca_pipeline_exports_reference_style_images(monkeypatch, tmp_path
                 "pretrained": False,
                 "options": {},
             },
-            "input": {"paths": [str(horse_a), str(horse_b)]},
+            "input": {"files": [str(horse_a), str(horse_b)]},
             "output": {"directory": str(tmp_path)},
             "preprocessing": {"image_size": 4},
             "runtime": {"device": "cpu"},
             "analysis": {
                 "method": "patch_pca",
+                "foreground_separation": True,
                 "foreground_threshold": 0.5,
                 "foreground_side": "low",
             },
@@ -417,7 +418,100 @@ def test_patch_pca_pipeline_exports_reference_style_images(monkeypatch, tmp_path
     }
     assert all(path.is_file() for path in result.output_paths)
     with Image.open(tmp_path / "patch_pca_comparison.png") as comparison:
-        assert comparison.size == (56, 36)
+        assert comparison.size == (460, 224)
+
+
+def test_patch_pca_grid_uses_matplotlib_without_labels(monkeypatch, tmp_path):
+    from vision_lens import image_pipeline
+
+    patch_pca = PatchPCAResult(
+        patch_embeddings=torch.rand(2, 4, 3),
+        foreground_mask=torch.ones(2, 4, dtype=torch.bool),
+        images=(
+            Image.new("RGB", (4, 4), "red"),
+            Image.new("RGB", (4, 4), "green"),
+        ),
+        patch_grid=(2, 2),
+        image_size=(4, 4),
+    )
+    calls = []
+    original = image_pipeline.save_grid
+
+    def record_save_grid(*args, **kwargs):
+        calls.append(kwargs)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(image_pipeline, "save_grid", record_save_grid)
+    paths = export_patch_pca_outputs(
+        patch_pca,
+        (Path("first.jpg"), Path("second.jpg")),
+        tmp_path,
+        output_config=OutputConfig(
+            tmp_path,
+            heatmaps=False,
+            overlays=False,
+            grids=True,
+        ),
+        visualization_config=VisualizationConfig(
+            tile_size=(20, 10),
+            spacing=3,
+            padding=5,
+            grid_format="svg",
+        ),
+    )
+
+    assert [path.name for path in paths] == ["patch_pca_comparison.svg"]
+    assert paths[0].is_file()
+    assert calls == [
+        {
+            "labels": ["first", "second"],
+            "output_path": tmp_path / "patch_pca_comparison.svg",
+            "columns": None,
+            "tile_size": (20, 10),
+            "spacing": 3,
+            "padding": 5,
+            "show_labels": False,
+            "background": None,
+            "dpi": None,
+        }
+    ]
+
+
+def test_loaded_patch_pca_projection_does_not_require_fit_settings(
+    monkeypatch,
+    tmp_path,
+):
+    from vision_lens import image_pipeline
+
+    projection_path = tmp_path / "projection.npz"
+    projection_path.touch()
+    raw = {
+        "input": {"files": ["examples/1.jpg"]},
+        "model": {
+            "architecture": "vit",
+            "backend": "timm",
+            "name": "mock_model",
+        },
+        "analysis": {
+            "method": "patch_pca",
+            "projection": "load",
+            "projection_path": str(projection_path),
+        },
+        "output": {"directory": str(tmp_path / "outputs")},
+    }
+    config = parse_config(raw)
+
+    def reached_projection_loader(_path):
+        raise RuntimeError("projection loader reached")
+
+    monkeypatch.setattr(
+        image_pipeline,
+        "load_patch_pca_projection",
+        reached_projection_loader,
+    )
+
+    with pytest.raises(RuntimeError, match="projection loader reached"):
+        run_patch_pca_from_config(config)
 
 
 def test_patch_pca_single_image_run_skips_redundant_comparison(tmp_path):
@@ -462,7 +556,7 @@ def test_patch_pca_keeps_single_image_page_in_larger_run(tmp_path):
     ]
 
 
-def test_patch_pca_pipeline_fits_and_transforms_multiple_bounded_batches(
+def test_patch_pca_pipeline_combines_grid_across_bounded_batches(
     monkeypatch,
     tmp_path,
 ):
@@ -487,10 +581,13 @@ def test_patch_pca_pipeline_fits_and_transforms_multiple_bounded_batches(
             "input": {"files": [str(path) for path in input_paths]},
             "output": {
                 "directory": str(output_dir),
-                "grids": False,
+                "grids": True,
             },
             "preprocessing": {"image_size": 4},
-            "analysis": {"method": "patch_pca"},
+            "analysis": {
+                "method": "patch_pca",
+                "foreground_separation": True,
+            },
             "runtime": {"device": "cpu", "batch_size": 2},
         }
     )
@@ -542,7 +639,9 @@ def test_patch_pca_pipeline_fits_and_transforms_multiple_bounded_batches(
         "image-0_patch_pca.png",
         "image-1_patch_pca.png",
         "image-2_patch_pca.png",
+        "patch_pca_comparison.png",
     }
+    assert not list(output_dir.glob("patch_pca_comparison_part-*.png"))
     assert (output_dir / "run-manifest.json").is_file()
 
 
@@ -586,7 +685,7 @@ def test_items_per_grid_splits_gradcam_comparison_files(tmp_path):
     ]
 
 
-def test_attention_pipeline_honors_batch_size_and_raw_only_output(
+def test_attention_pipeline_combines_cross_image_grid_across_batches(
     monkeypatch,
     tmp_path,
 ):
@@ -611,7 +710,7 @@ def test_attention_pipeline_honors_batch_size_and_raw_only_output(
                 "directory": str(tmp_path),
                 "heatmaps": False,
                 "overlays": False,
-                "grids": False,
+                "grids": True,
                 "raw_arrays": True,
             },
             "preprocessing": {"image_size": 4},
@@ -670,8 +769,16 @@ def test_attention_pipeline_honors_batch_size_and_raw_only_output(
     assert batch_sizes == [2, 1]
     assert result.attention is None
     assert result.processed_inputs == 3
-    assert len(result.output_paths) == 3
-    assert all(path.suffix == ".npy" for path in result.output_paths)
+    assert {path.name for path in result.output_paths} == {
+        "1_layer-0_heads-mean.npy",
+        "1_layers_heads-mean.png",
+        "2_layer-0_heads-mean.npy",
+        "2_layers_heads-mean.png",
+        "3_layer-0_heads-mean.npy",
+        "3_layers_heads-mean.png",
+        "layer-0_images_heads-mean.png",
+    }
+    assert not list(tmp_path.glob("layer-0_images_heads-mean_part-*.png"))
 
 
 def test_shared_normalization_is_fitted_across_all_batches(monkeypatch, tmp_path):
@@ -868,7 +975,7 @@ def test_gradcam_pipeline_passes_fixed_class_workers_and_batch_size(
                 "directory": str(tmp_path),
                 "heatmaps": False,
                 "overlays": False,
-                "grids": False,
+                "grids": True,
                 "raw_arrays": True,
             },
             "preprocessing": {"image_size": 4},
@@ -882,6 +989,7 @@ def test_gradcam_pipeline_passes_fixed_class_workers_and_batch_size(
                 "output_size": [6, 2],
                 "interpolation": "anyup",
                 "anyup_query_chunk_size": 7,
+                "padding": 7,
             },
         }
     )
@@ -936,7 +1044,14 @@ def test_gradcam_pipeline_passes_fixed_class_workers_and_batch_size(
     assert all(call["target_layer"] == "features.0" for call in received)
     assert all(call["output_size"] == (2, 6) for call in received)
     assert all(call["anyup_query_chunk_size"] == 7 for call in received)
-    assert len(result.output_paths) == 2
+    assert {path.name for path in result.output_paths} == {
+        "1_gradcam.npy",
+        "2_gradcam.npy",
+        "gradcam_images.png",
+    }
+    assert not list(tmp_path.glob("gradcam_images_part-*.png"))
+    with Image.open(tmp_path / "gradcam_images.png") as grid:
+        assert grid.size == (474, 270)
 
 
 def _attention_result(layer_indices: tuple[int, ...]) -> AttentionExtractionResult:

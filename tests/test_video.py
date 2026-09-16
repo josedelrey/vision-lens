@@ -204,8 +204,6 @@ def test_short_pca_video_uses_frozen_projection_and_bounded_batches(
             "preprocessing": {"image_size": 4},
             "analysis": {
                 "method": "patch_pca",
-                "foreground_threshold": 0.4,
-                "foreground_side": "low",
             },
             "runtime": {"device": "cpu", "batch_size": 2},
             "visualization": {"output_size": [64, 48]},
@@ -236,7 +234,9 @@ def test_short_pca_video_uses_frozen_projection_and_bounded_batches(
     )
     embedding_batch_sizes = []
     projection_ids = []
+    rendered_masks = []
     original_project = video_pipeline.project_patch_embeddings
+    original_fit = video_pipeline.fit_patch_pca_projection_batches
 
     def fake_embeddings(_model, inputs, _patch_grid):
         embedding_batch_sizes.append(len(inputs))
@@ -249,7 +249,16 @@ def test_short_pca_video_uses_frozen_projection_and_bounded_batches(
 
     def record_projection(*args, **kwargs):
         projection_ids.append(id(kwargs["projection"]))
-        return original_project(*args, **kwargs)
+        assert kwargs["foreground_separation"] is False
+        result = original_project(*args, **kwargs)
+        rendered_masks.append(result.foreground_mask)
+        return result
+
+    def record_fit(*args, **kwargs):
+        assert kwargs["foreground_separation"] is False
+        assert kwargs["rgb_fit_scope"] == "all"
+        assert kwargs["rgb_percentile_bounds"] == (0.01, 0.99)
+        return original_fit(*args, **kwargs)
 
     monkeypatch.setattr(
         video_pipeline,
@@ -263,6 +272,11 @@ def test_short_pca_video_uses_frozen_projection_and_bounded_batches(
     )
     monkeypatch.setattr(video_pipeline, "extract_patch_embeddings", fake_embeddings)
     monkeypatch.setattr(video_pipeline, "project_patch_embeddings", record_projection)
+    monkeypatch.setattr(
+        video_pipeline,
+        "fit_patch_pca_projection_batches",
+        record_fit,
+    )
 
     result = run_pipeline_from_config(config)
 
@@ -271,9 +285,9 @@ def test_short_pca_video_uses_frozen_projection_and_bounded_batches(
     assert result.duration == pytest.approx(1.0)
     assert max(embedding_batch_sizes) <= 2
     assert len(set(projection_ids)) == 1
+    assert rendered_masks and all(mask.all() for mask in rendered_masks)
     assert {path.name for path in result.output_paths} == {
         "clip_patch_pca.mp4",
-        "clip_patch_pca_comparison.mp4",
     }
     for output_path in result.output_paths:
         assert probe_video(output_path).duration == pytest.approx(1.0, abs=0.05)
@@ -288,7 +302,7 @@ def test_short_pca_video_uses_frozen_projection_and_bounded_batches(
 
 
 @pytest.mark.parametrize(("sampling_rate", "expected_frames"), [(2, 2), ("auto", 4)])
-def test_gradcam_video_exports_overlays_with_one_fixed_class(
+def test_gradcam_video_exports_heatmaps_and_overlays_with_one_fixed_class(
     monkeypatch,
     tmp_path,
     sampling_rate,
@@ -322,9 +336,8 @@ def test_gradcam_video_exports_overlays_with_one_fixed_class(
             },
             "output": {
                 "directory": str(output_dir),
-                "heatmaps": False,
+                "heatmaps": True,
                 "overlays": True,
-                "grids": True,
             },
             "video": {
                 "sampling_rate": sampling_rate,
@@ -386,11 +399,6 @@ def test_gradcam_video_exports_overlays_with_one_fixed_class(
     monkeypatch.setattr(video_pipeline, "extract_gradcam", fake_gradcam)
     monkeypatch.setattr(video_pipeline, "overlay_attention", record_overlay)
 
-    def reject_heatmap(*_args, **_kwargs):
-        raise AssertionError("disabled heatmap output should not be rendered")
-
-    monkeypatch.setattr(video_pipeline, "render_heatmap", reject_heatmap)
-
     result = run_pipeline_from_config(config)
 
     assert target_classes == [[1]] * expected_frames
@@ -400,14 +408,14 @@ def test_gradcam_video_exports_overlays_with_one_fixed_class(
     assert result.processed_frames == expected_frames
     assert result.frame_rate == (4 if sampling_rate == "auto" else 2)
     assert {path.name for path in result.output_paths} == {
+        "clip_gradcam_heatmap.mp4",
         "clip_gradcam_overlay.mp4",
-        "clip_gradcam_comparison.mp4",
     }
     assert all(
         probe_video(path).duration == pytest.approx(1.0, abs=0.05)
         for path in result.output_paths
     )
-    assert probe_video(output_dir / "clip_gradcam_comparison.mp4").width == 128
+    assert not (output_dir / "clip_gradcam_comparison.mp4").exists()
     manifest = json.loads((output_dir / "run-manifest.json").read_text())
     assert manifest["model"]["input_size"] == [3, 3, 4]
     assert manifest["configuration"]["video"]["sampling_rate"] == sampling_rate
@@ -443,9 +451,8 @@ def test_multiple_videos_have_independent_outputs_and_sampling_rates(
             "visualization": {"output_size": [64, 48]},
             "output": {
                 "directory": str(output_dir),
-                "heatmaps": False,
+                "heatmaps": True,
                 "overlays": True,
-                "grids": False,
             },
             "video": {"sampling_rate": "auto"},
         }

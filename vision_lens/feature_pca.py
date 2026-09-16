@@ -54,13 +54,15 @@ class PatchPCAProjection:
     rgb_maximum: Any
     foreground_threshold: float
     foreground_side: Literal["high", "low"]
-    rgb_fit_scope: RGBFitScope = "foreground"
+    rgb_fit_scope: RGBFitScope
+    foreground_separation: bool
 
 
 def extract_patch_pca(
     model: Any,
     inputs: Any,
     metadata: ModelMetadata,
+    foreground_separation: bool | None = None,
     foreground_threshold: ForegroundThreshold = 0.5,
     foreground_side: Literal["high", "low"] = "high",
     rgb_fit_scope: RGBFitScope = "foreground",
@@ -82,6 +84,7 @@ def extract_patch_pca(
         patch_embeddings,
         patch_grid=patch_grid,
         image_size=output_size or image_size,
+        foreground_separation=foreground_separation,
         foreground_threshold=foreground_threshold,
         foreground_side=foreground_side,
         rgb_fit_scope=rgb_fit_scope,
@@ -116,6 +119,7 @@ def project_patch_embeddings(
     patch_embeddings: Any,
     patch_grid: tuple[int, int],
     image_size: tuple[int, int],
+    foreground_separation: bool | None = None,
     foreground_threshold: ForegroundThreshold = 0.5,
     foreground_side: Literal["high", "low"] = "high",
     rgb_fit_scope: RGBFitScope = "foreground",
@@ -125,6 +129,10 @@ def project_patch_embeddings(
     anyup_query_chunk_size: int | None = None,
 ) -> PatchPCAResult:
     """Project a batch of patch embeddings into one shared RGB PCA space."""
+    if foreground_separation is not None and not isinstance(
+        foreground_separation, bool
+    ):
+        raise ValueError("foreground_separation must be a boolean or None.")
     _validate_foreground_threshold(foreground_threshold)
     if foreground_side not in {"high", "low"}:
         raise ValueError("foreground_side must be one of: high, low.")
@@ -170,27 +178,49 @@ def project_patch_embeddings(
 
     flattened = embeddings.reshape(batch_size * patch_count, feature_count)
     if projection is None:
+        resolved_foreground_separation = (
+            True if foreground_separation is None else foreground_separation
+        )
         projection, first_component = _fit_projection(
             flattened,
+            resolved_foreground_separation,
             foreground_threshold,
             foreground_side,
             rgb_fit_scope,
         )
     else:
         _validate_projection(projection, feature_count)
-        first_component = _apply_projection(
-            flattened,
-            projection.foreground_components,
-            projection.foreground_minimum,
-            projection.foreground_maximum,
+        resolved_foreground_separation = (
+            projection.foreground_separation
+            if foreground_separation is None
+            else foreground_separation
         )
-        foreground_side = projection.foreground_side
+        first_component = (
+            _apply_projection(
+                flattened,
+                projection.foreground_components,
+                projection.foreground_minimum,
+                projection.foreground_maximum,
+            )
+            if resolved_foreground_separation
+            else None
+        )
 
-    foreground_threshold = projection.foreground_threshold
-    if foreground_side == "high":
-        foreground_mask = first_component[:, 0] > foreground_threshold
+    if resolved_foreground_separation:
+        assert first_component is not None
+        if projection.foreground_side == "high":
+            foreground_mask = (
+                first_component[:, 0] > projection.foreground_threshold
+            )
+        else:
+            foreground_mask = (
+                first_component[:, 0] < projection.foreground_threshold
+            )
     else:
-        foreground_mask = first_component[:, 0] < foreground_threshold
+        foreground_mask = torch.ones(
+            batch_size * patch_count,
+            dtype=torch.bool,
+        )
 
     rgb_patches = torch.zeros(
         (batch_size * patch_count, 3),
@@ -198,7 +228,11 @@ def project_patch_embeddings(
     )
     projected_mask = (
         torch.ones_like(foreground_mask)
-        if interpolation == "bilinear_mask" or is_anyup_interpolation(interpolation)
+        if (
+            not resolved_foreground_separation
+            or interpolation == "bilinear_mask"
+            or is_anyup_interpolation(interpolation)
+        )
         else foreground_mask
     )
     projected_embeddings = flattened[projected_mask]
@@ -220,6 +254,7 @@ def project_patch_embeddings(
             patch_grid,
             image_size,
             projection,
+            resolved_foreground_separation,
             interpolation,
             guidance_image,
             anyup_query_chunk_size,
@@ -294,12 +329,13 @@ def _render_anyup_pca_images(
     patch_grid: tuple[int, int],
     image_size: tuple[int, int],
     projection: PatchPCAProjection,
+    foreground_separation: bool,
     interpolation: Interpolation,
     guidance_image: Any,
     anyup_query_chunk_size: int | None,
 ) -> tuple[tuple[Image.Image, ...], Any]:
     batch_size, _patch_count, feature_count = embeddings.shape
-    dense_mask = interpolation in {"anyup", "anyup_soft"}
+    dense_mask = foreground_separation and interpolation in {"anyup", "anyup_soft"}
     soft_attention = interpolation in {"anyup_soft", "anyup_soft_mask"}
     feature_map = embeddings.reshape(
         batch_size,
@@ -369,7 +405,12 @@ def _render_anyup_pca_images(
             )[:, 0]
     rendered = rendered.reshape(batch_size, *image_size, 3).permute(0, 3, 1, 2)
 
-    if dense_mask:
+    if not foreground_separation:
+        upsampled_mask = torch.ones(
+            (batch_size, 1, *image_size),
+            dtype=rendered.dtype,
+        )
+    elif dense_mask:
         if projection.foreground_side == "high":
             dense_foreground = dense_first_component > projection.foreground_threshold
         else:
@@ -399,34 +440,46 @@ def _render_anyup_pca_images(
 def fit_patch_pca_projection_batches(
     batch_factory: Callable[[], Iterable[Any]],
     *,
+    foreground_separation: bool = True,
     foreground_threshold: ForegroundThreshold = 0.5,
     foreground_side: Literal["high", "low"] = "high",
     rgb_fit_scope: RGBFitScope = "foreground",
+    rgb_percentile_bounds: tuple[float, float] | None = None,
 ) -> PatchPCAProjection:
     """Fit one approximate PCA projection from all embedding batches."""
+    if not isinstance(foreground_separation, bool):
+        raise ValueError("foreground_separation must be a boolean.")
     _validate_foreground_threshold(foreground_threshold)
     if foreground_side not in {"high", "low"}:
         raise ValueError("foreground_side must be one of: high, low.")
     if rgb_fit_scope not in {"foreground", "all"}:
         raise ValueError("rgb_fit_scope must be one of: foreground, all.")
+    _validate_percentile_bounds(rgb_percentile_bounds)
 
-    foreground_components = _fit_batched_components(batch_factory, components=1)
-    foreground_minimum, foreground_maximum = _streaming_projected_bounds(
-        batch_factory,
-        foreground_components,
-    )
-    if foreground_threshold == "auto":
-        histogram = np.zeros(_OTSU_BINS, dtype=np.int64)
-        for embeddings in batch_factory():
-            flattened = _flatten_embedding_batch(embeddings)
-            normalized = _apply_projection(
-                flattened,
-                foreground_components,
-                foreground_minimum,
-                foreground_maximum,
-            )
-            histogram += _foreground_histogram(normalized[:, 0])
-        foreground_threshold = _otsu_threshold(histogram)
+    if foreground_separation:
+        foreground_components = _fit_batched_components(batch_factory, components=1)
+        foreground_minimum, foreground_maximum = _streaming_projected_bounds(
+            batch_factory,
+            foreground_components,
+        )
+        if foreground_threshold == "auto":
+            histogram = np.zeros(_OTSU_BINS, dtype=np.int64)
+            for embeddings in batch_factory():
+                flattened = _flatten_embedding_batch(embeddings)
+                normalized = _apply_projection(
+                    flattened,
+                    foreground_components,
+                    foreground_minimum,
+                    foreground_maximum,
+                )
+                histogram += _foreground_histogram(normalized[:, 0])
+            foreground_threshold = _otsu_threshold(histogram)
+    else:
+        feature_count = _batch_feature_count(batch_factory)
+        foreground_components = torch.zeros((feature_count, 1), dtype=torch.float32)
+        foreground_minimum = torch.zeros(1, dtype=torch.float32)
+        foreground_maximum = torch.zeros(1, dtype=torch.float32)
+        foreground_threshold = 0.5
 
     def foreground_batches() -> Iterable[Any]:
         for embeddings in batch_factory():
@@ -444,7 +497,12 @@ def fit_patch_pca_projection_batches(
             if mask.any():
                 yield flattened[mask]
 
-    rgb_batches = batch_factory if rgb_fit_scope == "all" else foreground_batches
+    resolved_rgb_fit_scope: RGBFitScope = (
+        "all" if not foreground_separation else rgb_fit_scope
+    )
+    rgb_batches = (
+        batch_factory if resolved_rgb_fit_scope == "all" else foreground_batches
+    )
     rgb_components = _fit_batched_components(
         rgb_batches,
         components=3,
@@ -457,11 +515,19 @@ def fit_patch_pca_projection_batches(
             (0, 3 - rgb_components.shape[1]),
         )
     if rgb_components.numel():
-        rgb_minimum, rgb_maximum = _streaming_projected_bounds(
-            rgb_batches,
-            rgb_components,
-            allow_empty=True,
-        )
+        if rgb_percentile_bounds is None:
+            rgb_minimum, rgb_maximum = _streaming_projected_bounds(
+                rgb_batches,
+                rgb_components,
+                allow_empty=True,
+            )
+        else:
+            rgb_minimum, rgb_maximum = _projected_percentile_bounds(
+                rgb_batches,
+                rgb_components,
+                rgb_percentile_bounds,
+                allow_empty=True,
+            )
     else:
         rgb_minimum = torch.zeros(3)
         rgb_maximum = torch.zeros(3)
@@ -475,7 +541,8 @@ def fit_patch_pca_projection_batches(
         rgb_maximum=rgb_maximum,
         foreground_threshold=foreground_threshold,
         foreground_side=foreground_side,
-        rgb_fit_scope=rgb_fit_scope,
+        rgb_fit_scope=resolved_rgb_fit_scope,
+        foreground_separation=foreground_separation,
     )
 
 
@@ -497,12 +564,31 @@ def save_patch_pca_projection(
             foreground_threshold=projection.foreground_threshold,
             foreground_side=projection.foreground_side,
             rgb_fit_scope=projection.rgb_fit_scope,
+            foreground_separation=projection.foreground_separation,
         )
     return output
 
 
 def load_patch_pca_projection(path: str | Path) -> PatchPCAProjection:
     with np.load(Path(path), allow_pickle=False) as values:
+        required = {
+            "foreground_components",
+            "foreground_minimum",
+            "foreground_maximum",
+            "rgb_components",
+            "rgb_minimum",
+            "rgb_maximum",
+            "foreground_threshold",
+            "foreground_side",
+            "rgb_fit_scope",
+            "foreground_separation",
+        }
+        missing = sorted(required - set(values.files))
+        if missing:
+            raise ValueError(
+                "PCA projection is missing required value(s): "
+                f"{', '.join(missing)}."
+            )
         return PatchPCAProjection(
             foreground_components=torch.from_numpy(values["foreground_components"]),
             foreground_minimum=torch.from_numpy(values["foreground_minimum"]),
@@ -512,11 +598,8 @@ def load_patch_pca_projection(path: str | Path) -> PatchPCAProjection:
             rgb_maximum=torch.from_numpy(values["rgb_maximum"]),
             foreground_threshold=float(values["foreground_threshold"]),
             foreground_side=str(values["foreground_side"]),
-            rgb_fit_scope=(
-                str(values["rgb_fit_scope"])
-                if "rgb_fit_scope" in values
-                else "foreground"
-            ),
+            rgb_fit_scope=str(values["rgb_fit_scope"]),
+            foreground_separation=bool(values["foreground_separation"]),
         )
 
 
@@ -568,27 +651,41 @@ def _patch_tokens_from_features(features: Any, patch_count: int) -> Any:
 
 def _fit_projection(
     values: Any,
+    foreground_separation: bool,
     foreground_threshold: ForegroundThreshold,
     foreground_side: Literal["high", "low"],
     rgb_fit_scope: RGBFitScope,
 ) -> tuple[PatchPCAProjection, Any]:
-    first_projected, first_components = _fit_pca_projection(values, components=1)
-    first_minimum, first_maximum = _value_bounds(first_projected)
-    normalized_first = _normalize_with_bounds(
-        first_projected,
-        first_minimum,
-        first_maximum,
-    )
-    if foreground_threshold == "auto":
-        foreground_threshold = _otsu_threshold(
-            _foreground_histogram(normalized_first[:, 0])
+    if foreground_separation:
+        first_projected, first_components = _fit_pca_projection(values, components=1)
+        first_minimum, first_maximum = _value_bounds(first_projected)
+        normalized_first = _normalize_with_bounds(
+            first_projected,
+            first_minimum,
+            first_maximum,
         )
-    if foreground_side == "high":
-        foreground_mask = normalized_first[:, 0] > foreground_threshold
+        if foreground_threshold == "auto":
+            foreground_threshold = _otsu_threshold(
+                _foreground_histogram(normalized_first[:, 0])
+            )
+        if foreground_side == "high":
+            foreground_mask = normalized_first[:, 0] > foreground_threshold
+        else:
+            foreground_mask = normalized_first[:, 0] < foreground_threshold
     else:
-        foreground_mask = normalized_first[:, 0] < foreground_threshold
+        first_components = values.new_zeros((values.shape[1], 1))
+        first_minimum = values.new_zeros(1)
+        first_maximum = values.new_zeros(1)
+        normalized_first = values.new_zeros((values.shape[0], 1))
+        foreground_mask = torch.ones(values.shape[0], dtype=torch.bool)
+        foreground_threshold = 0.5
 
-    rgb_values = values if rgb_fit_scope == "all" else values[foreground_mask]
+    resolved_rgb_fit_scope: RGBFitScope = (
+        "all" if not foreground_separation else rgb_fit_scope
+    )
+    rgb_values = (
+        values if resolved_rgb_fit_scope == "all" else values[foreground_mask]
+    )
     if rgb_values.numel():
         rgb_projected, rgb_components = _fit_pca_projection(rgb_values, components=3)
         rgb_minimum, rgb_maximum = _value_bounds(rgb_projected)
@@ -612,7 +709,8 @@ def _fit_projection(
         rgb_maximum=rgb_maximum,
         foreground_threshold=foreground_threshold,
         foreground_side=foreground_side,
-        rgb_fit_scope=rgb_fit_scope,
+        rgb_fit_scope=resolved_rgb_fit_scope,
+        foreground_separation=foreground_separation,
     )
     return projection, normalized_first
 
@@ -727,6 +825,46 @@ def _streaming_projected_bounds(
     return minimum, maximum
 
 
+def _projected_percentile_bounds(
+    batch_factory: Callable[[], Iterable[Any]],
+    components: Any,
+    percentiles: tuple[float, float],
+    *,
+    allow_empty: bool = False,
+) -> tuple[Any, Any]:
+    projected_batches = []
+    for batch in batch_factory():
+        projected = _flatten_embedding_batch(batch) @ components
+        if len(projected):
+            projected_batches.append(projected)
+    if not projected_batches:
+        if allow_empty:
+            zeros = torch.zeros(int(components.shape[1]), dtype=torch.float32)
+            return zeros, zeros.clone()
+        raise ValueError("Cannot calculate PCA bounds from empty embedding batches.")
+    projected = torch.cat(projected_batches)
+    lower, upper = percentiles
+    return (
+        torch.quantile(projected, lower, dim=0),
+        torch.quantile(projected, upper, dim=0),
+    )
+
+
+def _batch_feature_count(batch_factory: Callable[[], Iterable[Any]]) -> int:
+    feature_count = None
+    found_values = False
+    for batch in batch_factory():
+        values = _flatten_embedding_batch(batch)
+        found_values = found_values or len(values) > 0
+        if feature_count is None:
+            feature_count = int(values.shape[1])
+        elif int(values.shape[1]) != feature_count:
+            raise ValueError("PCA embedding batches have inconsistent feature counts.")
+    if feature_count is None or not found_values:
+        raise ValueError("Cannot fit PCA from empty embedding batches.")
+    return feature_count
+
+
 def _flatten_embedding_batch(values: Any) -> Any:
     tensor = torch.as_tensor(values).detach().float().cpu()
     if tensor.ndim == 3:
@@ -734,6 +872,23 @@ def _flatten_embedding_batch(values: Any) -> Any:
     if tensor.ndim == 2:
         return tensor
     raise ValueError("PCA embedding batches must have two or three dimensions.")
+
+
+def _validate_percentile_bounds(value: tuple[float, float] | None) -> None:
+    if value is None:
+        return
+    if (
+        not isinstance(value, tuple)
+        or len(value) != 2
+        or any(
+            isinstance(item, bool) or not isinstance(item, int | float)
+            for item in value
+        )
+        or not 0 <= value[0] < value[1] <= 1
+    ):
+        raise ValueError(
+            "rgb_percentile_bounds must contain two increasing values between 0 and 1."
+        )
 
 
 def _minmax_normalize(values: Any) -> Any:

@@ -1,80 +1,27 @@
 input:
-  files: []
   folders:
     - examples
-  patterns:
-    - '*.jpg'
-    - '*.jpeg'
-    - '*.png'
-    - '*.webp'
-  recursive: false
-  limit: null
 
 model:
   architecture: vit
   backend: timm
   name: vit_small_patch8_224.dino
-  pretrained: true
-  options: {}
 
 preprocessing:
   image_size: 224
-  resize: stretch
-  crop: none
-  pad: none
   interpolation: bilinear
-  normalize: true
-  mean: null
-  std: null
 
 analysis:
   method: attention
-  layers:
-    - 2
-    - 5
-    - 8
-    - 11
-  heads: null
-  head_fusion: mean
-
-runtime:
-  batch_size: 1
-  device: auto
-  workers: 0
-  precision: float32
-  seed: null
+  layers: [2, 5, 8, 11]
 
 visualization:
-  tile_size: null
-  columns: null
-  items_per_grid: null
-  spacing: null
-  padding: null
-  labels: null
-  background: null
-  dpi: null
   output_size: match
-  interpolation: anyup_soft_mask
-  anyup_query_chunk_size: 4096
+  interpolation: bilinear_mask
   overlay_alpha: 1.0
-  overlay_alpha_curve:
-    steepness: 15
-    midpoint: 0.25
-  cmap: viridis
-  cmap_black:
-    threshold: 20
-    blend_width: 35
-    transparent: true
-  grid_format: png
-  normalization: per_map
-  normalization_range: null
+  overlay_alpha_curve: {steepness: 15, midpoint: 0.25}
+  cmap_black: {threshold: 20, blend_width: 35, transparent: true}
 
 output:
   directory: outputs/image/dino_vits8_attention
-  heatmaps: true
-  overlays: true
-  grids: true
-  raw_arrays: false
-  image_format: png
-  raw_format: npy
   overwrite: replace

@@ -70,10 +70,12 @@ resolved configuration, model identity, versions, inputs, and generated files.
 
 ## Configure a workflow
 
-Copy an example from `configs/` and edit it for your run. Every setting must
-appear in the YAML, including settings set to `null`. For patch PCA, put only
-the images that should share one fit in a configuration file. Images needing
-different thresholds or `foreground_side` values need separate configurations.
+Copy an example from `configs/` and edit it for your run. Settings with parser
+defaults may be omitted; settings that do not apply to the selected workflow
+are rejected. For image patch PCA, put only the images that should share one
+fit in a configuration file. Images needing different thresholds or
+`foreground_side` values need separate configurations. Video PCA is always
+full-frame and does not use foreground settings.
 
 Validate or inspect the resolved configuration before loading a model:
 

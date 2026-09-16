@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from math import ceil, sqrt
 from pathlib import Path
 from typing import Any
 
@@ -521,4 +522,4 @@ def _grid_columns(item_count: int, columns: int | None) -> int:
             raise ValueError("columns must be positive.")
         return min(columns, item_count)
 
-    return min(item_count, 3)
+    return ceil(sqrt(item_count))

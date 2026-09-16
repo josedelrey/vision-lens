@@ -37,7 +37,7 @@ TOP_LEVEL_KEYS = {
     "video",
 }
 SECTION_KEYS = {
-    "input": {"paths", "files", "folders", "patterns", "recursive", "limit"},
+    "input": {"files", "folders", "patterns", "recursive", "limit"},
     "model": {"architecture", "backend", "name", "pretrained", "options"},
     "preprocessing": {
         "image_size",
@@ -90,12 +90,33 @@ SECTION_KEYS = {
         "codec",
     },
 }
+VIDEO_OUTPUT_KEYS = SECTION_KEYS["output"] - {"grids", "image_format"}
+GRID_VISUALIZATION_KEYS = {
+    "tile_size",
+    "columns",
+    "items_per_grid",
+    "spacing",
+    "padding",
+    "labels",
+    "background",
+    "dpi",
+    "grid_format",
+}
+MAP_VISUALIZATION_KEYS = {
+    "overlay_alpha",
+    "overlay_alpha_curve",
+    "cmap",
+    "cmap_black",
+    "normalization",
+    "normalization_range",
+}
 ANALYSIS_KEYS = {
     "attention": {"method", "layers", "heads", "head_fusion"},
     "rollout": {"method", "layers", "heads", "head_fusion"},
     "gradcam": {"method", "target_layer", "target_class"},
     "patch_pca": {
         "method",
+        "foreground_separation",
         "foreground_threshold",
         "foreground_side",
         "rgb_fit_scope",
@@ -157,20 +178,6 @@ class OutputConfig:
 
 
 @dataclass(frozen=True)
-class AttentionConfig:
-    layers: AttentionLayers
-    heads: tuple[int, ...] | None = None
-    head_fusion: HeadFusion = "mean"
-
-
-@dataclass(frozen=True)
-class PatchPCAConfig:
-    foreground_threshold: float | Literal["auto"] = 0.5
-    foreground_side: Literal["high", "low"] = "high"
-    rgb_fit_scope: Literal["foreground", "all"] = "foreground"
-
-
-@dataclass(frozen=True)
 class AnalysisConfig:
     method: AnalysisMethod
     layers: AttentionLayers | None = None
@@ -178,6 +185,7 @@ class AnalysisConfig:
     head_fusion: HeadFusion | None = None
     target_layer: str | None = None
     target_class: int | None = None
+    foreground_separation: bool | None = None
     foreground_threshold: float | Literal["auto"] | None = None
     foreground_side: Literal["high", "low"] | None = None
     rgb_fit_scope: Literal["foreground", "all"] | None = None
@@ -288,36 +296,6 @@ class VisionLensConfig:
     def task(self) -> str:
         return METHOD_TASKS[self.analysis.method]
 
-    @property
-    def images(self) -> InputConfig:
-        """Compatibility alias for the pre-release Python API."""
-        return self.input
-
-    @property
-    def attention(self) -> AttentionConfig | None:
-        if self.analysis.method not in {"attention", "rollout"}:
-            return None
-        assert self.analysis.layers is not None
-        assert self.analysis.head_fusion is not None
-        return AttentionConfig(
-            layers=self.analysis.layers,
-            heads=self.analysis.heads,
-            head_fusion=self.analysis.head_fusion,
-        )
-
-    @property
-    def patch_pca(self) -> PatchPCAConfig | None:
-        if self.analysis.method != "patch_pca":
-            return None
-        assert self.analysis.foreground_threshold is not None
-        assert self.analysis.foreground_side is not None
-        assert self.analysis.rgb_fit_scope is not None
-        return PatchPCAConfig(
-            foreground_threshold=self.analysis.foreground_threshold,
-            foreground_side=self.analysis.foreground_side,
-            rgb_fit_scope=self.analysis.rgb_fit_scope,
-        )
-
 
 def load_config(
     path: str | Path,
@@ -326,13 +304,12 @@ def load_config(
 ) -> VisionLensConfig:
     config_path = Path(path).resolve()
     with config_path.open("r", encoding="utf-8") as file:
-        raw_config = yaml.safe_load(file) or {}
+        raw_config = yaml.safe_load(file)
 
-    if not isinstance(raw_config, dict):
+    if raw_config is None:
+        raw_config = {}
+    elif not isinstance(raw_config, dict):
         raise ValueError("Config file must contain a YAML mapping at the top level.")
-    _validate_keys(raw_config)
-    _require_complete_config(raw_config)
-
     return parse_config(
         raw_config,
         base_dir=_project_root(config_path.parent),
@@ -359,7 +336,14 @@ def parse_config(
     output_section = _section(resolved, "output")
     video_section = _section(resolved, "video")
     method = _analysis_method(analysis_section.get("method", "attention"))
-    _reject_unknown_keys("analysis", analysis_section, ANALYSIS_KEYS[method])
+    projection = analysis_section.get("projection", "fit")
+    analysis_keys = _analysis_keys(
+        method,
+        is_video="video" in resolved,
+        output_grids=output_section.get("grids", True),
+        projection=projection,
+    )
+    _reject_unknown_keys("analysis", analysis_section, analysis_keys)
 
     config = VisionLensConfig(
         input=_parse_input(input_section, base),
@@ -415,7 +399,12 @@ def parse_config(
                 positive=True,
             ),
         ),
-        analysis=_parse_analysis(analysis_section, method, base),
+        analysis=_parse_analysis(
+            analysis_section,
+            method,
+            base,
+            is_video="video" in resolved,
+        ),
         runtime=RuntimeConfig(
             device=_device(runtime_section.get("device", "auto")),
             batch_size=_positive_int(
@@ -522,7 +511,11 @@ def parse_config(
                 output_section.get("overlays", method != "patch_pca"),
                 "output.overlays",
             ),
-            grids=_bool(output_section.get("grids", True), "output.grids"),
+            grids=(
+                False
+                if "video" in resolved
+                else _bool(output_section.get("grids", True), "output.grids")
+            ),
             raw_arrays=_bool(
                 output_section.get("raw_arrays", False),
                 "output.raw_arrays",
@@ -570,15 +563,11 @@ def parse_config(
         ),
     )
     validate_config(config)
+    _validate_applicable_settings(resolved, config)
     return config
 
 
 def validate_config(config: VisionLensConfig) -> None:
-    missing_inputs = [path for path in config.input.paths if not path.is_file()]
-    if missing_inputs:
-        paths = ", ".join(str(path) for path in missing_inputs)
-        raise ValueError(f"Input file(s) do not exist: {paths}.")
-
     method = config.analysis.method
     if config.video is not None:
         if config.preprocessing.crop != "none" or config.preprocessing.pad != "none":
@@ -607,10 +596,16 @@ def validate_config(config: VisionLensConfig) -> None:
         )
 
     options = config.model.options or {}
-    if "img_size" in options:
+    reserved_options = (
+        {"img_size", "pretrained"}
+        if config.model.backend == "timm"
+        else {"weights"}
+    )
+    conflicts = sorted(reserved_options & options.keys())
+    if conflicts:
         raise ValueError(
-            "model.options.img_size is not allowed; use "
-            "preprocessing.image_size as the authoritative input size."
+            "model.options cannot override managed loader argument(s): "
+            f"{', '.join(conflicts)}."
         )
 
     fixed_size = KNOWN_FIXED_IMAGE_SIZES.get((config.model.backend, config.model.name))
@@ -673,6 +668,7 @@ def validate_config(config: VisionLensConfig) -> None:
             config.output.overlays,
             config.output.grids,
             config.output.raw_arrays,
+            config.analysis.save_projection is not None,
         )
     ):
         raise ValueError("At least one output type must be enabled.")
@@ -713,41 +709,44 @@ def config_to_dict(config: VisionLensConfig) -> dict[str, Any]:
         "pretrained": config.model.pretrained,
         "options": config.model.options,
     }
-    resolved["preprocessing"] = {
+    preprocessing = {
         "image_size": config.preprocessing.image_size,
-        "resize": config.preprocessing.resize,
-        "crop": config.preprocessing.crop,
-        "pad": config.preprocessing.pad,
         "interpolation": config.preprocessing.interpolation,
         "normalize": config.preprocessing.normalize,
-        "mean": None
-        if config.preprocessing.mean is None
-        else list(config.preprocessing.mean),
-        "std": None
-        if config.preprocessing.std is None
-        else list(config.preprocessing.std),
     }
-    resolved["analysis"] = _analysis_to_dict(config.analysis)
-    resolved["runtime"] = {
+    if config.video is None:
+        preprocessing.update(
+            {
+                "resize": config.preprocessing.resize,
+                "crop": config.preprocessing.crop,
+                "pad": config.preprocessing.pad,
+            }
+        )
+    if config.preprocessing.normalize:
+        preprocessing["mean"] = (
+            None
+            if config.preprocessing.mean is None
+            else list(config.preprocessing.mean)
+        )
+        preprocessing["std"] = (
+            None if config.preprocessing.std is None else list(config.preprocessing.std)
+        )
+    resolved["preprocessing"] = preprocessing
+    resolved["analysis"] = _analysis_to_dict(
+        config.analysis,
+        is_video=config.video is not None,
+        include_rollout_comparison=(config.video is None and config.output.grids),
+    )
+    runtime = {
         "batch_size": config.runtime.batch_size,
         "device": config.runtime.device,
-        "workers": config.runtime.workers,
         "precision": config.runtime.precision,
         "seed": config.runtime.seed,
     }
-    resolved["visualization"] = {
-        "tile_size": (
-            None
-            if config.visualization.tile_size is None
-            else list(config.visualization.tile_size)
-        ),
-        "columns": config.visualization.columns,
-        "items_per_grid": config.visualization.items_per_grid,
-        "spacing": config.visualization.spacing,
-        "padding": config.visualization.padding,
-        "labels": config.visualization.labels,
-        "background": config.visualization.background,
-        "dpi": config.visualization.dpi,
+    if config.video is None:
+        runtime["workers"] = config.runtime.workers
+    resolved["runtime"] = runtime
+    visualization = {
         "output_size": (
             list(config.visualization.output_size)
             if isinstance(config.visualization.output_size, tuple)
@@ -755,53 +754,103 @@ def config_to_dict(config: VisionLensConfig) -> dict[str, Any]:
         ),
         "interpolation": config.visualization.interpolation,
         "anyup_query_chunk_size": config.visualization.anyup_query_chunk_size,
-        "overlay_alpha": config.visualization.overlay_alpha,
-        "overlay_alpha_curve": (
-            None
-            if config.visualization.overlay_alpha_curve is None
-            else {
-                "steepness": config.visualization.overlay_alpha_curve.steepness,
-                "midpoint": config.visualization.overlay_alpha_curve.midpoint,
-            }
-        ),
-        "cmap": config.visualization.cmap,
-        "cmap_black": (
-            None
-            if config.visualization.cmap_black is None
-            else {
-                "threshold": config.visualization.cmap_black[0],
-                "blend_width": config.visualization.cmap_black[1],
-                "transparent": config.visualization.cmap_black[2],
-            }
-        ),
-        "grid_format": config.visualization.grid_format,
-        "normalization": config.visualization.normalization,
-        "normalization_range": (
-            None
-            if config.visualization.normalization_range is None
-            else list(config.visualization.normalization_range)
-        ),
     }
-    resolved["output"] = {
+    if config.analysis.method != "patch_pca":
+        visualization.update(
+            {
+                "normalization": config.visualization.normalization,
+                "normalization_range": (
+                    None
+                    if config.visualization.normalization_range is None
+                    else list(config.visualization.normalization_range)
+                ),
+            }
+        )
+        if config.output.heatmaps or config.output.overlays or config.output.grids:
+            visualization.update(
+                {
+                    "cmap": config.visualization.cmap,
+                    "cmap_black": (
+                        None
+                        if config.visualization.cmap_black is None
+                        else {
+                            "threshold": config.visualization.cmap_black[0],
+                            "blend_width": config.visualization.cmap_black[1],
+                            "transparent": config.visualization.cmap_black[2],
+                        }
+                    ),
+                }
+            )
+        if config.output.overlays or config.output.grids:
+            visualization.update(
+                {
+                    "overlay_alpha": config.visualization.overlay_alpha,
+                    "overlay_alpha_curve": (
+                        None
+                        if config.visualization.overlay_alpha_curve is None
+                        else {
+                            "steepness": (
+                                config.visualization.overlay_alpha_curve.steepness
+                            ),
+                            "midpoint": (
+                                config.visualization.overlay_alpha_curve.midpoint
+                            ),
+                        }
+                    ),
+                }
+            )
+    if config.video is None and config.output.grids:
+        visualization.update(
+            {
+                "tile_size": (
+                    None
+                    if config.visualization.tile_size is None
+                    else list(config.visualization.tile_size)
+                ),
+                "columns": config.visualization.columns,
+                "items_per_grid": config.visualization.items_per_grid,
+                "spacing": config.visualization.spacing,
+                "padding": config.visualization.padding,
+                "background": config.visualization.background,
+                "dpi": config.visualization.dpi,
+                "grid_format": config.visualization.grid_format,
+            }
+        )
+        if config.analysis.method != "patch_pca":
+            visualization["labels"] = config.visualization.labels
+    resolved["visualization"] = visualization
+    output = {
         "directory": str(config.output.directory),
         "heatmaps": config.output.heatmaps,
-        "overlays": config.output.overlays,
-        "grids": config.output.grids,
-        "raw_arrays": config.output.raw_arrays,
-        "image_format": config.output.image_format,
-        "raw_format": config.output.raw_format,
-        "overwrite": config.output.overwrite,
     }
+    if config.analysis.method != "patch_pca":
+        output["overlays"] = config.output.overlays
+    if config.video is None:
+        output["grids"] = config.output.grids
+    output["raw_arrays"] = config.output.raw_arrays
+    if config.video is None and (config.output.heatmaps or config.output.overlays):
+        output["image_format"] = config.output.image_format
+    if config.output.raw_arrays:
+        output["raw_format"] = config.output.raw_format
+    output["overwrite"] = config.output.overwrite
+    resolved["output"] = output
     if config.video is not None:
-        resolved["video"] = {
+        video = {
             "start_time": config.video.start_time,
             "end_time": config.video.end_time,
             "sampling_rate": config.video.sampling_rate,
             "frame_limit": config.video.frame_limit,
-            "pca_fit_frames": config.video.pca_fit_frames,
-            "temporal_smoothing": config.video.temporal_smoothing,
-            "codec": config.video.codec,
         }
+        if config.analysis.method != "patch_pca" or config.output.heatmaps:
+            video["temporal_smoothing"] = config.video.temporal_smoothing
+        if (
+            config.analysis.method == "patch_pca"
+            and config.analysis.projection == "fit"
+        ):
+            video["pca_fit_frames"] = config.video.pca_fit_frames
+        if config.output.heatmaps or config.output.overlays:
+            video["codec"] = config.video.codec
+        resolved["video"] = video
     return resolved
 
 
@@ -810,10 +859,7 @@ def resolved_config_yaml(config: VisionLensConfig) -> str:
 
 
 def _parse_input(section: dict[str, Any], base_dir: Path) -> InputConfig:
-    if "paths" in section and "files" in section:
-        raise ValueError("input.paths and input.files cannot both be set.")
-
-    raw_files = section.get("files", section.get("paths", []))
+    raw_files = section.get("files", [])
     raw_folders = section.get("folders", [])
     files = tuple(
         _resolve_path(path, base_dir) for path in _list(raw_files, "input.files")
@@ -869,6 +915,8 @@ def _parse_analysis(
     section: dict[str, Any],
     method: AnalysisMethod,
     base_dir: Path,
+    *,
+    is_video: bool = False,
 ) -> AnalysisConfig:
     if method in {"attention", "rollout"}:
         return AnalysisConfig(
@@ -894,54 +942,91 @@ def _parse_analysis(
                 "analysis.target_class",
             ),
         )
+    projection = _choice(
+        section.get("projection", "fit"),
+        "analysis.projection",
+        {"fit", "load"},
+    )
+    projection_path = _optional_path(
+        section.get("projection_path"),
+        base_dir,
+        "analysis.projection_path",
+    )
+    save_projection = _optional_path(
+        section.get("save_projection"),
+        base_dir,
+        "analysis.save_projection",
+    )
+    if projection == "load":
+        return AnalysisConfig(
+            method=method,
+            projection=projection,
+            projection_path=projection_path,
+        )
+    if is_video:
+        return AnalysisConfig(
+            method=method,
+            projection=projection,
+            save_projection=save_projection,
+        )
+    foreground_separation = _bool(
+        section.get("foreground_separation", True),
+        "analysis.foreground_separation",
+    )
+    foreground_threshold = _foreground_threshold(
+        section.get("foreground_threshold", 0.5),
+    )
+    foreground_side = _foreground_side(section.get("foreground_side", "high"))
+    rgb_fit_scope = _choice(
+        section.get("rgb_fit_scope", "foreground"),
+        "analysis.rgb_fit_scope",
+        {"foreground", "all"},
+    )
     return AnalysisConfig(
         method=method,
-        foreground_threshold=_foreground_threshold(
-            section.get("foreground_threshold", 0.5),
-        ),
-        foreground_side=_foreground_side(section.get("foreground_side", "high")),
-        rgb_fit_scope=_choice(
-            section.get("rgb_fit_scope", "foreground"),
-            "analysis.rgb_fit_scope",
-            {"foreground", "all"},
-        ),
-        projection=_choice(
-            section.get("projection", "fit"),
-            "analysis.projection",
-            {"fit", "load"},
-        ),
-        projection_path=_optional_path(
-            section.get("projection_path"),
-            base_dir,
-            "analysis.projection_path",
-        ),
-        save_projection=_optional_path(
-            section.get("save_projection"),
-            base_dir,
-            "analysis.save_projection",
-        ),
+        foreground_separation=foreground_separation,
+        foreground_threshold=foreground_threshold,
+        foreground_side=foreground_side,
+        rgb_fit_scope=rgb_fit_scope,
+        projection=projection,
+        projection_path=projection_path,
+        save_projection=save_projection,
     )
 
 
-def _analysis_to_dict(analysis: AnalysisConfig) -> dict[str, Any]:
+def _analysis_to_dict(
+    analysis: AnalysisConfig,
+    *,
+    is_video: bool = False,
+    include_rollout_comparison: bool = True,
+) -> dict[str, Any]:
     resolved: dict[str, Any] = {"method": analysis.method}
     if analysis.method in {"attention", "rollout"}:
         resolved["layers"] = (
             analysis.layers if analysis.layers == "all" else list(analysis.layers or ())
         )
-        resolved["heads"] = None if analysis.heads is None else list(analysis.heads)
-        resolved["head_fusion"] = analysis.head_fusion
+        if analysis.method == "attention" or include_rollout_comparison:
+            resolved["heads"] = (
+                None if analysis.heads is None else list(analysis.heads)
+            )
+            resolved["head_fusion"] = analysis.head_fusion
     elif analysis.method == "gradcam":
         resolved["target_layer"] = analysis.target_layer
         resolved["target_class"] = analysis.target_class
     else:
-        resolved["foreground_threshold"] = analysis.foreground_threshold
-        resolved["foreground_side"] = analysis.foreground_side
-        resolved["rgb_fit_scope"] = analysis.rgb_fit_scope
         resolved["projection"] = analysis.projection
-        resolved["projection_path"] = (
-            None if analysis.projection_path is None else str(analysis.projection_path)
-        )
+        if analysis.projection == "load":
+            resolved["projection_path"] = (
+                None
+                if analysis.projection_path is None
+                else str(analysis.projection_path)
+            )
+            return resolved
+        if not is_video:
+            resolved["foreground_separation"] = analysis.foreground_separation
+            resolved["foreground_threshold"] = analysis.foreground_threshold
+            resolved["foreground_side"] = analysis.foreground_side
+            resolved["rgb_fit_scope"] = analysis.rgb_fit_scope
         resolved["save_projection"] = (
             None if analysis.save_projection is None else str(analysis.save_projection)
         )
@@ -951,33 +1036,181 @@ def _analysis_to_dict(analysis: AnalysisConfig) -> dict[str, Any]:
 def _validate_keys(config: dict[str, Any]) -> None:
     _reject_unknown_keys("top level", config, TOP_LEVEL_KEYS)
     for section_name, allowed in SECTION_KEYS.items():
+        if section_name == "output" and "video" in config:
+            allowed = VIDEO_OUTPUT_KEYS
         _reject_unknown_keys(section_name, _section(config, section_name), allowed)
 
 
-def _require_complete_config(config: dict[str, Any]) -> None:
-    required_sections = TOP_LEVEL_KEYS - {"video"}
-    missing_sections = sorted(required_sections - config.keys())
-    if missing_sections:
-        raise ValueError(f"Missing config section(s): {', '.join(missing_sections)}.")
+def _analysis_keys(
+    method: AnalysisMethod,
+    *,
+    is_video: bool,
+    output_grids: Any,
+    projection: Any,
+) -> set[str]:
+    if method == "rollout":
+        keys = {"method", "layers"}
+        if not is_video and output_grids is not False:
+            keys.update({"heads", "head_fusion"})
+        return keys
+    if method != "patch_pca":
+        return ANALYSIS_KEYS[method]
+    if projection == "load":
+        return {"method", "projection", "projection_path"}
+    if projection != "fit":
+        return ANALYSIS_KEYS[method]
+    keys = {"method", "projection", "save_projection"}
+    if not is_video:
+        keys.update(
+            {
+                "foreground_separation",
+                "foreground_threshold",
+                "foreground_side",
+                "rgb_fit_scope",
+            }
+        )
+    return keys
 
-    sections = required_sections | ({"video"} if "video" in config else set())
-    for section_name in sorted(sections):
-        section = _section(config, section_name)
-        if section_name == "analysis":
-            method = _analysis_method(section.get("method"))
-            required_keys = ANALYSIS_KEYS[method]
-        elif section_name == "input":
-            required_keys = SECTION_KEYS[section_name] - {"paths"}
-            if "paths" in section and "files" not in section:
-                required_keys = required_keys - {"files"} | {"paths"}
-        else:
-            required_keys = SECTION_KEYS[section_name]
-        missing = sorted(required_keys - section.keys())
-        if missing:
-            raise ValueError(
-                f"Missing setting(s) in {section_name}: {', '.join(missing)}. "
-                "Specify every setting explicitly in the YAML file."
+
+def _validate_applicable_settings(
+    raw_config: dict[str, Any],
+    config: VisionLensConfig,
+) -> None:
+    preprocessing = _section(raw_config, "preprocessing")
+    runtime = _section(raw_config, "runtime")
+    visualization = _section(raw_config, "visualization")
+    output = _section(raw_config, "output")
+    video = _section(raw_config, "video")
+    method = config.analysis.method
+
+    if config.video is not None:
+        _reject_present_keys(
+            "preprocessing",
+            preprocessing,
+            {"resize", "crop", "pad"},
+            "video preprocessing determines its aspect-ratio resize automatically",
+        )
+        _reject_present_keys(
+            "runtime",
+            runtime,
+            {"workers"},
+            "video frames are decoded sequentially",
+        )
+        _reject_present_keys(
+            "visualization",
+            visualization,
+            GRID_VISUALIZATION_KEYS,
+            "video workflows do not export grids",
+        )
+        if method != "patch_pca" or config.analysis.projection != "fit":
+            _reject_present_keys(
+                "video",
+                video,
+                {"pca_fit_frames"},
+                "video.pca_fit_frames only applies when fitting patch PCA",
             )
+        if not (config.output.heatmaps or config.output.overlays):
+            _reject_present_keys(
+                "video",
+                video,
+                {"codec"},
+                "video.codec only applies to rendered video outputs",
+            )
+    elif not config.output.grids:
+        _reject_present_keys(
+            "visualization",
+            visualization,
+            GRID_VISUALIZATION_KEYS,
+            "grid visualization settings require output.grids=true",
+        )
+
+    if not config.preprocessing.normalize:
+        _reject_present_keys(
+            "preprocessing",
+            preprocessing,
+            {"mean", "std"},
+            "mean and std require preprocessing.normalize=true",
+        )
+
+    if method == "patch_pca":
+        _reject_present_keys(
+            "output",
+            output,
+            {"overlays"},
+            "patch PCA does not produce overlays",
+        )
+        _reject_present_keys(
+            "visualization",
+            visualization,
+            MAP_VISUALIZATION_KEYS,
+            "map styling and normalization do not apply to patch PCA",
+        )
+        _reject_present_keys(
+            "visualization",
+            visualization,
+            {"labels"},
+            "patch PCA comparison grids never include text labels",
+        )
+    else:
+        if not (
+            config.output.heatmaps
+            or config.output.overlays
+            or config.output.grids
+        ):
+            _reject_present_keys(
+                "visualization",
+                visualization,
+                {"cmap", "cmap_black"},
+                "colormap settings require rendered map output",
+            )
+        if not (config.output.overlays or config.output.grids):
+            _reject_present_keys(
+                "visualization",
+                visualization,
+                {"overlay_alpha", "overlay_alpha_curve"},
+                "overlay styling requires overlay or grid output",
+            )
+
+    if (
+        config.video is not None
+        and method == "patch_pca"
+        and not config.output.heatmaps
+    ):
+        _reject_present_keys(
+            "video",
+            video,
+            {"temporal_smoothing"},
+            "video.temporal_smoothing requires rendered patch PCA output",
+        )
+
+    if not config.output.raw_arrays:
+        _reject_present_keys(
+            "output",
+            output,
+            {"raw_format"},
+            "output.raw_format requires output.raw_arrays=true",
+        )
+    if config.video is None and not (
+        config.output.heatmaps or config.output.overlays
+    ):
+        _reject_present_keys(
+            "output",
+            output,
+            {"image_format"},
+            "output.image_format requires standalone image output",
+        )
+
+
+def _reject_present_keys(
+    section_name: str,
+    section: dict[str, Any],
+    keys: set[str],
+    reason: str,
+) -> None:
+    present = sorted(keys & section.keys())
+    if present:
+        qualified = ", ".join(f"{section_name}.{key}" for key in present)
+        raise ValueError(f"Setting(s) {qualified} are not applicable: {reason}.")
 
 
 def _reject_unknown_keys(
@@ -1056,13 +1289,6 @@ def _required_str(section: dict[str, Any], key: str, section_name: str) -> str:
     value = section.get(key)
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{section_name}.{key} must be a non-empty string.")
-    return value
-
-
-def _required_list(section: dict[str, Any], key: str, section_name: str) -> list[Any]:
-    value = section.get(key)
-    if not isinstance(value, list) or not value:
-        raise ValueError(f"{section_name}.{key} must be a non-empty list.")
     return value
 
 
@@ -1200,6 +1426,8 @@ def _optional_triplet(
         if isinstance(item, bool) or not isinstance(item, int | float):
             raise ValueError(f"{field_name} must contain only numbers.")
         number = float(item)
+        if not isfinite(number):
+            raise ValueError(f"{field_name} values must be finite.")
         if positive and number <= 0:
             raise ValueError(f"{field_name} values must be greater than zero.")
         parsed.append(number)
@@ -1244,6 +1472,8 @@ def _optional_range(value: Any, field_name: str) -> tuple[float, float] | None:
     ):
         raise ValueError(f"{field_name} must contain only numbers.")
     minimum, maximum = float(value[0]), float(value[1])
+    if not isfinite(minimum) or not isfinite(maximum):
+        raise ValueError(f"{field_name} values must be finite.")
     if maximum <= minimum:
         raise ValueError(f"{field_name} maximum must be greater than its minimum.")
     return (minimum, maximum)
@@ -1355,9 +1585,12 @@ def _cmap_black(value: Any) -> tuple[int, int, bool] | None:
 
 
 def _non_negative_number(value: Any, field_name: str) -> float:
-    if isinstance(value, bool) or not isinstance(value, int | float) or value < 0:
-        raise ValueError(f"{field_name} must be a non-negative number.")
-    return float(value)
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise ValueError(f"{field_name} must be a finite non-negative number.")
+    number = float(value)
+    if not isfinite(number) or number < 0:
+        raise ValueError(f"{field_name} must be a finite non-negative number.")
+    return number
 
 
 def _optional_non_negative_number(value: Any, field_name: str) -> float | None:
@@ -1367,9 +1600,12 @@ def _optional_non_negative_number(value: Any, field_name: str) -> float | None:
 
 
 def _positive_number(value: Any, field_name: str) -> float:
-    if isinstance(value, bool) or not isinstance(value, int | float) or value <= 0:
-        raise ValueError(f"{field_name} must be a positive number.")
-    return float(value)
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise ValueError(f"{field_name} must be a finite positive number.")
+    number = float(value)
+    if not isfinite(number) or number <= 0:
+        raise ValueError(f"{field_name} must be a finite positive number.")
+    return number
 
 
 def _video_sampling_rate(value: Any) -> float | Literal["auto"]:

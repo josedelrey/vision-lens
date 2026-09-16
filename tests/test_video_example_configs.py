@@ -35,18 +35,20 @@ def test_video_example_config_uses_expected_video_mode(tmp_path, config_name, me
     assert config.analysis.method == method
     assert config.video is not None
     assert config.video.sampling_rate == "auto"
-    assert config.runtime.batch_size == 1
+    assert config.runtime.batch_size == 8
     assert config.output.directory == output
     assert config.visualization.output_size == "match"
-    assert config.visualization.interpolation == "anyup_soft_mask"
-    assert config.visualization.anyup_query_chunk_size == 4096
-    assert config.output.grids
+    assert config.visualization.interpolation == "bilinear_mask"
+    assert config.visualization.anyup_query_chunk_size is None
+    assert config.output.grids is False
     if method == "patch_pca":
+        assert config.analysis.foreground_separation is None
+        assert config.analysis.rgb_fit_scope is None
         assert config.output.heatmaps
         assert not config.output.overlays
         assert config.video.pca_fit_frames == 32
     else:
-        assert not config.output.heatmaps
+        assert config.output.heatmaps
         assert config.output.overlays
 
 
@@ -69,5 +71,7 @@ def test_image_example_config_selects_every_example_image(config_name):
     )
     assert config.input.paths == expected
     assert config.visualization.output_size == "match"
-    assert config.visualization.interpolation == "anyup_soft_mask"
-    assert config.visualization.anyup_query_chunk_size == 4096
+    assert config.visualization.interpolation == "bilinear_mask"
+    assert config.visualization.anyup_query_chunk_size is None
+    if config_name == "patch_pca.dinov2.yaml":
+        assert config.analysis.foreground_separation is True
