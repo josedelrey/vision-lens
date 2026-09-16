@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable
 from functools import cache
 from typing import Any, Literal
@@ -183,13 +184,14 @@ def upsample_values_streaming(
     q_chunk_size: int,
     attention_mode: Literal["hard", "soft"] = "hard",
 ) -> Any:
-    """Run AnyUp in row chunks and aggregate a compact value tensor.
+    """Run AnyUp in sparse 2D tiles and aggregate a compact value tensor.
 
     ``features`` still determines AnyUp's keys. ``values`` may use fewer channels
     when a linear projection can be applied before attention. Query features and
-    locality masks are generated per chunk, and completed chunks are transferred
-    to the value tensor's original device immediately. ``attention_mode="soft"``
-    replaces AnyUp's hard spatial cutoff with a cosine-tapered local bias.
+    locality masks are generated per tile, and only keys within each tile's local
+    neighborhood participate in attention. Completed tiles are transferred to the
+    value tensor's original device immediately. ``attention_mode="soft"`` replaces
+    AnyUp's hard spatial cutoff with a cosine-tapered local bias.
     """
     image_tensor = torch.as_tensor(image)
     feature_tensor = torch.as_tensor(features)
@@ -310,22 +312,23 @@ def _stream_anyup_values(
         feature_height * feature_width,
         keys.shape[1],
     )
-    normalized_keys = cross_attention.norm_k(key_sequence)
-    value_sequence = values.permute(0, 2, 3, 1).reshape(
-        values.shape[0],
-        feature_height * feature_width,
-        values.shape[1],
+    normalized_key_grid = cross_attention.norm_k(key_sequence).reshape(
+        keys.shape[0],
+        feature_height,
+        feature_width,
+        keys.shape[1],
     )
+    value_grid = values.permute(0, 2, 3, 1)
 
     output_height, output_width = output_size
-    rows_per_chunk = max(1, q_chunk_size // output_width)
+    tile_height, tile_width = _query_tile_size(output_size, q_chunk_size)
     upsampled = torch.empty(
         (values.shape[0], values.shape[1], output_height, output_width),
         device=output_device,
         dtype=output_dtype,
     )
-    for row_start in range(0, output_height, rows_per_chunk):
-        row_end = min(row_start + rows_per_chunk, output_height)
+    for row_start in range(0, output_height, tile_height):
+        row_end = min(row_start + tile_height, output_height)
         halo_start = max(0, row_start - 1)
         halo_end = min(output_height, row_end + 1)
         pooled_queries = _adaptive_pool_rows(
@@ -342,46 +345,77 @@ def _stream_anyup_values(
             chunk_offset : chunk_offset + row_end - row_start,
             :,
         ]
-        query_sequence = convolved_queries.permute(0, 2, 3, 1).reshape(
-            convolved_queries.shape[0],
-            (row_end - row_start) * output_width,
-            convolved_queries.shape[1],
-        )
-        normalized_queries = cross_attention.norm_q(query_sequence)
-        mask_arguments = (
-            output_size,
-            (feature_height, feature_width),
-            row_start,
-            row_end,
-            float(decoder.window_ratio),
-        )
-        if attention_mode == "soft":
-            attention_mask = _soft_attention_bias_rows(
-                *mask_arguments,
-                device=normalized_queries.device,
-                dtype=normalized_queries.dtype,
+        for column_start in range(0, output_width, tile_width):
+            column_end = min(column_start + tile_width, output_width)
+            query_tile = convolved_queries[:, :, :, column_start:column_end]
+            query_sequence = query_tile.permute(0, 2, 3, 1).reshape(
+                query_tile.shape[0],
+                (row_end - row_start) * (column_end - column_start),
+                query_tile.shape[1],
             )
-        else:
-            attention_mask = _attention_mask_rows(
-                *mask_arguments,
-                device=normalized_queries.device,
+            normalized_queries = cross_attention.norm_q(query_sequence)
+            key_bounds = _local_key_bounds(
+                output_size,
+                (feature_height, feature_width),
+                row_start,
+                row_end,
+                column_start,
+                column_end,
+                float(decoder.window_ratio),
             )
-        output = _attention_weighted_values(
-            cross_attention,
-            normalized_queries,
-            normalized_keys,
-            value_sequence,
-            attention_mask,
-        )
-        output = output.reshape(
-            output.shape[0],
-            row_end - row_start,
-            output_width,
-            output.shape[-1],
-        ).permute(0, 3, 1, 2)
-        upsampled[:, :, row_start:row_end, :].copy_(
-            output.to(device=output_device, dtype=output_dtype)
-        )
+            key_row_start, key_row_end, key_column_start, key_column_end = key_bounds
+            local_keys = normalized_key_grid[
+                :,
+                key_row_start:key_row_end,
+                key_column_start:key_column_end,
+                :,
+            ].reshape(normalized_key_grid.shape[0], -1, normalized_key_grid.shape[-1])
+            local_values = value_grid[
+                :,
+                key_row_start:key_row_end,
+                key_column_start:key_column_end,
+                :,
+            ].reshape(value_grid.shape[0], -1, value_grid.shape[-1])
+            mask_arguments = (
+                output_size,
+                (feature_height, feature_width),
+                row_start,
+                row_end,
+                column_start,
+                column_end,
+                key_row_start,
+                key_row_end,
+                key_column_start,
+                key_column_end,
+                float(decoder.window_ratio),
+            )
+            if attention_mode == "soft":
+                attention_mask = _soft_attention_bias_tile(
+                    *mask_arguments,
+                    device=normalized_queries.device,
+                    dtype=normalized_queries.dtype,
+                )
+            else:
+                attention_mask = _attention_mask_tile(
+                    *mask_arguments,
+                    device=normalized_queries.device,
+                )
+            output = _attention_weighted_values(
+                cross_attention,
+                normalized_queries,
+                local_keys,
+                local_values,
+                attention_mask,
+            )
+            output = output.reshape(
+                output.shape[0],
+                row_end - row_start,
+                column_end - column_start,
+                output.shape[-1],
+            ).permute(0, 3, 1, 2)
+            upsampled[:, :, row_start:row_end, column_start:column_end].copy_(
+                output.to(device=output_device, dtype=output_dtype)
+            )
     return upsampled
 
 
@@ -512,6 +546,60 @@ def _adaptive_pool_rows(
     return torch.cat(rows, dim=2)
 
 
+def _query_tile_size(
+    output_size: tuple[int, int],
+    q_chunk_size: int,
+) -> tuple[int, int]:
+    """Choose compact 2D query tiles without exceeding the chunk budget."""
+    output_height, output_width = output_size
+    aspect_adjusted_height = math.sqrt(q_chunk_size * output_height / output_width)
+    tile_height = min(
+        output_height,
+        q_chunk_size,
+        max(1, int(aspect_adjusted_height)),
+    )
+    tile_width = min(output_width, max(1, q_chunk_size // tile_height))
+    return tile_height, tile_width
+
+
+def _local_key_bounds(
+    output_size: tuple[int, int],
+    feature_size: tuple[int, int],
+    row_start: int,
+    row_end: int,
+    column_start: int,
+    column_end: int,
+    window_ratio: float,
+) -> tuple[int, int, int, int]:
+    """Return a conservative key rectangle containing a query tile's support."""
+    output_height, output_width = output_size
+    feature_height, feature_width = feature_size
+    if window_ratio <= 0:
+        return 0, feature_height, 0, feature_width
+
+    first_row = (row_start + 0.5) / output_height
+    last_row = (row_end - 0.5) / output_height
+    first_column = (column_start + 0.5) / output_width
+    last_column = (column_end - 0.5) / output_width
+    key_row_start = max(
+        0,
+        math.floor((first_row - window_ratio) * feature_height) - 1,
+    )
+    key_row_end = min(
+        feature_height,
+        math.ceil((last_row + window_ratio) * feature_height) + 1,
+    )
+    key_column_start = max(
+        0,
+        math.floor((first_column - window_ratio) * feature_width) - 1,
+    )
+    key_column_end = min(
+        feature_width,
+        math.ceil((last_column + window_ratio) * feature_width) + 1,
+    )
+    return key_row_start, key_row_end, key_column_start, key_column_end
+
+
 def _attention_mask_rows(
     output_size: tuple[int, int],
     feature_size: tuple[int, int],
@@ -521,12 +609,43 @@ def _attention_mask_rows(
     *,
     device: Any,
 ) -> Any | None:
+    return _attention_mask_tile(
+        output_size,
+        feature_size,
+        row_start,
+        row_end,
+        0,
+        output_size[1],
+        0,
+        feature_size[0],
+        0,
+        feature_size[1],
+        window_ratio,
+        device=device,
+    )
+
+
+def _attention_mask_tile(
+    output_size: tuple[int, int],
+    feature_size: tuple[int, int],
+    row_start: int,
+    row_end: int,
+    column_start: int,
+    column_end: int,
+    key_row_start: int,
+    key_row_end: int,
+    key_column_start: int,
+    key_column_end: int,
+    window_ratio: float,
+    *,
+    device: Any,
+) -> Any | None:
     if window_ratio <= 0:
         return None
     output_height, output_width = output_size
     feature_height, feature_width = feature_size
     output_rows = torch.arange(row_start, row_end, device=device)
-    output_columns = torch.arange(output_width, device=device)
+    output_columns = torch.arange(column_start, column_end, device=device)
     row_positions = (output_rows.float() + 0.5) / output_height
     column_positions = (output_columns.float() + 0.5) / output_width
     row_positions, column_positions = torch.meshgrid(
@@ -544,14 +663,17 @@ def _attention_mask_rows(
     column_maximum = (
         (column_positions + window_ratio).clamp(0, 1) * feature_width
     ).ceil()
-    feature_rows = torch.arange(feature_height, device=device)
-    feature_columns = torch.arange(feature_width, device=device)
+    feature_rows = torch.arange(key_row_start, key_row_end, device=device)
+    feature_columns = torch.arange(key_column_start, key_column_end, device=device)
     row_allowed = (feature_rows >= row_minimum) & (feature_rows < row_maximum)
     column_allowed = (feature_columns >= column_minimum) & (
         feature_columns < column_maximum
     )
     allowed = row_allowed.unsqueeze(2) & column_allowed.unsqueeze(1)
-    return ~allowed.reshape(-1, feature_height * feature_width)
+    return ~allowed.reshape(
+        -1,
+        (key_row_end - key_row_start) * (key_column_end - key_column_start),
+    )
 
 
 def _soft_attention_bias_rows(
@@ -565,12 +687,51 @@ def _soft_attention_bias_rows(
     dtype: Any,
 ) -> Any | None:
     """Create a continuous local-attention bias for a range of output rows."""
+    return _soft_attention_bias_tile(
+        output_size,
+        feature_size,
+        row_start,
+        row_end,
+        0,
+        output_size[1],
+        0,
+        feature_size[0],
+        0,
+        feature_size[1],
+        window_ratio,
+        device=device,
+        dtype=dtype,
+    )
+
+
+def _soft_attention_bias_tile(
+    output_size: tuple[int, int],
+    feature_size: tuple[int, int],
+    row_start: int,
+    row_end: int,
+    column_start: int,
+    column_end: int,
+    key_row_start: int,
+    key_row_end: int,
+    key_column_start: int,
+    key_column_end: int,
+    window_ratio: float,
+    *,
+    device: Any,
+    dtype: Any,
+) -> Any | None:
+    """Create a continuous local-attention bias for one query/key tile pair."""
     if window_ratio <= 0:
         return None
     output_height, output_width = output_size
     feature_height, feature_width = feature_size
     output_rows = torch.arange(row_start, row_end, device=device, dtype=torch.float32)
-    output_columns = torch.arange(output_width, device=device, dtype=torch.float32)
+    output_columns = torch.arange(
+        column_start,
+        column_end,
+        device=device,
+        dtype=torch.float32,
+    )
     query_rows = (output_rows + 0.5) / output_height
     query_columns = (output_columns + 0.5) / output_width
     query_rows, query_columns = torch.meshgrid(
@@ -580,12 +741,12 @@ def _soft_attention_bias_rows(
     )
     query_rows = query_rows.reshape(-1, 1)
     query_columns = query_columns.reshape(-1, 1)
-    key_rows = (torch.arange(feature_height, device=device).float() + 0.5) / (
-        feature_height
-    )
-    key_columns = (torch.arange(feature_width, device=device).float() + 0.5) / (
-        feature_width
-    )
+    key_rows = (
+        torch.arange(key_row_start, key_row_end, device=device).float() + 0.5
+    ) / feature_height
+    key_columns = (
+        torch.arange(key_column_start, key_column_end, device=device).float() + 0.5
+    ) / feature_width
     row_weights = _cosine_window_weights(
         (query_rows - key_rows).abs(),
         window_ratio,
@@ -597,7 +758,10 @@ def _soft_attention_bias_rows(
         0.5 / feature_width,
     )
     weights = row_weights.unsqueeze(2) * column_weights.unsqueeze(1)
-    weights = weights.reshape(-1, feature_height * feature_width)
+    weights = weights.reshape(
+        -1,
+        (key_row_end - key_row_start) * (key_column_end - key_column_start),
+    )
     bias = torch.where(
         weights > 0,
         weights.log(),
