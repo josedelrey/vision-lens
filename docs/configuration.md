@@ -145,7 +145,6 @@ analysis:
   foreground_side: low
   rgb_fit_scope: foreground
   projection: fit
-  projection_path: null
   save_projection: null
 ```
 
@@ -174,8 +173,8 @@ media and raw-array output disabled.
 A loaded projection reuses its fitted foreground mode, rule, RGB fit scope, and
 color ranges, so new images remain in the same PCA color space. For images,
 `foreground_separation: false` skips the PC1 split, renders every patch, and
-forces the RGB fit scope to `all`; `foreground_threshold` and `foreground_side`
-then have no effect.
+uses the full patch set for the RGB fit. Omit `foreground_threshold`,
+`foreground_side`, and `rgb_fit_scope` in this mode because they are invalid.
 With `foreground_threshold: auto`, image PCA fits one threshold from the
 normalized first component and stores the resulting number in the projection.
 A flat component uses `0.5`. `foreground_side` remains explicit because
@@ -287,6 +286,9 @@ files are only produced when the number of comparison items exceeds
 
 `per_map` is the historical attention and Grad-CAM behavior. `shared` computes
 one range across the run. `fixed` clips to an explicit range.
+These normalization modes affect rendered heatmaps, overlays, and grids only.
+Raw arrays always contain the extracted, interpolated analysis values before
+visualization normalization.
 `nearest` preserves one constant-color block per attention, Grad-CAM activation,
 or PCA patch. `bilinear` smoothly interpolates all maps. For attention, rollout,
 and Grad-CAM, `bilinear_mask` is identical to `bilinear`. For image patch PCA
@@ -498,7 +500,8 @@ Print final values, expanded inputs, and absolute paths:
 uv run vision-lens resolve --config configs/vit_attention.yaml
 ```
 
-Override any leaf setting from the command line using YAML values:
+Override leaf values within the configuration's existing workflow mode using
+YAML values:
 
 ```bash
 uv run vision-lens run --config configs/gradcam.yaml \
@@ -508,3 +511,8 @@ uv run vision-lens run --config configs/gradcam.yaml \
   --set visualization.items_per_grid=2 \
   --set output.raw_arrays=true
 ```
+
+Conditional mode settings (`analysis.method`, patch-PCA `projection` and
+`foreground_separation`, and the presence of the `video` section) cannot be
+switched with `--set`. Use a separate configuration file so mode-specific keys
+remain explicit and auditable.

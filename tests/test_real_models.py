@@ -33,7 +33,7 @@ pytestmark = [
         ),
         (
             "vit_rollout.dinov2_reg4.yaml",
-            {"layers": [11], "heads": None, "head_fusion": "mean"},
+            {"layers": [11]},
             "_heatmap.png",
         ),
         (
@@ -48,7 +48,6 @@ pytestmark = [
                 "foreground_threshold": 0.5,
                 "foreground_side": "high",
                 "projection": "fit",
-                "projection_path": None,
                 "save_projection": None,
             },
             "_patch_pca.png",
@@ -61,6 +60,15 @@ def test_pretrained_model_pipeline_smoke(
     expected_suffix,
     tmp_path,
 ):
+    output_overrides = {
+        "directory": str(tmp_path / config_name),
+        "heatmaps": True,
+        "grids": False,
+        "raw_arrays": False,
+        "overwrite": "error",
+    }
+    if config_name != "patch_pca.dinov2.yaml":
+        output_overrides["overlays"] = False
     config = load_config(
         REPO_ROOT / "configs" / config_name,
         overrides={
@@ -68,14 +76,7 @@ def test_pretrained_model_pipeline_smoke(
             "preprocessing": {"image_size": 224},
             "analysis": analysis_overrides,
             "runtime": {"batch_size": 1, "device": "cpu"},
-            "output": {
-                "directory": str(tmp_path / config_name),
-                "heatmaps": True,
-                "overlays": False,
-                "grids": False,
-                "raw_arrays": False,
-                "overwrite": "error",
-            },
+            "output": output_overrides,
         },
     )
 

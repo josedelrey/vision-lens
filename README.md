@@ -85,7 +85,8 @@ uv run vision-lens resolve --config workflow.yaml
 uv run vision-lens run --config workflow.yaml
 ```
 
-CLI `--set` values override the complete YAML configuration. Relative
+CLI `--set` values override leaf settings within the configuration's existing
+workflow mode; conditional modes require a separate configuration. Relative
 paths in YAML files and CLI overrides are resolved from the project
 root (the nearest ancestor containing `pyproject.toml`), not the config file's
 directory. If no project root is found, they use the current working directory.
