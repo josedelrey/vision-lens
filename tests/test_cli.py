@@ -1,3 +1,4 @@
+import builtins
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -33,9 +34,11 @@ def test_cli_requires_a_config_file(capsys):
 
 
 def test_cli_hides_individual_output_paths_by_default(monkeypatch, capsys):
-    from vision_lens import cli
+    from vision_lens import pipeline
 
-    monkeypatch.setattr(cli, "run_pipeline_from_config", lambda _config: _result())
+    monkeypatch.setattr(
+        pipeline, "run_pipeline_from_config", lambda _config: _result()
+    )
 
     assert main(["--config", "configs/patch_pca.dinov2.yaml"]) == 0
 
@@ -45,14 +48,20 @@ def test_cli_hides_individual_output_paths_by_default(monkeypatch, capsys):
     ]
 
 
-def test_cli_validates_without_running_a_model(monkeypatch, capsys):
-    from vision_lens import cli
+def test_cli_validates_without_running_a_model(capsys):
+    assert main(["validate", "--config", "configs/patch_pca.dinov2.yaml"]) == 0
+    assert capsys.readouterr().out == "configuration is valid\n"
 
-    monkeypatch.setattr(
-        cli,
-        "run_pipeline_from_config",
-        lambda _config: pytest.fail("model pipeline should not run"),
-    )
+
+def test_cli_validation_does_not_import_pipeline_modules(monkeypatch, capsys):
+    original_import = builtins.__import__
+
+    def guarded_import(name, *args, **kwargs):
+        if name in {"vision_lens.pipeline", "vision_lens.video_pipeline"}:
+            pytest.fail(f"validation imported {name}")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", guarded_import)
 
     assert main(["validate", "--config", "configs/patch_pca.dinov2.yaml"]) == 0
     assert capsys.readouterr().out == "configuration is valid\n"

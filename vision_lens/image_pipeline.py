@@ -1,23 +1,17 @@
 from __future__ import annotations
 
-import random
 from collections.abc import Iterator
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import torch
 from PIL import Image
 
-from vision_lens.anyup import (
-    IMAGENET_MEAN,
-    IMAGENET_STD,
-    is_anyup_interpolation,
-    prepare_anyup_image,
-)
+from vision_lens.anyup import is_anyup_interpolation
 from vision_lens.attention import (
     AttentionExtractionResult,
     GradCamResult,
@@ -33,7 +27,10 @@ from vision_lens.config import (
     load_config,
 )
 from vision_lens.feature_pca import (
+    ForegroundThreshold,
+    PatchPCAProjection,
     PatchPCAResult,
+    RGBFitScope,
     extract_patch_embeddings,
     extract_patch_pca,
     fit_patch_pca_projection_batches,
@@ -53,6 +50,7 @@ from vision_lens.processing import (
     unique_input_labels,
 )
 from vision_lens.progress import status, track_image_batches, track_units
+from vision_lens.runtime import anyup_guidance, apply_seed
 from vision_lens.visualization import (
     make_image_comparison_grid,
     make_layer_comparison_grid,
@@ -294,16 +292,12 @@ def run_patch_pca_from_config(
         raise ValueError(f"Expected task='patch_pca', got {config.task!r}.")
     if config.model.architecture != "vit":
         raise ValueError("Patch PCA pipeline expects a ViT model config.")
-    if config.analysis.projection != "load" and any(
-        value is None
-        for value in (
-            config.analysis.foreground_separation,
-            config.analysis.foreground_threshold,
-            config.analysis.foreground_side,
-            config.analysis.rgb_fit_scope,
-        )
+    if (
+        config.analysis.projection != "load"
+        and config.analysis.foreground_separation is None
     ):
         raise ValueError("Image patch PCA requires foreground analysis settings.")
+    fit_settings = _pca_fit_settings(config)
 
     started_at = datetime.now(timezone.utc)
     check_manifest_overwrite(config)
@@ -313,10 +307,47 @@ def run_patch_pca_from_config(
         if config.analysis.projection == "load"
         else None
     )
-    _apply_seed(config.runtime.seed)
+    apply_seed(config.runtime.seed)
     loaded_model = _load_model_with_status(config)
     transform = build_batch_preprocessor(loaded_model, config.preprocessing)
     patch_grid = _patch_grid(loaded_model)
+    projection_only = (
+        config.analysis.projection == "fit"
+        and config.analysis.save_projection is not None
+        and not config.output.heatmaps
+        and not config.output.grids
+        and not config.output.raw_arrays
+    )
+    if projection_only:
+        projection = _fit_image_pca_projection(
+            config,
+            labels,
+            loaded_model,
+            transform,
+            patch_grid,
+            fit_settings,
+        )
+        assert config.analysis.save_projection is not None
+        projection_path = _write_projection(
+            projection,
+            config.analysis.save_projection,
+            config.output.overwrite,
+        )
+        output_paths = () if projection_path is None else (projection_path,)
+        write_run_manifest(
+            config,
+            loaded_model,
+            labels,
+            output_paths,
+            started_at=started_at,
+        )
+        return PatchPCAPipelineResult(
+            config=config,
+            loaded_model=loaded_model,
+            patch_pca=None,
+            output_paths=output_paths,
+            processed_inputs=len(config.input.paths),
+        )
     grid_collector = _PatchPCAGridCollector(
         total_items=len(config.input.paths),
         output_dir=config.output.directory,
@@ -340,7 +371,7 @@ def run_patch_pca_from_config(
                 loaded_model.metadata,
                 projection=projection,
                 interpolation=config.visualization.interpolation,
-                guidance_image=_anyup_guidance(config, loaded_model, batch.inputs),
+                guidance_image=anyup_guidance(config, loaded_model, batch.inputs),
                 output_size=_analysis_output_size(config, loaded_model),
                 anyup_query_chunk_size=(config.visualization.anyup_query_chunk_size),
             )
@@ -370,14 +401,12 @@ def run_patch_pca_from_config(
                 loaded_model.model,
                 batch.inputs,
                 loaded_model.metadata,
-                foreground_separation=(
-                    config.analysis.foreground_separation
-                ),
-                foreground_threshold=config.analysis.foreground_threshold,
-                foreground_side=config.analysis.foreground_side,
-                rgb_fit_scope=config.analysis.rgb_fit_scope,
+                foreground_separation=fit_settings[0],
+                foreground_threshold=fit_settings[1],
+                foreground_side=fit_settings[2],
+                rgb_fit_scope=fit_settings[3],
                 interpolation=config.visualization.interpolation,
-                guidance_image=_anyup_guidance(config, loaded_model, batch.inputs),
+                guidance_image=anyup_guidance(config, loaded_model, batch.inputs),
                 output_size=_analysis_output_size(config, loaded_model),
                 anyup_query_chunk_size=(config.visualization.anyup_query_chunk_size),
             )
@@ -425,7 +454,7 @@ def run_patch_pca_from_config(
                     Path(temporary_directory) / f"batch-{input_batch.index}.npy"
                 )
                 _save_array(embeddings, staged_path)
-                guidance = _anyup_guidance(config, loaded_model, batch.inputs)
+                guidance = anyup_guidance(config, loaded_model, batch.inputs)
                 guidance_path = None
                 if guidance is not None:
                     guidance_path = (
@@ -457,12 +486,10 @@ def run_patch_pca_from_config(
             status("Fitting PCA projection")
             projection = fit_patch_pca_projection_batches(
                 embedding_batches,
-                foreground_separation=(
-                    config.analysis.foreground_separation
-                ),
-                foreground_threshold=config.analysis.foreground_threshold,
-                foreground_side=config.analysis.foreground_side,
-                rgb_fit_scope=config.analysis.rgb_fit_scope,
+                foreground_separation=fit_settings[0],
+                foreground_threshold=fit_settings[1],
+                foreground_side=fit_settings[2],
+                rgb_fit_scope=fit_settings[3],
             )
             for (
                 _batch_index,
@@ -483,9 +510,7 @@ def run_patch_pca_from_config(
                     embeddings,
                     patch_grid=patch_grid,
                     image_size=_analysis_output_size(config, loaded_model),
-                    foreground_separation=(
-                        config.analysis.foreground_separation
-                    ),
+                    foreground_separation=fit_settings[0],
                     projection=projection,
                     interpolation=config.visualization.interpolation,
                     anyup_query_chunk_size=(
@@ -512,7 +537,10 @@ def run_patch_pca_from_config(
                     )
                 )
 
-    if config.output.grids and len(config.input.paths) > 1:
+    if config.output.grids and (
+        len(config.input.paths) > 1
+        or (not config.output.heatmaps and not config.output.raw_arrays)
+    ):
         output_paths.extend(grid_collector.finish())
     if config.analysis.save_projection is not None:
         assert projection is not None
@@ -566,11 +594,11 @@ def run_vit_rollout_comparison_from_config(
     started_at = datetime.now(timezone.utc)
     check_manifest_overwrite(config)
     labels = unique_input_labels(config.input.paths)
-    _apply_seed(config.runtime.seed)
+    apply_seed(config.runtime.seed)
     loaded_model = _load_model_with_status(config)
     transform = build_batch_preprocessor(loaded_model, config.preprocessing)
     rendering = config.visualization
-    if rendering.normalization == "shared":
+    if rendering.normalization == "shared" and _renders_maps(config):
         normalization_range = None
         for input_batch in _tracked_input_batches(config, labels, "Fit normalization"):
             batch = preprocess_batch(
@@ -586,7 +614,7 @@ def run_vit_rollout_comparison_from_config(
                 layers=config.analysis.layers,
                 normalize=False,
                 interpolation=config.visualization.interpolation,
-                guidance_image=_anyup_guidance(config, loaded_model, batch.inputs),
+                guidance_image=anyup_guidance(config, loaded_model, batch.inputs),
                 output_size=_analysis_output_size(config, loaded_model),
                 anyup_query_chunk_size=(config.visualization.anyup_query_chunk_size),
             )
@@ -620,9 +648,9 @@ def run_vit_rollout_comparison_from_config(
             batch.inputs,
             loaded_model.metadata,
             layers=config.analysis.layers,
-            normalize=config.visualization.normalization == "per_map",
+            normalize=False,
             interpolation=config.visualization.interpolation,
-            guidance_image=_anyup_guidance(config, loaded_model, batch.inputs),
+            guidance_image=anyup_guidance(config, loaded_model, batch.inputs),
             output_size=_analysis_output_size(config, loaded_model),
             anyup_query_chunk_size=config.visualization.anyup_query_chunk_size,
         )
@@ -687,7 +715,7 @@ def run_gradcam_from_config(config: VisionLensConfig) -> GradCamPipelineResult:
     started_at = datetime.now(timezone.utc)
     check_manifest_overwrite(config)
     labels = unique_input_labels(config.input.paths)
-    _apply_seed(config.runtime.seed)
+    apply_seed(config.runtime.seed)
     loaded_model = _load_model_with_status(config)
     if (
         config.analysis.target_class is not None
@@ -700,7 +728,7 @@ def run_gradcam_from_config(config: VisionLensConfig) -> GradCamPipelineResult:
         )
     transform = build_batch_preprocessor(loaded_model, config.preprocessing)
     rendering = config.visualization
-    if rendering.normalization == "shared":
+    if rendering.normalization == "shared" and _renders_maps(config):
         normalization_range = None
         for input_batch in _tracked_input_batches(config, labels, "Fit normalization"):
             batch = preprocess_batch(
@@ -721,7 +749,7 @@ def run_gradcam_from_config(config: VisionLensConfig) -> GradCamPipelineResult:
                 ),
                 normalize=False,
                 interpolation=config.visualization.interpolation,
-                guidance_image=_anyup_guidance(config, loaded_model, batch.inputs),
+                guidance_image=anyup_guidance(config, loaded_model, batch.inputs),
                 output_size=_analysis_output_size(config, loaded_model),
                 anyup_query_chunk_size=(config.visualization.anyup_query_chunk_size),
             )
@@ -755,9 +783,9 @@ def run_gradcam_from_config(config: VisionLensConfig) -> GradCamPipelineResult:
                 if config.analysis.target_class is None
                 else [config.analysis.target_class] * len(input_batch.paths)
             ),
-            normalize=config.visualization.normalization == "per_map",
+            normalize=False,
             interpolation=config.visualization.interpolation,
-            guidance_image=_anyup_guidance(config, loaded_model, batch.inputs),
+            guidance_image=anyup_guidance(config, loaded_model, batch.inputs),
             output_size=_analysis_output_size(config, loaded_model),
             anyup_query_chunk_size=config.visualization.anyup_query_chunk_size,
         )
@@ -806,11 +834,11 @@ def run_vit_attention_from_config(config: VisionLensConfig) -> PipelineResult:
     started_at = datetime.now(timezone.utc)
     check_manifest_overwrite(config)
     labels = unique_input_labels(config.input.paths)
-    _apply_seed(config.runtime.seed)
+    apply_seed(config.runtime.seed)
     loaded_model = _load_model_with_status(config)
     transform = build_batch_preprocessor(loaded_model, config.preprocessing)
     rendering = config.visualization
-    if rendering.normalization == "shared":
+    if rendering.normalization == "shared" and _renders_maps(config):
         normalization_range = None
         for input_batch in _tracked_input_batches(config, labels, "Fit normalization"):
             batch = preprocess_batch(
@@ -1136,12 +1164,14 @@ def export_patch_pca_outputs(
         return tuple(output_paths)
 
     if grid_collector is not None:
-        if grid_collector.total_items > 1:
+        if grid_collector.total_items > 1 or (
+            not output.heatmaps and not output.raw_arrays
+        ):
             grid_collector.add(list(rendered_images), list(labels))
         return tuple(output_paths)
 
     single_image_run = len(patch_pca.images) == 1 and total_grid_pages in {None, 1}
-    if single_image_run:
+    if single_image_run and (output.heatmaps or output.raw_arrays):
         return tuple(output_paths)
 
     indices_pages = _chunks(
@@ -1461,9 +1491,9 @@ def _extract_attention(
         layers=config.analysis.layers,
         heads=config.analysis.heads,
         head_fusion=config.analysis.head_fusion,
-        normalize=config.visualization.normalization == "per_map",
+        normalize=False,
         interpolation=config.visualization.interpolation,
-        guidance_image=_anyup_guidance(config, loaded_model, inputs),
+        guidance_image=anyup_guidance(config, loaded_model, inputs),
         output_size=_analysis_output_size(config, loaded_model),
         anyup_query_chunk_size=config.visualization.anyup_query_chunk_size,
     )
@@ -1691,38 +1721,79 @@ def _patch_grid(loaded_model: LoadedModel) -> tuple[int, int]:
     return infer_patch_grid_from_image(loaded_model.metadata.image_size, patch_size)
 
 
-def _anyup_guidance(
+def _pca_fit_settings(
     config: VisionLensConfig,
+) -> tuple[
+    bool,
+    ForegroundThreshold,
+    Literal["high", "low"],
+    RGBFitScope,
+]:
+    foreground_separation = config.analysis.foreground_separation
+    if foreground_separation is not True:
+        return False, 0.5, "high", "all"
+    if any(
+        value is None
+        for value in (
+            config.analysis.foreground_threshold,
+            config.analysis.foreground_side,
+            config.analysis.rgb_fit_scope,
+        )
+    ):
+        raise ValueError("Foreground-separated patch PCA requires fit settings.")
+    return (
+        True,
+        config.analysis.foreground_threshold,
+        config.analysis.foreground_side,
+        config.analysis.rgb_fit_scope,
+    )
+
+
+def _fit_image_pca_projection(
+    config: VisionLensConfig,
+    labels: tuple[str, ...],
     loaded_model: LoadedModel,
-    inputs: Any,
-) -> Any | None:
-    if not is_anyup_interpolation(config.visualization.interpolation):
-        return None
-    source_mean = None
-    source_std = None
-    if config.preprocessing.normalize:
-        source_mean = (
-            config.preprocessing.mean
-            or loaded_model.metadata.data_config.get("mean", IMAGENET_MEAN)
-        )
-        source_std = config.preprocessing.std or loaded_model.metadata.data_config.get(
-            "std", IMAGENET_STD
-        )
-    return prepare_anyup_image(
-        inputs,
-        source_mean=source_mean,
-        source_std=source_std,
-    ).to(loaded_model.metadata.device)
+    transform: Any,
+    patch_grid: tuple[int, int],
+    fit_settings: tuple[
+        bool,
+        ForegroundThreshold,
+        Literal["high", "low"],
+        RGBFitScope,
+    ],
+) -> PatchPCAProjection:
+    with TemporaryDirectory(prefix="vision-lens-pca-fit-") as temporary_directory:
+        staged_paths: list[Path] = []
+        for input_batch in _tracked_input_batches(
+            config, labels, "Extract PCA embeddings"
+        ):
+            batch = preprocess_batch(
+                input_batch,
+                transform,
+                loaded_model,
+                include_display_images=False,
+            )
+            embeddings = extract_patch_embeddings(
+                loaded_model.model,
+                batch.inputs,
+                patch_grid,
+            )
+            path = Path(temporary_directory) / f"batch-{input_batch.index}.npy"
+            _save_array(embeddings, path)
+            staged_paths.append(path)
 
+        def embedding_batches() -> Any:
+            for path in staged_paths:
+                yield np.load(path, allow_pickle=False)
 
-def _apply_seed(seed: int | None) -> None:
-    if seed is None:
-        return
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
+        status("Fitting PCA projection")
+        return fit_patch_pca_projection_batches(
+            embedding_batches,
+            foreground_separation=fit_settings[0],
+            foreground_threshold=fit_settings[1],
+            foreground_side=fit_settings[2],
+            rgb_fit_scope=fit_settings[3],
+        )
 
 
 def _rendering_range(
@@ -1734,6 +1805,10 @@ def _rendering_range(
     if visualization.normalization == "fixed":
         return visualization.normalization_range
     return shared_value_range(values)
+
+
+def _renders_maps(config: VisionLensConfig) -> bool:
+    return config.output.heatmaps or config.output.overlays or config.output.grids
 
 
 def _extend_value_range(

@@ -6,8 +6,6 @@ from pathlib import Path
 import yaml
 
 from vision_lens.config import load_config, resolved_config_yaml
-from vision_lens.pipeline import run_pipeline_from_config
-from vision_lens.video_pipeline import VideoBatchPipelineResult
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -48,6 +46,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "resolve":
         print(resolved_config_yaml(config), end="")
         return 0
+
+    from vision_lens.pipeline import run_pipeline_from_config
+    from vision_lens.video_pipeline import VideoBatchPipelineResult
 
     try:
         result = run_pipeline_from_config(config)

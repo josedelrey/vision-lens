@@ -98,6 +98,25 @@ def test_patch_pca_can_disable_foreground_separation():
     assert torch.allclose(result.projection.rgb_components, expected)
 
 
+def test_patch_pca_can_project_raw_values_without_rendering_images():
+    embeddings = torch.tensor(
+        [[[0.0, 0.0, 0.0], [0.2, 3.0, 0.0], [2.0, 0.0, 4.0], [3.0, 1.0, 1.0]]]
+    )
+
+    result = project_patch_embeddings(
+        embeddings,
+        patch_grid=(2, 2),
+        image_size=(32, 32),
+        foreground_separation=False,
+        interpolation="anyup",
+        render_images=False,
+    )
+
+    assert result.images == ()
+    assert result.rgb_patches is not None
+    assert result.foreground_mask.shape == (1, 4)
+
+
 def test_batched_full_frame_pca_uses_robust_rgb_bounds():
     embeddings = torch.tensor(
         [

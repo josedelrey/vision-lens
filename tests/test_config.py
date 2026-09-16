@@ -156,7 +156,9 @@ def test_video_patch_pca_has_no_image_foreground_settings(tmp_path):
     assert "rgb_fit_scope" not in resolved
 
     raw["analysis"]["foreground_threshold"] = 0.2
-    with pytest.raises(ValueError, match="Unknown key.*foreground_threshold"):
+    with pytest.raises(
+        ValueError, match="analysis.foreground_threshold.*not applicable"
+    ):
         parse_config(raw)
 
 
@@ -388,12 +390,17 @@ def test_patch_pca_defaults_and_overrides_are_in_analysis_section():
             "rgb_fit_scope": "all",
         }
     )
+    with pytest.raises(ValueError, match="foreground_threshold.*not applicable"):
+        parse_config(raw_config)
+
+    for key in ("foreground_threshold", "foreground_side", "rgb_fit_scope"):
+        raw_config["analysis"].pop(key)
     overridden = parse_config(raw_config)
     assert overridden.analysis.foreground_separation is False
-    assert overridden.analysis.foreground_threshold == 0.65
-    assert overridden.analysis.foreground_side == "low"
-    assert overridden.analysis.rgb_fit_scope == "all"
-    assert config_to_dict(overridden)["analysis"]["rgb_fit_scope"] == "all"
+    assert overridden.analysis.foreground_threshold is None
+    assert overridden.analysis.foreground_side is None
+    assert overridden.analysis.rgb_fit_scope is None
+    assert "rgb_fit_scope" not in config_to_dict(overridden)["analysis"]
     assert config_to_dict(overridden)["analysis"]["foreground_separation"] is False
 
 
@@ -653,10 +660,7 @@ def test_input_folders_patterns_recursion_and_limit_are_resolved(tmp_path):
     config = parse_config(raw_config, base_dir=tmp_path)
 
     assert config.input.paths == (image_dir / "a.jpg",)
-    assert config.input.folders == (image_dir,)
-    assert config.input.patterns == ("*.jpg",)
-    assert config.input.recursive is True
-    assert config.input.limit == 1
+    assert config_to_dict(config)["input"] == {"files": [str(image_dir / "a.jpg")]}
 
 
 def test_all_new_controls_are_parsed_and_resolved(tmp_path):
@@ -805,7 +809,7 @@ def test_patch_pca_projection_modes_reject_irrelevant_settings(tmp_path):
     raw["input"]["files"] = [str(Path("examples/1.jpg").resolve())]
     raw["analysis"]["projection_path"] = str(projection_path)
 
-    with pytest.raises(ValueError, match="Unknown key.*projection_path"):
+    with pytest.raises(ValueError, match="analysis.projection_path.*not applicable"):
         parse_config(raw, base_dir=tmp_path)
 
     raw["analysis"] = {
@@ -814,12 +818,14 @@ def test_patch_pca_projection_modes_reject_irrelevant_settings(tmp_path):
         "projection_path": str(projection_path),
         "foreground_threshold": 0.2,
     }
-    with pytest.raises(ValueError, match="Unknown key.*foreground_threshold"):
+    with pytest.raises(
+        ValueError, match="analysis.foreground_threshold.*not applicable"
+    ):
         parse_config(raw, base_dir=tmp_path)
 
     raw["analysis"].pop("foreground_threshold")
     raw["analysis"]["save_projection"] = "copy.npz"
-    with pytest.raises(ValueError, match="Unknown key.*save_projection"):
+    with pytest.raises(ValueError, match="analysis.save_projection.*not applicable"):
         parse_config(raw, base_dir=tmp_path)
 
 
@@ -833,6 +839,81 @@ def test_patch_pca_can_fit_only_a_saved_projection(tmp_path):
     config = parse_config(raw)
 
     assert config.analysis.save_projection == tmp_path / "projection.npz"
+
+
+def test_single_image_grids_only_patch_pca_warns():
+    raw = _minimal_config(method="patch_pca")
+    raw["output"].update({"heatmaps": False, "grids": True, "raw_arrays": False})
+
+    with pytest.warns(UserWarning, match="one-tile comparison grid"):
+        parse_config(raw)
+
+
+def test_choice_settings_reject_wrong_shaped_values_cleanly():
+    raw = _minimal_config()
+    raw["preprocessing"]["resize"] = []
+
+    with pytest.raises(ValueError, match="preprocessing.resize must be one of"):
+        parse_config(raw)
+
+
+def test_runtime_seed_must_fit_numpy_seed_range():
+    raw = _minimal_config()
+    raw["runtime"]["seed"] = 2**32
+
+    with pytest.raises(ValueError, match=r"runtime.seed must be at most 2\*\*32 - 1"):
+        parse_config(raw)
+
+
+def test_overrides_cannot_switch_conditional_modes():
+    raw = _minimal_config(method="patch_pca")
+
+    with pytest.raises(ValueError, match="cannot switch conditional mode.*projection"):
+        parse_config(raw, overrides={"analysis": {"projection": "load"}})
+
+
+def test_video_rejects_managed_dynamic_image_size_option(tmp_path):
+    source = tmp_path / "clip.mp4"
+    source.touch()
+    raw = _minimal_config()
+    raw["input"] = {"files": [str(source)]}
+    raw["model"]["options"] = {"dynamic_img_size": False}
+    raw["video"] = {}
+
+    with pytest.raises(ValueError, match="dynamic_img_size"):
+        parse_config(raw)
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    (("cmap", "not-a-colormap"), ("background", "not-a-color")),
+)
+def test_static_matplotlib_values_are_validated(key, value):
+    raw = _minimal_config()
+    raw["visualization"][key] = value
+
+    with pytest.raises(ValueError, match=f"visualization.{key}"):
+        parse_config(raw)
+
+
+def test_raw_only_maps_reject_rendering_normalization_settings():
+    raw = _minimal_config()
+    raw["output"].update(
+        {
+            "heatmaps": False,
+            "overlays": False,
+            "grids": False,
+            "raw_arrays": True,
+        }
+    )
+    raw["visualization"]["normalization"] = "shared"
+
+    with pytest.raises(ValueError, match="visualization.normalization.*not applicable"):
+        parse_config(raw)
+
+    raw["visualization"].clear()
+    config = parse_config(raw)
+    assert "normalization" not in config_to_dict(config)["visualization"]
 
 
 def test_loaded_patch_pca_projection_uses_only_saved_projection_settings(tmp_path):
@@ -892,13 +973,13 @@ def test_workflow_specific_no_op_settings_are_rejected(tmp_path):
     video_rollout["input"] = {"files": [str(source)]}
     video_rollout["analysis"]["heads"] = [0]
     video_rollout["video"] = {}
-    with pytest.raises(ValueError, match="Unknown key.*heads"):
+    with pytest.raises(ValueError, match="analysis.heads.*not applicable"):
         parse_config(video_rollout)
 
     gridless_rollout = _minimal_config(method="rollout")
     gridless_rollout["analysis"]["head_fusion"] = "max"
     gridless_rollout["output"]["grids"] = False
-    with pytest.raises(ValueError, match="Unknown key.*head_fusion"):
+    with pytest.raises(ValueError, match="analysis.head_fusion.*not applicable"):
         parse_config(gridless_rollout)
 
 

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import random
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -11,12 +10,6 @@ import numpy as np
 import torch
 from PIL import Image
 
-from vision_lens.anyup import (
-    IMAGENET_MEAN,
-    IMAGENET_STD,
-    is_anyup_interpolation,
-    prepare_anyup_image,
-)
 from vision_lens.attention import (
     AttentionExtractionResult,
     GradCamResult,
@@ -44,6 +37,7 @@ from vision_lens.processing import (
     unique_input_labels,
 )
 from vision_lens.progress import status, track_video_batches
+from vision_lens.runtime import anyup_guidance, apply_seed
 from vision_lens.video import (
     SampledVideoFrame,
     VideoMetadata,
@@ -110,9 +104,6 @@ def run_video_from_config(
             input=replace(
                 config.input,
                 paths=(source_path,),
-                files=(source_path,),
-                folders=(),
-                limit=None,
             ),
             output=replace(config.output, directory=config.output.directory / label),
             analysis=analysis,
@@ -121,7 +112,7 @@ def run_video_from_config(
         video_configs.append(video_config)
 
     require_video_dependencies()
-    _apply_seed(config.runtime.seed)
+    apply_seed(config.runtime.seed)
     status(f"Loading model {config.model.name}")
     loaded_model = load_model(config, dynamic_img_size=True)
     status(f"Model ready on {loaded_model.metadata.device}")
@@ -160,7 +151,7 @@ def _run_single_video_from_config(
         f"{config.analysis.method}: {source_path.name} "
         f"at {config.video.sampling_rate:g} FPS"
     )
-    _apply_seed(config.runtime.seed)
+    apply_seed(config.runtime.seed)
     if loaded_model is None:
         status(f"Loading model {config.model.name}")
         loaded_model = load_model(config, dynamic_img_size=True)
@@ -190,6 +181,36 @@ def _run_single_video_from_config(
         replace(config.preprocessing, resize="stretch", crop="none", pad="none"),
     )
     projection = _video_pca_projection(config, loaded_model, transform, source)
+    projection_only = (
+        config.analysis.method == "patch_pca"
+        and config.analysis.projection == "fit"
+        and config.analysis.save_projection is not None
+        and not config.output.heatmaps
+        and not config.output.raw_arrays
+    )
+    if projection_only:
+        assert projection is not None
+        assert config.analysis.save_projection is not None
+        output_paths: tuple[Path, ...] = ()
+        if _can_write(config.analysis.save_projection, config.output.overwrite):
+            save_patch_pca_projection(projection, config.analysis.save_projection)
+            output_paths = (config.analysis.save_projection,)
+        write_run_manifest(
+            requested_config,
+            loaded_model,
+            (source_path.stem,),
+            output_paths,
+            started_at=started_at,
+        )
+        return VideoPipelineResult(
+            config=config,
+            loaded_model=loaded_model,
+            source=source,
+            output_paths=output_paths,
+            processed_frames=0,
+            frame_rate=frame_rate,
+            duration=0.0,
+        )
     normalization_range = _video_normalization_range(
         config,
         loaded_model,
@@ -236,17 +257,22 @@ def _run_single_video_from_config(
                     anyup_query_chunk_size=(
                         config.visualization.anyup_query_chunk_size
                     ),
-                    guidance_image=_anyup_guidance(
-                        config,
-                        loaded_model,
-                        batch.inputs,
+                    guidance_image=(
+                        anyup_guidance(config, loaded_model, batch.inputs)
+                        if config.output.heatmaps
+                        else None
                     ),
+                    render_images=config.output.heatmaps,
                 )
-                pca_images = _smooth_images(
-                    pca.images,
-                    smoothing_state,
-                    "patch-pca",
-                    config.video.temporal_smoothing,
+                pca_images = (
+                    _smooth_images(
+                        pca.images,
+                        smoothing_state,
+                        "patch-pca",
+                        config.video.temporal_smoothing,
+                    )
+                    if config.output.heatmaps
+                    else ()
                 )
                 exports.write_pca_batch(
                     frame_batch.frames,
@@ -542,7 +568,9 @@ def _video_normalization_range(
     source: VideoMetadata,
     output_size: tuple[int, int],
 ) -> tuple[float, float] | None:
-    if config.analysis.method == "patch_pca":
+    if config.analysis.method == "patch_pca" or not (
+        config.output.heatmaps or config.output.overlays
+    ):
         return None
     if config.visualization.normalization == "fixed":
         return config.visualization.normalization_range
@@ -596,7 +624,7 @@ def _analyze_maps(
     inputs: Any,
     output_size: tuple[int, int],
 ) -> AttentionExtractionResult | GradCamResult:
-    guidance_image = _anyup_guidance(config, loaded_model, inputs)
+    guidance_image = anyup_guidance(config, loaded_model, inputs)
     if config.analysis.method == "attention":
         return extract_attention_maps(
             loaded_model.model,
@@ -758,30 +786,6 @@ def _patch_grid(loaded_model: LoadedModel) -> tuple[int, int]:
     return infer_patch_grid_from_image(loaded_model.metadata.image_size, patch_size)
 
 
-def _anyup_guidance(
-    config: VisionLensConfig,
-    loaded_model: LoadedModel,
-    inputs: Any,
-) -> Any | None:
-    if not is_anyup_interpolation(config.visualization.interpolation):
-        return None
-    source_mean = None
-    source_std = None
-    if config.preprocessing.normalize:
-        source_mean = (
-            config.preprocessing.mean
-            or loaded_model.metadata.data_config.get("mean", IMAGENET_MEAN)
-        )
-        source_std = config.preprocessing.std or loaded_model.metadata.data_config.get(
-            "std", IMAGENET_STD
-        )
-    return prepare_anyup_image(
-        inputs,
-        source_mean=source_mean,
-        source_std=source_std,
-    ).to(loaded_model.metadata.device)
-
-
 def _video_model_for_source(
     loaded_model: LoadedModel,
     config: VisionLensConfig,
@@ -837,13 +841,3 @@ def _as_numpy(value: Any) -> np.ndarray:
     if hasattr(value, "detach"):
         value = value.detach().cpu().numpy()
     return np.asarray(value)
-
-
-def _apply_seed(seed: int | None) -> None:
-    if seed is None:
-        return
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)

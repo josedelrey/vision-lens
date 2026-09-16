@@ -512,6 +512,81 @@ def test_multiple_videos_have_independent_outputs_and_sampling_rates(
         assert manifest["inputs"][0]["path"].endswith(f"{name}.mp4")
 
 
+def test_projection_only_video_pca_stops_after_fit(monkeypatch, tmp_path):
+    from vision_lens import video_pipeline
+
+    source = tmp_path / "clip.mp4"
+    projection_path = tmp_path / "projection.npz"
+    _make_video(source, frame_count=2, frame_rate=2)
+    config = parse_config(
+        {
+            "input": {"files": [str(source)]},
+            "model": {
+                "architecture": "vit",
+                "backend": "timm",
+                "name": "mock_vit",
+                "pretrained": False,
+            },
+            "analysis": {
+                "method": "patch_pca",
+                "save_projection": str(projection_path),
+            },
+            "output": {
+                "directory": str(tmp_path / "output"),
+                "heatmaps": False,
+                "raw_arrays": False,
+            },
+            "video": {"sampling_rate": 2},
+        }
+    )
+    loaded_model = LoadedModel(
+        model=object(),
+        metadata=ModelMetadata(
+            architecture="vit",
+            backend="timm",
+            name="mock_vit",
+            pretrained=False,
+            device="cpu",
+            input_size=(3, 4, 4),
+            image_size=(4, 4),
+            patch_size=(2, 2),
+            num_classes=2,
+            data_config={"input_size": (3, 4, 4)},
+        ),
+    )
+    fitted_projection = object()
+
+    monkeypatch.setattr(
+        video_pipeline,
+        "build_batch_preprocessor",
+        lambda *_args, **_kwargs: object(),
+    )
+    monkeypatch.setattr(
+        video_pipeline,
+        "_video_pca_projection",
+        lambda *_args, **_kwargs: fitted_projection,
+    )
+
+    def save_projection(projection, path):
+        assert projection is fitted_projection
+        path.touch()
+
+    monkeypatch.setattr(video_pipeline, "save_patch_pca_projection", save_projection)
+    monkeypatch.setattr(
+        video_pipeline,
+        "iter_video_batches",
+        lambda *_args, **_kwargs: pytest.fail("analysis pass should be skipped"),
+    )
+
+    result = video_pipeline._run_single_video_from_config(
+        config,
+        loaded_model=loaded_model,
+    )
+
+    assert result.processed_frames == 0
+    assert result.output_paths == (projection_path,)
+
+
 def _make_video(path, *, frame_count, frame_rate):
     with VideoWriter(
         path,

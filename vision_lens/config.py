@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from math import isfinite
 from pathlib import Path
 from typing import Any, Literal
+from warnings import warn
 
 import yaml
 
@@ -102,14 +103,6 @@ GRID_VISUALIZATION_KEYS = {
     "dpi",
     "grid_format",
 }
-MAP_VISUALIZATION_KEYS = {
-    "overlay_alpha",
-    "overlay_alpha_curve",
-    "cmap",
-    "cmap_black",
-    "normalization",
-    "normalization_range",
-}
 ANALYSIS_KEYS = {
     "attention": {"method", "layers", "heads", "head_fusion"},
     "rollout": {"method", "layers", "heads", "head_fusion"},
@@ -158,11 +151,6 @@ class ModelConfig:
 @dataclass(frozen=True)
 class InputConfig:
     paths: tuple[Path, ...]
-    files: tuple[Path, ...] = ()
-    folders: tuple[Path, ...] = ()
-    patterns: tuple[str, ...] = DEFAULT_INPUT_PATTERNS
-    recursive: bool = False
-    limit: int | None = None
 
 
 @dataclass(frozen=True)
@@ -297,6 +285,13 @@ class VisionLensConfig:
         return METHOD_TASKS[self.analysis.method]
 
 
+DEFAULT_PREPROCESSING_CONFIG = PreprocessingConfig()
+DEFAULT_RUNTIME_CONFIG = RuntimeConfig()
+DEFAULT_VISUALIZATION_CONFIG = VisualizationConfig()
+DEFAULT_OUTPUT_CONFIG = OutputConfig(Path("."))
+DEFAULT_VIDEO_CONFIG = VideoConfig()
+
+
 def load_config(
     path: str | Path,
     *,
@@ -326,6 +321,7 @@ def parse_config(
     base = _project_root(Path.cwd()) if base_dir is None else Path(base_dir).resolve()
     resolved = _deep_merge(raw_config, overrides or {})
     _validate_keys(resolved)
+    _validate_mode_overrides(raw_config, overrides or {})
 
     input_section = _section(resolved, "input")
     model_section = _section(resolved, "model")
@@ -336,14 +332,7 @@ def parse_config(
     output_section = _section(resolved, "output")
     video_section = _section(resolved, "video")
     method = _analysis_method(analysis_section.get("method", "attention"))
-    projection = analysis_section.get("projection", "fit")
-    analysis_keys = _analysis_keys(
-        method,
-        is_video="video" in resolved,
-        output_grids=output_section.get("grids", True),
-        projection=projection,
-    )
-    _reject_unknown_keys("analysis", analysis_section, analysis_keys)
+    _reject_unknown_keys("analysis", analysis_section, ANALYSIS_KEYS[method])
 
     config = VisionLensConfig(
         input=_parse_input(input_section, base),
@@ -362,21 +351,25 @@ def parse_config(
         ),
         preprocessing=PreprocessingConfig(
             image_size=_positive_int(
-                preprocessing_section.get("image_size", 672),
+                preprocessing_section.get(
+                    "image_size", DEFAULT_PREPROCESSING_CONFIG.image_size
+                ),
                 "preprocessing.image_size",
             ),
             resize=_choice(
-                preprocessing_section.get("resize", "stretch"),
+                preprocessing_section.get(
+                    "resize", DEFAULT_PREPROCESSING_CONFIG.resize
+                ),
                 "preprocessing.resize",
                 {"stretch", "shortest", "longest", "none"},
             ),
             crop=_choice(
-                preprocessing_section.get("crop", "none"),
+                preprocessing_section.get("crop", DEFAULT_PREPROCESSING_CONFIG.crop),
                 "preprocessing.crop",
                 {"none", "center"},
             ),
             pad=_choice(
-                preprocessing_section.get("pad", "none"),
+                preprocessing_section.get("pad", DEFAULT_PREPROCESSING_CONFIG.pad),
                 "preprocessing.pad",
                 {"none", "center"},
             ),
@@ -386,7 +379,9 @@ def parse_config(
                 {"nearest", "bilinear", "bicubic", "lanczos"},
             ),
             normalize=_bool(
-                preprocessing_section.get("normalize", True),
+                preprocessing_section.get(
+                    "normalize", DEFAULT_PREPROCESSING_CONFIG.normalize
+                ),
                 "preprocessing.normalize",
             ),
             mean=_optional_triplet(
@@ -406,21 +401,23 @@ def parse_config(
             is_video="video" in resolved,
         ),
         runtime=RuntimeConfig(
-            device=_device(runtime_section.get("device", "auto")),
+            device=_device(
+                runtime_section.get("device", DEFAULT_RUNTIME_CONFIG.device)
+            ),
             batch_size=_positive_int(
-                runtime_section.get("batch_size", 8),
+                runtime_section.get("batch_size", DEFAULT_RUNTIME_CONFIG.batch_size),
                 "runtime.batch_size",
             ),
             workers=_non_negative_int_value(
-                runtime_section.get("workers", 0),
+                runtime_section.get("workers", DEFAULT_RUNTIME_CONFIG.workers),
                 "runtime.workers",
             ),
             precision=_choice(
-                runtime_section.get("precision", "float32"),
+                runtime_section.get("precision", DEFAULT_RUNTIME_CONFIG.precision),
                 "runtime.precision",
                 {"float32", "float16", "bfloat16"},
             ),
-            seed=_optional_non_negative_int(
+            seed=_optional_seed(
                 runtime_section.get("seed"),
                 "runtime.seed",
             ),
@@ -462,7 +459,9 @@ def parse_config(
                 visualization_section.get("output_size"),
             ),
             interpolation=_choice(
-                visualization_section.get("interpolation", "bilinear"),
+                visualization_section.get(
+                    "interpolation", DEFAULT_VISUALIZATION_CONFIG.interpolation
+                ),
                 "visualization.interpolation",
                 {
                     "nearest",
@@ -479,20 +478,28 @@ def parse_config(
                 "visualization.anyup_query_chunk_size",
             ),
             overlay_alpha=_unit_interval(
-                visualization_section.get("overlay_alpha", 0.45),
+                visualization_section.get(
+                    "overlay_alpha", DEFAULT_VISUALIZATION_CONFIG.overlay_alpha
+                ),
                 "visualization.overlay_alpha",
             ),
             overlay_alpha_curve=_overlay_alpha_curve(
                 visualization_section.get("overlay_alpha_curve")
             ),
             cmap=_optional_str(
-                visualization_section.get("cmap", "viridis"),
+                visualization_section.get("cmap", DEFAULT_VISUALIZATION_CONFIG.cmap),
                 "visualization.cmap",
             ),
             cmap_black=_cmap_black(visualization_section.get("cmap_black")),
-            grid_format=_grid_format(visualization_section.get("grid_format", "png")),
+            grid_format=_grid_format(
+                visualization_section.get(
+                    "grid_format", DEFAULT_VISUALIZATION_CONFIG.grid_format
+                )
+            ),
             normalization=_choice(
-                visualization_section.get("normalization", "per_map"),
+                visualization_section.get(
+                    "normalization", DEFAULT_VISUALIZATION_CONFIG.normalization
+                ),
                 "visualization.normalization",
                 {"per_map", "shared", "fixed"},
             ),
@@ -506,7 +513,10 @@ def parse_config(
                 _required_str(output_section, "directory", "output"),
                 base,
             ),
-            heatmaps=_bool(output_section.get("heatmaps", True), "output.heatmaps"),
+            heatmaps=_bool(
+                output_section.get("heatmaps", DEFAULT_OUTPUT_CONFIG.heatmaps),
+                "output.heatmaps",
+            ),
             overlays=_bool(
                 output_section.get("overlays", method != "patch_pca"),
                 "output.overlays",
@@ -517,13 +527,17 @@ def parse_config(
                 else _bool(output_section.get("grids", True), "output.grids")
             ),
             raw_arrays=_bool(
-                output_section.get("raw_arrays", False),
+                output_section.get("raw_arrays", DEFAULT_OUTPUT_CONFIG.raw_arrays),
                 "output.raw_arrays",
             ),
-            image_format=_image_format(output_section.get("image_format", "png")),
-            raw_format=_raw_format(output_section.get("raw_format", "npy")),
+            image_format=_image_format(
+                output_section.get("image_format", DEFAULT_OUTPUT_CONFIG.image_format)
+            ),
+            raw_format=_raw_format(
+                output_section.get("raw_format", DEFAULT_OUTPUT_CONFIG.raw_format)
+            ),
             overwrite=_choice(
-                output_section.get("overwrite", "error"),
+                output_section.get("overwrite", DEFAULT_OUTPUT_CONFIG.overwrite),
                 "output.overwrite",
                 {"replace", "error", "skip"},
             ),
@@ -533,7 +547,7 @@ def parse_config(
             if "video" not in resolved
             else VideoConfig(
                 start_time=_non_negative_number(
-                    video_section.get("start_time", 0.0),
+                    video_section.get("start_time", DEFAULT_VIDEO_CONFIG.start_time),
                     "video.start_time",
                 ),
                 end_time=_optional_non_negative_number(
@@ -541,22 +555,28 @@ def parse_config(
                     "video.end_time",
                 ),
                 sampling_rate=_video_sampling_rate(
-                    video_section.get("sampling_rate", 5.0),
+                    video_section.get(
+                        "sampling_rate", DEFAULT_VIDEO_CONFIG.sampling_rate
+                    ),
                 ),
                 frame_limit=_optional_positive_int(
                     video_section.get("frame_limit"),
                     "video.frame_limit",
                 ),
                 pca_fit_frames=_positive_int(
-                    video_section.get("pca_fit_frames", 32),
+                    video_section.get(
+                        "pca_fit_frames", DEFAULT_VIDEO_CONFIG.pca_fit_frames
+                    ),
                     "video.pca_fit_frames",
                 ),
                 temporal_smoothing=_unit_interval(
-                    video_section.get("temporal_smoothing", 0.0),
+                    video_section.get(
+                        "temporal_smoothing", DEFAULT_VIDEO_CONFIG.temporal_smoothing
+                    ),
                     "video.temporal_smoothing",
                 ),
                 codec=_optional_str(
-                    video_section.get("codec", "libx264"),
+                    video_section.get("codec", DEFAULT_VIDEO_CONFIG.codec),
                     "video.codec",
                 ),
             )
@@ -569,6 +589,7 @@ def parse_config(
 
 def validate_config(config: VisionLensConfig) -> None:
     method = config.analysis.method
+    applicable = _applicable_setting_keys(config)
     if config.video is not None:
         if config.preprocessing.crop != "none" or config.preprocessing.pad != "none":
             raise ValueError(
@@ -596,11 +617,12 @@ def validate_config(config: VisionLensConfig) -> None:
         )
 
     options = config.model.options or {}
-    reserved_options = (
-        {"img_size", "pretrained"}
-        if config.model.backend == "timm"
-        else {"weights"}
-    )
+    if config.model.backend == "timm":
+        reserved_options = {"img_size", "pretrained"}
+        if config.video is not None:
+            reserved_options.add("dynamic_img_size")
+    else:
+        reserved_options = {"weights"}
     conflicts = sorted(reserved_options & options.keys())
     if conflicts:
         raise ValueError(
@@ -631,7 +653,8 @@ def validate_config(config: VisionLensConfig) -> None:
             "crop and pad must be 'none'."
         )
     if (
-        config.visualization.anyup_query_chunk_size is not None
+        "interpolation" in applicable["visualization"]
+        and config.visualization.anyup_query_chunk_size is not None
         and config.visualization.interpolation
         not in {"anyup", "anyup_mask", "anyup_soft", "anyup_soft_mask"}
     ):
@@ -641,21 +664,25 @@ def validate_config(config: VisionLensConfig) -> None:
             "'anyup_soft', or 'anyup_soft_mask'."
         )
     if (
-        config.visualization.interpolation in {"anyup_soft", "anyup_soft_mask"}
+        "interpolation" in applicable["visualization"]
+        and config.visualization.interpolation
+        in {"anyup_soft", "anyup_soft_mask"}
         and config.visualization.anyup_query_chunk_size is None
     ):
         raise ValueError(
             "soft AnyUp interpolation requires visualization.anyup_query_chunk_size."
         )
     if (
-        config.visualization.normalization == "fixed"
+        "normalization" in applicable["visualization"]
+        and config.visualization.normalization == "fixed"
         and config.visualization.normalization_range is None
     ):
         raise ValueError(
             "visualization.normalization_range is required when normalization='fixed'."
         )
     if (
-        config.visualization.normalization != "fixed"
+        "normalization" in applicable["visualization"]
+        and config.visualization.normalization != "fixed"
         and config.visualization.normalization_range is not None
     ):
         raise ValueError(
@@ -692,16 +719,32 @@ def validate_config(config: VisionLensConfig) -> None:
                 f"{config.analysis.projection_path}."
             )
 
+    if "cmap" in applicable["visualization"]:
+        _validate_colormap(config.visualization.cmap)
+    if (
+        "background" in applicable["visualization"]
+        and config.visualization.background is not None
+    ):
+        _validate_color(config.visualization.background, "visualization.background")
+    if (
+        method == "patch_pca"
+        and config.video is None
+        and len(config.input.paths) == 1
+        and config.output.grids
+        and not config.output.heatmaps
+        and not config.output.raw_arrays
+    ):
+        warn(
+            "A single-image, grids-only patch-PCA run will export a one-tile "
+            "comparison grid.",
+            UserWarning,
+            stacklevel=2,
+        )
+
 
 def config_to_dict(config: VisionLensConfig) -> dict[str, Any]:
-    resolved: dict[str, Any] = {}
-    resolved["input"] = {
-        "files": [str(path) for path in config.input.paths],
-        "folders": [],
-        "patterns": list(config.input.patterns),
-        "recursive": False,
-        "limit": None,
-    }
+    resolved: dict[str, dict[str, Any]] = {}
+    resolved["input"] = {"files": [str(path) for path in config.input.paths]}
     resolved["model"] = {
         "architecture": config.model.architecture,
         "backend": config.model.backend,
@@ -709,44 +752,43 @@ def config_to_dict(config: VisionLensConfig) -> dict[str, Any]:
         "pretrained": config.model.pretrained,
         "options": config.model.options,
     }
-    preprocessing = {
+    resolved["preprocessing"] = {
         "image_size": config.preprocessing.image_size,
+        "resize": config.preprocessing.resize,
+        "crop": config.preprocessing.crop,
+        "pad": config.preprocessing.pad,
         "interpolation": config.preprocessing.interpolation,
         "normalize": config.preprocessing.normalize,
-    }
-    if config.video is None:
-        preprocessing.update(
-            {
-                "resize": config.preprocessing.resize,
-                "crop": config.preprocessing.crop,
-                "pad": config.preprocessing.pad,
-            }
-        )
-    if config.preprocessing.normalize:
-        preprocessing["mean"] = (
+        "mean": (
             None
             if config.preprocessing.mean is None
             else list(config.preprocessing.mean)
-        )
-        preprocessing["std"] = (
+        ),
+        "std": (
             None if config.preprocessing.std is None else list(config.preprocessing.std)
-        )
-    resolved["preprocessing"] = preprocessing
-    resolved["analysis"] = _analysis_to_dict(
-        config.analysis,
-        is_video=config.video is not None,
-        include_rollout_comparison=(config.video is None and config.output.grids),
-    )
-    runtime = {
+        ),
+    }
+    resolved["analysis"] = _analysis_to_dict(config.analysis)
+    resolved["runtime"] = {
         "batch_size": config.runtime.batch_size,
         "device": config.runtime.device,
+        "workers": config.runtime.workers,
         "precision": config.runtime.precision,
         "seed": config.runtime.seed,
     }
-    if config.video is None:
-        runtime["workers"] = config.runtime.workers
-    resolved["runtime"] = runtime
-    visualization = {
+    resolved["visualization"] = {
+        "tile_size": (
+            None
+            if config.visualization.tile_size is None
+            else list(config.visualization.tile_size)
+        ),
+        "columns": config.visualization.columns,
+        "items_per_grid": config.visualization.items_per_grid,
+        "spacing": config.visualization.spacing,
+        "padding": config.visualization.padding,
+        "labels": config.visualization.labels,
+        "background": config.visualization.background,
+        "dpi": config.visualization.dpi,
         "output_size": (
             list(config.visualization.output_size)
             if isinstance(config.visualization.output_size, tuple)
@@ -754,104 +796,63 @@ def config_to_dict(config: VisionLensConfig) -> dict[str, Any]:
         ),
         "interpolation": config.visualization.interpolation,
         "anyup_query_chunk_size": config.visualization.anyup_query_chunk_size,
+        "overlay_alpha": config.visualization.overlay_alpha,
+        "overlay_alpha_curve": (
+            None
+            if config.visualization.overlay_alpha_curve is None
+            else {
+                "steepness": config.visualization.overlay_alpha_curve.steepness,
+                "midpoint": config.visualization.overlay_alpha_curve.midpoint,
+            }
+        ),
+        "cmap": config.visualization.cmap,
+        "cmap_black": (
+            None
+            if config.visualization.cmap_black is None
+            else {
+                "threshold": config.visualization.cmap_black[0],
+                "blend_width": config.visualization.cmap_black[1],
+                "transparent": config.visualization.cmap_black[2],
+            }
+        ),
+        "grid_format": config.visualization.grid_format,
+        "normalization": config.visualization.normalization,
+        "normalization_range": (
+            None
+            if config.visualization.normalization_range is None
+            else list(config.visualization.normalization_range)
+        ),
     }
-    if config.analysis.method != "patch_pca":
-        visualization.update(
-            {
-                "normalization": config.visualization.normalization,
-                "normalization_range": (
-                    None
-                    if config.visualization.normalization_range is None
-                    else list(config.visualization.normalization_range)
-                ),
-            }
-        )
-        if config.output.heatmaps or config.output.overlays or config.output.grids:
-            visualization.update(
-                {
-                    "cmap": config.visualization.cmap,
-                    "cmap_black": (
-                        None
-                        if config.visualization.cmap_black is None
-                        else {
-                            "threshold": config.visualization.cmap_black[0],
-                            "blend_width": config.visualization.cmap_black[1],
-                            "transparent": config.visualization.cmap_black[2],
-                        }
-                    ),
-                }
-            )
-        if config.output.overlays or config.output.grids:
-            visualization.update(
-                {
-                    "overlay_alpha": config.visualization.overlay_alpha,
-                    "overlay_alpha_curve": (
-                        None
-                        if config.visualization.overlay_alpha_curve is None
-                        else {
-                            "steepness": (
-                                config.visualization.overlay_alpha_curve.steepness
-                            ),
-                            "midpoint": (
-                                config.visualization.overlay_alpha_curve.midpoint
-                            ),
-                        }
-                    ),
-                }
-            )
-    if config.video is None and config.output.grids:
-        visualization.update(
-            {
-                "tile_size": (
-                    None
-                    if config.visualization.tile_size is None
-                    else list(config.visualization.tile_size)
-                ),
-                "columns": config.visualization.columns,
-                "items_per_grid": config.visualization.items_per_grid,
-                "spacing": config.visualization.spacing,
-                "padding": config.visualization.padding,
-                "background": config.visualization.background,
-                "dpi": config.visualization.dpi,
-                "grid_format": config.visualization.grid_format,
-            }
-        )
-        if config.analysis.method != "patch_pca":
-            visualization["labels"] = config.visualization.labels
-    resolved["visualization"] = visualization
-    output = {
+    resolved["output"] = {
         "directory": str(config.output.directory),
         "heatmaps": config.output.heatmaps,
+        "overlays": config.output.overlays,
+        "grids": config.output.grids,
+        "raw_arrays": config.output.raw_arrays,
+        "image_format": config.output.image_format,
+        "raw_format": config.output.raw_format,
+        "overwrite": config.output.overwrite,
     }
-    if config.analysis.method != "patch_pca":
-        output["overlays"] = config.output.overlays
-    if config.video is None:
-        output["grids"] = config.output.grids
-    output["raw_arrays"] = config.output.raw_arrays
-    if config.video is None and (config.output.heatmaps or config.output.overlays):
-        output["image_format"] = config.output.image_format
-    if config.output.raw_arrays:
-        output["raw_format"] = config.output.raw_format
-    output["overwrite"] = config.output.overwrite
-    resolved["output"] = output
     if config.video is not None:
-        video = {
+        resolved["video"] = {
             "start_time": config.video.start_time,
             "end_time": config.video.end_time,
             "sampling_rate": config.video.sampling_rate,
             "frame_limit": config.video.frame_limit,
+            "pca_fit_frames": config.video.pca_fit_frames,
+            "temporal_smoothing": config.video.temporal_smoothing,
+            "codec": config.video.codec,
         }
-        if config.analysis.method != "patch_pca" or config.output.heatmaps:
-            video["temporal_smoothing"] = config.video.temporal_smoothing
-        if (
-            config.analysis.method == "patch_pca"
-            and config.analysis.projection == "fit"
-        ):
-            video["pca_fit_frames"] = config.video.pca_fit_frames
-        if config.output.heatmaps or config.output.overlays:
-            video["codec"] = config.video.codec
-        resolved["video"] = video
-    return resolved
+
+    applicable = _applicable_setting_keys(config)
+    return {
+        section: {
+            key: value
+            for key, value in values.items()
+            if key in applicable[section]
+        }
+        for section, values in resolved.items()
+    }
 
 
 def resolved_config_yaml(config: VisionLensConfig) -> str:
@@ -901,14 +902,7 @@ def _parse_input(section: dict[str, Any], base_dir: Path) -> InputConfig:
     if not unique:
         raise ValueError("input must select at least one existing file.")
 
-    return InputConfig(
-        paths=unique,
-        files=files,
-        folders=folders,
-        patterns=patterns,
-        recursive=recursive,
-        limit=limit,
-    )
+    return InputConfig(paths=unique)
 
 
 def _parse_analysis(
@@ -947,22 +941,21 @@ def _parse_analysis(
         "analysis.projection",
         {"fit", "load"},
     )
-    projection_path = _optional_path(
-        section.get("projection_path"),
-        base_dir,
-        "analysis.projection_path",
-    )
+    if projection == "load":
+        return AnalysisConfig(
+            method=method,
+            projection=projection,
+            projection_path=_optional_path(
+                section.get("projection_path"),
+                base_dir,
+                "analysis.projection_path",
+            ),
+        )
     save_projection = _optional_path(
         section.get("save_projection"),
         base_dir,
         "analysis.save_projection",
     )
-    if projection == "load":
-        return AnalysisConfig(
-            method=method,
-            projection=projection,
-            projection_path=projection_path,
-        )
     if is_video:
         return AnalysisConfig(
             method=method,
@@ -973,6 +966,13 @@ def _parse_analysis(
         section.get("foreground_separation", True),
         "analysis.foreground_separation",
     )
+    if not foreground_separation:
+        return AnalysisConfig(
+            method=method,
+            foreground_separation=False,
+            projection=projection,
+            save_projection=save_projection,
+        )
     foreground_threshold = _foreground_threshold(
         section.get("foreground_threshold", 0.5),
     )
@@ -989,27 +989,20 @@ def _parse_analysis(
         foreground_side=foreground_side,
         rgb_fit_scope=rgb_fit_scope,
         projection=projection,
-        projection_path=projection_path,
         save_projection=save_projection,
     )
 
 
 def _analysis_to_dict(
     analysis: AnalysisConfig,
-    *,
-    is_video: bool = False,
-    include_rollout_comparison: bool = True,
 ) -> dict[str, Any]:
     resolved: dict[str, Any] = {"method": analysis.method}
     if analysis.method in {"attention", "rollout"}:
         resolved["layers"] = (
             analysis.layers if analysis.layers == "all" else list(analysis.layers or ())
         )
-        if analysis.method == "attention" or include_rollout_comparison:
-            resolved["heads"] = (
-                None if analysis.heads is None else list(analysis.heads)
-            )
-            resolved["head_fusion"] = analysis.head_fusion
+        resolved["heads"] = None if analysis.heads is None else list(analysis.heads)
+        resolved["head_fusion"] = analysis.head_fusion
     elif analysis.method == "gradcam":
         resolved["target_layer"] = analysis.target_layer
         resolved["target_class"] = analysis.target_class
@@ -1022,11 +1015,10 @@ def _analysis_to_dict(
                 else str(analysis.projection_path)
             )
             return resolved
-        if not is_video:
-            resolved["foreground_separation"] = analysis.foreground_separation
-            resolved["foreground_threshold"] = analysis.foreground_threshold
-            resolved["foreground_side"] = analysis.foreground_side
-            resolved["rgb_fit_scope"] = analysis.rgb_fit_scope
+        resolved["foreground_separation"] = analysis.foreground_separation
+        resolved["foreground_threshold"] = analysis.foreground_threshold
+        resolved["foreground_side"] = analysis.foreground_side
+        resolved["rgb_fit_scope"] = analysis.rgb_fit_scope
         resolved["save_projection"] = (
             None if analysis.save_projection is None else str(analysis.save_projection)
         )
@@ -1041,164 +1033,127 @@ def _validate_keys(config: dict[str, Any]) -> None:
         _reject_unknown_keys(section_name, _section(config, section_name), allowed)
 
 
-def _analysis_keys(
-    method: AnalysisMethod,
-    *,
-    is_video: bool,
-    output_grids: Any,
-    projection: Any,
-) -> set[str]:
-    if method == "rollout":
-        keys = {"method", "layers"}
-        if not is_video and output_grids is not False:
-            keys.update({"heads", "head_fusion"})
-        return keys
-    if method != "patch_pca":
-        return ANALYSIS_KEYS[method]
-    if projection == "load":
-        return {"method", "projection", "projection_path"}
-    if projection != "fit":
-        return ANALYSIS_KEYS[method]
-    keys = {"method", "projection", "save_projection"}
+def _applicable_setting_keys(config: VisionLensConfig) -> dict[str, set[str]]:
+    method = config.analysis.method
+    is_video = config.video is not None
+    rendered = config.output.heatmaps or config.output.overlays or config.output.grids
+    spatial_output = rendered or (
+        config.output.raw_arrays and (method != "patch_pca" or not is_video)
+    )
+
+    preprocessing = {"image_size", "interpolation", "normalize"}
     if not is_video:
-        keys.update(
-            {
-                "foreground_separation",
-                "foreground_threshold",
-                "foreground_side",
-                "rgb_fit_scope",
-            }
-        )
-    return keys
+        preprocessing.update({"resize", "crop", "pad"})
+    if config.preprocessing.normalize:
+        preprocessing.update({"mean", "std"})
+
+    if method == "attention":
+        analysis = {"method", "layers", "heads", "head_fusion"}
+    elif method == "rollout":
+        analysis = {"method", "layers"}
+        if not is_video and config.output.grids:
+            analysis.update({"heads", "head_fusion"})
+    elif method == "gradcam":
+        analysis = {"method", "target_layer", "target_class"}
+    elif config.analysis.projection == "load":
+        analysis = {"method", "projection", "projection_path"}
+    else:
+        analysis = {"method", "projection", "save_projection"}
+        if not is_video:
+            analysis.add("foreground_separation")
+            if config.analysis.foreground_separation:
+                analysis.update(
+                    {"foreground_threshold", "foreground_side", "rgb_fit_scope"}
+                )
+
+    runtime = {"batch_size", "device", "precision", "seed"}
+    if not is_video:
+        runtime.add("workers")
+
+    visualization: set[str] = set()
+    if spatial_output:
+        visualization.update({"output_size", "interpolation"})
+        if config.visualization.interpolation in {
+            "anyup",
+            "anyup_mask",
+            "anyup_soft",
+            "anyup_soft_mask",
+        }:
+            visualization.add("anyup_query_chunk_size")
+    if method != "patch_pca" and rendered:
+        visualization.update({"normalization", "cmap", "cmap_black"})
+        if config.visualization.normalization == "fixed":
+            visualization.add("normalization_range")
+        if config.output.overlays or config.output.grids:
+            visualization.update({"overlay_alpha", "overlay_alpha_curve"})
+    if not is_video and config.output.grids:
+        visualization.update(GRID_VISUALIZATION_KEYS)
+        if method == "patch_pca":
+            visualization.discard("labels")
+
+    output = {"directory", "heatmaps", "raw_arrays", "overwrite"}
+    if method != "patch_pca":
+        output.add("overlays")
+    if not is_video:
+        output.add("grids")
+    if not is_video and (config.output.heatmaps or config.output.overlays):
+        output.add("image_format")
+    if config.output.raw_arrays:
+        output.add("raw_format")
+
+    video: set[str] = set()
+    if is_video:
+        video.update({"start_time", "end_time", "sampling_rate", "frame_limit"})
+        if method == "patch_pca" and config.analysis.projection == "fit":
+            video.add("pca_fit_frames")
+        if method != "patch_pca" or config.output.heatmaps:
+            video.add("temporal_smoothing")
+        if config.output.heatmaps or config.output.overlays:
+            video.add("codec")
+
+    return {
+        "input": set(SECTION_KEYS["input"]),
+        "model": set(SECTION_KEYS["model"]),
+        "preprocessing": preprocessing,
+        "analysis": analysis,
+        "runtime": runtime,
+        "visualization": visualization,
+        "output": output,
+        "video": video,
+    }
 
 
 def _validate_applicable_settings(
     raw_config: dict[str, Any],
     config: VisionLensConfig,
 ) -> None:
-    preprocessing = _section(raw_config, "preprocessing")
-    runtime = _section(raw_config, "runtime")
-    visualization = _section(raw_config, "visualization")
-    output = _section(raw_config, "output")
-    video = _section(raw_config, "video")
-    method = config.analysis.method
+    input_section = _section(raw_config, "input")
+    if not input_section.get("folders"):
+        _reject_present_keys(
+            "input",
+            input_section,
+            {"patterns", "recursive"},
+            "input.patterns and input.recursive require input.folders",
+        )
 
-    if config.video is not None:
-        _reject_present_keys(
-            "preprocessing",
-            preprocessing,
-            {"resize", "crop", "pad"},
-            "video preprocessing determines its aspect-ratio resize automatically",
-        )
-        _reject_present_keys(
-            "runtime",
-            runtime,
-            {"workers"},
-            "video frames are decoded sequentially",
-        )
-        _reject_present_keys(
-            "visualization",
-            visualization,
-            GRID_VISUALIZATION_KEYS,
-            "video workflows do not export grids",
-        )
-        if method != "patch_pca" or config.analysis.projection != "fit":
+    applicable = _applicable_setting_keys(config)
+    analysis_section = _section(raw_config, "analysis")
+    _reject_present_keys(
+        "analysis",
+        analysis_section,
+        set(analysis_section) - applicable["analysis"],
+        "the settings do not affect this workflow",
+    )
+    for section_name in SECTION_KEYS:
+        section = _section(raw_config, section_name)
+        present_but_unused = set(section) - applicable[section_name]
+        if present_but_unused:
             _reject_present_keys(
-                "video",
-                video,
-                {"pca_fit_frames"},
-                "video.pca_fit_frames only applies when fitting patch PCA",
+                section_name,
+                section,
+                present_but_unused,
+                "the settings do not affect this workflow",
             )
-        if not (config.output.heatmaps or config.output.overlays):
-            _reject_present_keys(
-                "video",
-                video,
-                {"codec"},
-                "video.codec only applies to rendered video outputs",
-            )
-    elif not config.output.grids:
-        _reject_present_keys(
-            "visualization",
-            visualization,
-            GRID_VISUALIZATION_KEYS,
-            "grid visualization settings require output.grids=true",
-        )
-
-    if not config.preprocessing.normalize:
-        _reject_present_keys(
-            "preprocessing",
-            preprocessing,
-            {"mean", "std"},
-            "mean and std require preprocessing.normalize=true",
-        )
-
-    if method == "patch_pca":
-        _reject_present_keys(
-            "output",
-            output,
-            {"overlays"},
-            "patch PCA does not produce overlays",
-        )
-        _reject_present_keys(
-            "visualization",
-            visualization,
-            MAP_VISUALIZATION_KEYS,
-            "map styling and normalization do not apply to patch PCA",
-        )
-        _reject_present_keys(
-            "visualization",
-            visualization,
-            {"labels"},
-            "patch PCA comparison grids never include text labels",
-        )
-    else:
-        if not (
-            config.output.heatmaps
-            or config.output.overlays
-            or config.output.grids
-        ):
-            _reject_present_keys(
-                "visualization",
-                visualization,
-                {"cmap", "cmap_black"},
-                "colormap settings require rendered map output",
-            )
-        if not (config.output.overlays or config.output.grids):
-            _reject_present_keys(
-                "visualization",
-                visualization,
-                {"overlay_alpha", "overlay_alpha_curve"},
-                "overlay styling requires overlay or grid output",
-            )
-
-    if (
-        config.video is not None
-        and method == "patch_pca"
-        and not config.output.heatmaps
-    ):
-        _reject_present_keys(
-            "video",
-            video,
-            {"temporal_smoothing"},
-            "video.temporal_smoothing requires rendered patch PCA output",
-        )
-
-    if not config.output.raw_arrays:
-        _reject_present_keys(
-            "output",
-            output,
-            {"raw_format"},
-            "output.raw_format requires output.raw_arrays=true",
-        )
-    if config.video is None and not (
-        config.output.heatmaps or config.output.overlays
-    ):
-        _reject_present_keys(
-            "output",
-            output,
-            {"image_format"},
-            "output.image_format requires standalone image output",
-        )
 
 
 def _reject_present_keys(
@@ -1225,6 +1180,22 @@ def _reject_unknown_keys(
         raise ValueError(
             f"Unknown key(s) in {section_name}: {keys}. Allowed keys: {allowed_keys}."
         )
+
+
+def _validate_colormap(name: str) -> None:
+    from matplotlib import colormaps
+
+    if name not in colormaps:
+        raise ValueError(
+            "visualization.cmap is not a known Matplotlib colormap: " f"{name!r}."
+        )
+
+
+def _validate_color(value: str, field_name: str) -> None:
+    from matplotlib.colors import is_color_like
+
+    if not is_color_like(value):
+        raise ValueError(f"{field_name} is not a valid Matplotlib color: {value!r}.")
 
 
 def _validate_known_attention_constraints(config: VisionLensConfig) -> None:
@@ -1258,6 +1229,35 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
         else:
             merged[key] = value
     return merged
+
+
+def _validate_mode_overrides(
+    raw_config: dict[str, Any],
+    overrides: dict[str, Any],
+) -> None:
+    if not overrides:
+        return
+
+    raw_analysis = _section(raw_config, "analysis")
+    override_analysis = _section(overrides, "analysis")
+    mode_settings = {
+        "method": raw_analysis.get("method", "attention"),
+        "projection": raw_analysis.get("projection", "fit"),
+        "foreground_separation": raw_analysis.get("foreground_separation", True),
+    }
+    changed = [
+        f"analysis.{key}"
+        for key, current in mode_settings.items()
+        if key in override_analysis and override_analysis[key] != current
+    ]
+    if "video" in overrides and "video" not in raw_config:
+        changed.append("video workflow")
+    if changed:
+        settings = ", ".join(changed)
+        raise ValueError(
+            f"CLI/config overrides cannot switch conditional mode setting(s): "
+            f"{settings}. Edit or create a configuration file for that workflow."
+        )
 
 
 def _section(config: dict[str, Any], name: str) -> dict[str, Any]:
@@ -1374,6 +1374,13 @@ def _optional_non_negative_int(value: Any, field_name: str) -> int | None:
     return _non_negative_int_value(value, field_name)
 
 
+def _optional_seed(value: Any, field_name: str) -> int | None:
+    seed = _optional_non_negative_int(value, field_name)
+    if seed is not None and seed > 2**32 - 1:
+        raise ValueError(f"{field_name} must be at most 2**32 - 1.")
+    return seed
+
+
 def _positive_int(value: Any, field_name: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
         raise ValueError(f"{field_name} must be a positive integer.")
@@ -1399,7 +1406,7 @@ def _optional_bool(value: Any, field_name: str) -> bool | None:
 
 
 def _choice(value: Any, field_name: str, allowed: set[str]) -> str:
-    if value not in allowed:
+    if not isinstance(value, str) or value not in allowed:
         options = ", ".join(sorted(allowed))
         raise ValueError(f"{field_name} must be one of: {options}.")
     return value
@@ -1480,35 +1487,19 @@ def _optional_range(value: Any, field_name: str) -> tuple[float, float] | None:
 
 
 def _analysis_method(value: Any) -> AnalysisMethod:
-    allowed = set(ANALYSIS_KEYS)
-    if value not in allowed:
-        options = ", ".join(sorted(allowed))
-        raise ValueError(f"analysis.method must be one of: {options}.")
-    return value
+    return _choice(value, "analysis.method", set(ANALYSIS_KEYS))
 
 
 def _head_fusion(value: Any) -> HeadFusion:
-    allowed = {"mean", "max", "none"}
-    if value not in allowed:
-        options = ", ".join(sorted(allowed))
-        raise ValueError(f"analysis.head_fusion must be one of: {options}.")
-    return value
+    return _choice(value, "analysis.head_fusion", {"mean", "max", "none"})
 
 
 def _foreground_side(value: Any) -> Literal["high", "low"]:
-    allowed = {"high", "low"}
-    if value not in allowed:
-        options = ", ".join(sorted(allowed))
-        raise ValueError(f"analysis.foreground_side must be one of: {options}.")
-    return value
+    return _choice(value, "analysis.foreground_side", {"high", "low"})
 
 
 def _device(value: Any) -> Device:
-    allowed = {"auto", "cpu", "cuda", "mps"}
-    if value not in allowed:
-        options = ", ".join(sorted(allowed))
-        raise ValueError(f"runtime.device must be one of: {options}.")
-    return value
+    return _choice(value, "runtime.device", {"auto", "cpu", "cuda", "mps"})
 
 
 def _unit_interval(value: Any, field_name: str) -> float:
@@ -1615,24 +1606,12 @@ def _video_sampling_rate(value: Any) -> float | Literal["auto"]:
 
 
 def _grid_format(value: Any) -> str:
-    allowed = {"pdf", "png", "svg"}
-    if value not in allowed:
-        options = ", ".join(sorted(allowed))
-        raise ValueError(f"visualization.grid_format must be one of: {options}.")
-    return value
+    return _choice(value, "visualization.grid_format", {"pdf", "png", "svg"})
 
 
 def _image_format(value: Any) -> str:
-    allowed = {"jpeg", "png", "tiff", "webp"}
-    if value not in allowed:
-        options = ", ".join(sorted(allowed))
-        raise ValueError(f"output.image_format must be one of: {options}.")
-    return value
+    return _choice(value, "output.image_format", {"jpeg", "png", "tiff", "webp"})
 
 
 def _raw_format(value: Any) -> str:
-    allowed = {"npy", "npz"}
-    if value not in allowed:
-        options = ", ".join(sorted(allowed))
-        raise ValueError(f"output.raw_format must be one of: {options}.")
-    return value
+    return _choice(value, "output.raw_format", {"npy", "npz"})

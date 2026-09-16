@@ -151,6 +151,10 @@ def load_timm_vit(
     device = resolve_device(runtime_config.device)
     _validate_precision(runtime_config.precision, device)
     model_options = dict(model_config.options or {})
+    if dynamic_img_size and "dynamic_img_size" in model_options:
+        raise ValueError(
+            "model.options.dynamic_img_size is managed by the video workflow."
+        )
     model_options["img_size"] = preprocessing_config.image_size
     if dynamic_img_size:
         model_options["dynamic_img_size"] = True

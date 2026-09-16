@@ -108,6 +108,22 @@ def test_dynamic_vit_attention_uses_rectangular_patch_grid():
     ).shape[:2] == (1, 6)
 
 
+def test_dynamic_timm_loader_rejects_user_managed_dynamic_size_option():
+    with pytest.raises(ValueError, match="dynamic_img_size is managed"):
+        load_timm_vit(
+            ModelConfig(
+                "vit",
+                "timm",
+                "mock_vit",
+                pretrained=False,
+                options={"dynamic_img_size": False},
+            ),
+            PreprocessingConfig(image_size=32),
+            RuntimeConfig(device="cpu"),
+            dynamic_img_size=True,
+        )
+
+
 def test_unsupported_precision_device_pair_fails_before_model_creation():
     with pytest.raises(ValueError, match="float16.*CPU"):
         _validate_precision("float16", "cpu")

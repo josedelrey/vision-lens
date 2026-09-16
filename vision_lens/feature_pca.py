@@ -127,6 +127,7 @@ def project_patch_embeddings(
     interpolation: Interpolation = "bilinear",
     guidance_image: Any | None = None,
     anyup_query_chunk_size: int | None = None,
+    render_images: bool = True,
 ) -> PatchPCAResult:
     """Project a batch of patch embeddings into one shared RGB PCA space."""
     if foreground_separation is not None and not isinstance(
@@ -152,12 +153,17 @@ def project_patch_embeddings(
             "interpolation must be one of: nearest, bilinear, bilinear_mask, "
             "anyup, anyup_mask, anyup_soft, anyup_soft_mask."
         )
-    if is_anyup_interpolation(interpolation) and guidance_image is None:
+    if (
+        render_images
+        and is_anyup_interpolation(interpolation)
+        and guidance_image is None
+    ):
         raise ValueError(
             f"guidance_image is required for interpolation={interpolation!r}."
         )
     if (
-        interpolation in {"anyup_soft", "anyup_soft_mask"}
+        render_images
+        and interpolation in {"anyup_soft", "anyup_soft_mask"}
         and anyup_query_chunk_size is None
     ):
         raise ValueError("soft AnyUp interpolation requires anyup_query_chunk_size.")
@@ -247,7 +253,10 @@ def project_patch_embeddings(
 
     batched_rgb_patches = rgb_patches.reshape(batch_size, patch_count, 3)
     batched_foreground_mask = foreground_mask.reshape(batch_size, patch_count)
-    if is_anyup_interpolation(interpolation):
+    if not render_images:
+        images = ()
+        output_foreground_mask = batched_foreground_mask
+    elif is_anyup_interpolation(interpolation):
         images, output_foreground_mask = _render_anyup_pca_images(
             embeddings,
             batched_foreground_mask,

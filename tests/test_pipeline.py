@@ -530,6 +530,102 @@ def test_patch_pca_single_image_run_skips_redundant_comparison(tmp_path):
     )
 
     assert [path.name for path in paths] == ["horse_patch_pca.png"]
+
+
+def test_patch_pca_single_image_grids_only_exports_comparison(tmp_path):
+    patch_pca = PatchPCAResult(
+        patch_embeddings=torch.rand(1, 4, 3),
+        foreground_mask=torch.ones(1, 4, dtype=torch.bool),
+        images=(Image.new("RGB", (4, 4), "red"),),
+        patch_grid=(2, 2),
+        image_size=(4, 4),
+    )
+    output = OutputConfig(
+        tmp_path,
+        heatmaps=False,
+        overlays=False,
+        grids=True,
+        raw_arrays=False,
+    )
+
+    paths = export_patch_pca_outputs(
+        patch_pca,
+        image_paths=(Path("horse.jpg"),),
+        output_dir=tmp_path,
+        output_config=output,
+    )
+
+    assert [path.name for path in paths] == ["patch_pca_comparison.png"]
+
+
+def test_projection_only_image_pca_skips_projection_and_render_pass(
+    monkeypatch, tmp_path
+):
+    from vision_lens import image_pipeline
+
+    projection_path = tmp_path / "projection.npz"
+    raw = {
+        "input": {"files": ["examples/1.jpg"]},
+        "model": {
+            "architecture": "vit",
+            "backend": "timm",
+            "name": "mock_vit",
+            "pretrained": False,
+        },
+        "analysis": {"method": "patch_pca", "save_projection": str(projection_path)},
+        "output": {
+            "directory": str(tmp_path),
+            "heatmaps": False,
+            "grids": False,
+            "raw_arrays": False,
+        },
+    }
+    config = parse_config(raw)
+    loaded_model = LoadedModel(
+        model=object(),
+        metadata=ModelMetadata(
+            architecture="vit",
+            backend="timm",
+            name="mock_vit",
+            pretrained=False,
+            device="cpu",
+            input_size=(3, 4, 4),
+            image_size=(4, 4),
+            patch_size=(2, 2),
+            num_classes=2,
+            data_config={},
+        ),
+    )
+    fitted_projection = object()
+
+    monkeypatch.setattr(image_pipeline, "load_model", lambda _config: loaded_model)
+    monkeypatch.setattr(
+        image_pipeline,
+        "build_batch_preprocessor",
+        lambda *_args, **_kwargs: object(),
+    )
+    monkeypatch.setattr(
+        image_pipeline,
+        "_fit_image_pca_projection",
+        lambda *_args, **_kwargs: fitted_projection,
+    )
+
+    def write_projection(projection, path, _policy):
+        assert projection is fitted_projection
+        path.touch()
+        return path
+
+    monkeypatch.setattr(image_pipeline, "_write_projection", write_projection)
+    monkeypatch.setattr(
+        image_pipeline,
+        "project_patch_embeddings",
+        lambda *_args, **_kwargs: pytest.fail("projection pass should be skipped"),
+    )
+
+    result = run_patch_pca_from_config(config)
+
+    assert result.patch_pca is None
+    assert result.output_paths == (projection_path,)
     assert not (tmp_path / "patch_pca_comparison.png").exists()
 
 
