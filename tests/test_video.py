@@ -144,6 +144,24 @@ def test_video_writer_assigns_explicit_constant_playback_timing(tmp_path):
     )
 
 
+def test_video_writer_skips_resize_for_matching_rgb_frame(monkeypatch, tmp_path):
+    output = tmp_path / "matching.mp4"
+
+    def reject_resize(*_args, **_kwargs):
+        raise AssertionError("matching video frames should not be resized")
+
+    monkeypatch.setattr(Image.Image, "resize", reject_resize)
+    with VideoWriter(
+        output,
+        frame_rate=1,
+        resolution=(64, 48),
+        codec="libx264",
+    ) as writer:
+        writer.write(Image.new("RGB", (64, 48), "red"))
+
+    assert output.is_file()
+
+
 def test_temporal_smoothing_is_sequential_across_batches():
     from vision_lens.video_pipeline import _MapStream, _smooth_streams
 
@@ -367,6 +385,11 @@ def test_gradcam_video_exports_overlays_with_one_fixed_class(
     )
     monkeypatch.setattr(video_pipeline, "extract_gradcam", fake_gradcam)
     monkeypatch.setattr(video_pipeline, "overlay_attention", record_overlay)
+
+    def reject_heatmap(*_args, **_kwargs):
+        raise AssertionError("disabled heatmap output should not be rendered")
+
+    monkeypatch.setattr(video_pipeline, "render_heatmap", reject_heatmap)
 
     result = run_pipeline_from_config(config)
 
