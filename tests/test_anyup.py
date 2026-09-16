@@ -187,6 +187,82 @@ def test_soft_attention_bias_tapers_before_blocking_distant_keys():
     assert torch.any(torch.isneginf(bias))
 
 
+def test_local_attention_tiles_match_slices_of_full_masks():
+    output_size = (13, 17)
+    feature_size = (6, 8)
+    query_bounds = (3, 10, 4, 14)
+    key_bounds = anyup._local_key_bounds(
+        output_size,
+        feature_size,
+        *query_bounds,
+        0.2,
+    )
+    full_hard = anyup._attention_mask_rows(
+        output_size,
+        feature_size,
+        query_bounds[0],
+        query_bounds[1],
+        0.2,
+        device=torch.device("cpu"),
+    ).reshape(
+        query_bounds[1] - query_bounds[0],
+        output_size[1],
+        feature_size[0],
+        feature_size[1],
+    )
+    tiled_hard = anyup._attention_mask_tile(
+        output_size,
+        feature_size,
+        *query_bounds,
+        *key_bounds,
+        0.2,
+        device=torch.device("cpu"),
+    )
+    row_start, row_end, column_start, column_end = key_bounds
+    expected_hard = full_hard[
+        :,
+        query_bounds[2] : query_bounds[3],
+        row_start:row_end,
+        column_start:column_end,
+    ].reshape_as(tiled_hard)
+
+    full_soft = anyup._soft_attention_bias_rows(
+        output_size,
+        feature_size,
+        query_bounds[0],
+        query_bounds[1],
+        0.2,
+        device=torch.device("cpu"),
+        dtype=torch.float32,
+    ).reshape_as(full_hard)
+    tiled_soft = anyup._soft_attention_bias_tile(
+        output_size,
+        feature_size,
+        *query_bounds,
+        *key_bounds,
+        0.2,
+        device=torch.device("cpu"),
+        dtype=torch.float32,
+    )
+    expected_soft = full_soft[
+        :,
+        query_bounds[2] : query_bounds[3],
+        row_start:row_end,
+        column_start:column_end,
+    ].reshape_as(tiled_soft)
+
+    assert torch.equal(tiled_hard, expected_hard)
+    assert torch.equal(tiled_soft, expected_soft)
+
+
+def test_query_tiles_respect_chunk_budget():
+    assert anyup._query_tile_size((672, 672), 4096) == (64, 64)
+    assert anyup._query_tile_size((7, 9), 18) == (3, 6)
+    for output_size, chunk_size in [((3, 100), 5), ((100, 3), 5), ((8, 8), 1)]:
+        tile_height, tile_width = anyup._query_tile_size(output_size, chunk_size)
+        assert tile_height * tile_width <= chunk_size
+
+
 def test_streaming_anyup_matches_full_attention_with_compact_values():
     torch.manual_seed(3)
     model = _FakeStreamingAnyUp().eval()
@@ -206,6 +282,35 @@ def test_streaming_anyup_matches_full_attention_with_compact_values():
     )
 
     assert actual.shape == (1, 3, 7, 9)
+    assert torch.allclose(actual, expected, atol=1e-6)
+
+
+def test_streaming_soft_anyup_matches_full_attention():
+    torch.manual_seed(5)
+    model = _FakeStreamingAnyUp().eval()
+    image = torch.rand(1, 3, 4, 5)
+    features = torch.rand(1, 4, 2, 3)
+    values = torch.rand(1, 2, 2, 3)
+    output_size = (7, 9)
+
+    expected = _full_anyup_values(
+        model,
+        image,
+        features,
+        values,
+        output_size,
+        attention_mode="soft",
+    )
+    actual = anyup.upsample_values_streaming(
+        image,
+        features,
+        output_size,
+        values=values,
+        model=model,
+        q_chunk_size=18,
+        attention_mode="soft",
+    )
+
     assert torch.allclose(actual, expected, atol=1e-6)
 
 
@@ -282,7 +387,15 @@ def test_memory_efficient_attention_matches_soft_attention_bias():
     assert torch.allclose(actual, expected, atol=1e-6)
 
 
-def _full_anyup_values(model, image, features, values, output_size):
+def _full_anyup_values(
+    model,
+    image,
+    features,
+    values,
+    output_size,
+    *,
+    attention_mode="hard",
+):
     encoded = model.image_encoder(image)
     height, width = encoded.shape[-2:]
     coordinates = anyup._coordinates(
@@ -307,15 +420,25 @@ def _full_anyup_values(model, image, features, values, output_size):
     keys = model.aggregation(torch.cat((keys, feature_keys), dim=1))
     query_sequence = queries.permute(0, 2, 3, 1).reshape(1, -1, 4)
     key_sequence = keys.permute(0, 2, 3, 1).reshape(1, -1, 4)
-    value_sequence = values.permute(0, 2, 3, 1).reshape(1, -1, 3)
-    mask = anyup._attention_mask_rows(
+    value_sequence = values.permute(0, 2, 3, 1).reshape(1, -1, values.shape[1])
+    mask_arguments = (
         output_size,
         features.shape[-2:],
         0,
         output_size[0],
         model.cross_decode.window_ratio,
-        device=image.device,
     )
+    if attention_mode == "soft":
+        mask = anyup._soft_attention_bias_rows(
+            *mask_arguments,
+            device=image.device,
+            dtype=image.dtype,
+        )
+    else:
+        mask = anyup._attention_mask_rows(
+            *mask_arguments,
+            device=image.device,
+        )
     _ignored, attention = model.cross_decode.cross_attn.attention(
         model.cross_decode.cross_attn.norm_q(query_sequence),
         model.cross_decode.cross_attn.norm_k(key_sequence),
@@ -324,4 +447,4 @@ def _full_anyup_values(model, image, features, values, output_size):
         attn_mask=mask,
     )
     result = torch.einsum("bij,bjd->bid", attention, value_sequence)
-    return result.reshape(1, *output_size, 3).permute(0, 3, 1, 2)
+    return result.reshape(1, *output_size, values.shape[1]).permute(0, 3, 1, 2)

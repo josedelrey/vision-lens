@@ -46,7 +46,7 @@ visualization:
   background: null
   dpi: null
   output_size: match
-  interpolation: anyup_mask
+  interpolation: anyup_soft_mask
   anyup_query_chunk_size: 4096
   overlay_alpha: 1.0
   overlay_alpha_curve:
