@@ -75,6 +75,63 @@ def test_patch_pca_can_fit_rgb_projection_from_all_patches():
     assert torch.allclose(batched.rgb_components, expected)
 
 
+def test_patch_pca_can_disable_foreground_separation():
+    embeddings = torch.tensor(
+        [[[0.0, 0.0, 0.0], [0.2, 3.0, 0.0], [2.0, 0.0, 4.0], [3.0, 1.0, 1.0]]]
+    )
+
+    result = project_patch_embeddings(
+        embeddings,
+        patch_grid=(2, 2),
+        image_size=(8, 8),
+        foreground_separation=False,
+        foreground_threshold=1.0,
+        rgb_fit_scope="foreground",
+        interpolation="bilinear_mask",
+    )
+    _, expected = _fit_pca_projection(embeddings.flatten(0, 1), components=3)
+
+    assert result.projection is not None
+    assert result.projection.foreground_separation is False
+    assert result.projection.rgb_fit_scope == "all"
+    assert result.foreground_mask.all()
+    assert torch.allclose(result.projection.rgb_components, expected)
+
+
+def test_batched_full_frame_pca_uses_robust_rgb_bounds():
+    embeddings = torch.tensor(
+        [
+            [
+                [0.0, 0.0, 0.0],
+                [1.0, 2.0, 0.0],
+                [2.0, 0.0, 3.0],
+                [100.0, 100.0, 100.0],
+            ]
+        ]
+    )
+
+    projection = fit_patch_pca_projection_batches(
+        lambda: (embeddings[:, :2], embeddings[:, 2:]),
+        foreground_separation=False,
+        rgb_fit_scope="foreground",
+        rgb_percentile_bounds=(0.25, 0.75),
+    )
+    projected = embeddings.flatten(0, 1) @ projection.rgb_components
+
+    assert projection.foreground_separation is False
+    assert projection.rgb_fit_scope == "all"
+    assert torch.allclose(
+        projection.rgb_minimum,
+        torch.quantile(projected, 0.25, dim=0),
+        atol=1e-5,
+    )
+    assert torch.allclose(
+        projection.rgb_maximum,
+        torch.quantile(projected, 0.75, dim=0),
+        atol=1e-5,
+    )
+
+
 def test_batched_pca_uses_the_same_approximate_fit_for_every_batch_size():
     generator = torch.Generator().manual_seed(12)
     embeddings = torch.rand(7, 4, 6, generator=generator)
@@ -446,6 +503,8 @@ def _two_patch_projection() -> PatchPCAProjection:
         rgb_maximum=torch.full((3,), 3.0),
         foreground_threshold=0.5,
         foreground_side="high",
+        rgb_fit_scope="foreground",
+        foreground_separation=True,
     )
 
 
@@ -529,3 +588,48 @@ def test_patch_pca_projection_can_be_saved_and_reused_with_frozen_scaling(tmp_pa
         np.array_equal(np.asarray(actual), np.asarray(expected))
         for actual, expected in zip(reused.images, fitted.images, strict=True)
     )
+    assert loaded.foreground_separation is True
+
+
+def test_full_frame_projection_mode_survives_save_and_load(tmp_path):
+    embeddings = torch.rand(2, 4, 6)
+    projection = fit_patch_pca_projection_batches(
+        lambda: (embeddings,),
+        foreground_separation=False,
+    )
+    projection_path = tmp_path / "full-frame-projection.npz"
+
+    save_patch_pca_projection(projection, projection_path)
+    loaded = load_patch_pca_projection(projection_path)
+    reused = project_patch_embeddings(
+        embeddings,
+        patch_grid=(2, 2),
+        image_size=(8, 8),
+        projection=loaded,
+    )
+
+    assert loaded.foreground_separation is False
+    assert loaded.rgb_fit_scope == "all"
+    assert reused.foreground_mask.all()
+
+
+def test_projection_loader_requires_the_current_schema(tmp_path):
+    projection_path = tmp_path / "incomplete-projection.npz"
+    with projection_path.open("wb") as file:
+        np.savez_compressed(
+            file,
+            foreground_components=np.zeros((3, 1)),
+            foreground_minimum=np.zeros(1),
+            foreground_maximum=np.ones(1),
+            rgb_components=np.eye(3),
+            rgb_minimum=np.zeros(3),
+            rgb_maximum=np.ones(3),
+            foreground_threshold=0.5,
+            foreground_side="high",
+        )
+
+    with pytest.raises(
+        ValueError,
+        match="foreground_separation, rgb_fit_scope",
+    ):
+        load_patch_pca_projection(projection_path)

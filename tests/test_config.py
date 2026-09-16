@@ -22,7 +22,7 @@ def _minimal_config(
     if method in {"attention", "rollout"}:
         analysis["layers"] = [0]
     return {
-        "input": {"paths": ["examples/1.jpg"]},
+        "input": {"files": ["examples/1.jpg"]},
         "model": {
             "architecture": architecture,
             "backend": backend,
@@ -84,7 +84,6 @@ def test_video_settings_are_strict_and_resolved(tmp_path):
         "end_time": 4,
         "sampling_rate": 2.5,
         "frame_limit": 7,
-        "pca_fit_frames": 5,
         "temporal_smoothing": 0.25,
         "codec": "libx264",
     }
@@ -97,10 +96,24 @@ def test_video_settings_are_strict_and_resolved(tmp_path):
     assert config.video.end_time == 4
     assert config.video.sampling_rate == 2.5
     assert config.visualization.output_size == (640, 360)
+    assert config.output.grids is False
+    assert "grids" not in config_to_dict(config)["output"]
     assert resolved["temporal_smoothing"] == 0.25
 
     raw["video"]["unknown"] = True
     with pytest.raises(ValueError, match="Unknown key.*video"):
+        parse_config(raw)
+
+
+def test_video_rejects_image_grid_output(tmp_path):
+    source = tmp_path / "clip.mp4"
+    source.touch()
+    raw = _minimal_config()
+    raw["input"] = {"files": [str(source)]}
+    raw["output"]["grids"] = False
+    raw["video"] = {}
+
+    with pytest.raises(ValueError, match="Unknown key.*output: grids"):
         parse_config(raw)
 
 
@@ -121,6 +134,30 @@ def test_video_settings_apply_documented_defaults(tmp_path):
     assert config.video.pca_fit_frames == 32
     assert config.video.temporal_smoothing == 0
     assert config.video.codec == "libx264"
+
+
+def test_video_patch_pca_has_no_image_foreground_settings(tmp_path):
+    source = tmp_path / "clip.mp4"
+    source.touch()
+    raw = _minimal_config(method="patch_pca")
+    raw["input"] = {"files": [str(source)]}
+    raw["video"] = {}
+
+    config = parse_config(raw)
+    resolved = config_to_dict(config)["analysis"]
+
+    assert config.analysis.foreground_separation is None
+    assert config.analysis.foreground_threshold is None
+    assert config.analysis.foreground_side is None
+    assert config.analysis.rgb_fit_scope is None
+    assert "foreground_separation" not in resolved
+    assert "foreground_threshold" not in resolved
+    assert "foreground_side" not in resolved
+    assert "rgb_fit_scope" not in resolved
+
+    raw["analysis"]["foreground_threshold"] = 0.2
+    with pytest.raises(ValueError, match="Unknown key.*foreground_threshold"):
+        parse_config(raw)
 
 
 def test_video_rejects_crop_and_pad_that_shift_spatial_maps(tmp_path):
@@ -167,6 +204,26 @@ def test_video_rejects_invalid_time_range_and_odd_output_size(tmp_path):
     raw["video"] = {}
     raw["visualization"] = {"output_size": [641, 360]}
     with pytest.raises(ValueError, match="must be even"):
+        parse_config(raw)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("start_time", float("nan")),
+        ("end_time", float("inf")),
+        ("sampling_rate", float("nan")),
+        ("sampling_rate", float("inf")),
+    ],
+)
+def test_video_numeric_settings_must_be_finite(tmp_path, field, value):
+    source = tmp_path / "clip.mp4"
+    source.touch()
+    raw = _minimal_config()
+    raw["input"] = {"files": [str(source)]}
+    raw["video"] = {field: value}
+
+    with pytest.raises(ValueError, match=f"video.{field}.*finite"):
         parse_config(raw)
 
 
@@ -317,6 +374,7 @@ def test_patch_pca_defaults_and_overrides_are_in_analysis_section():
     raw_config = _minimal_config(method="patch_pca")
     config = parse_config(raw_config)
 
+    assert config.analysis.foreground_separation is True
     assert config.analysis.foreground_threshold == 0.5
     assert config.analysis.foreground_side == "high"
     assert config.analysis.rgb_fit_scope == "foreground"
@@ -324,16 +382,19 @@ def test_patch_pca_defaults_and_overrides_are_in_analysis_section():
 
     raw_config["analysis"].update(
         {
+            "foreground_separation": False,
             "foreground_threshold": 0.65,
             "foreground_side": "low",
             "rgb_fit_scope": "all",
         }
     )
     overridden = parse_config(raw_config)
+    assert overridden.analysis.foreground_separation is False
     assert overridden.analysis.foreground_threshold == 0.65
     assert overridden.analysis.foreground_side == "low"
     assert overridden.analysis.rgb_fit_scope == "all"
     assert config_to_dict(overridden)["analysis"]["rgb_fit_scope"] == "all"
+    assert config_to_dict(overridden)["analysis"]["foreground_separation"] is False
 
 
 def test_patch_pca_rejects_unknown_rgb_fit_scope():
@@ -350,7 +411,7 @@ def test_patch_pca_accepts_auto_threshold_and_rejects_other_strings():
 
     config = parse_config(raw_config)
 
-    assert config.patch_pca.foreground_threshold == "auto"
+    assert config.analysis.foreground_threshold == "auto"
     assert config_to_dict(config)["analysis"]["foreground_threshold"] == "auto"
 
     raw_config["analysis"]["foreground_threshold"] = "otsu"
@@ -418,40 +479,19 @@ def test_paths_fall_back_to_working_directory_without_project(tmp_path, monkeypa
     assert config.output.directory == tmp_path / "outputs"
 
 
-@pytest.mark.parametrize(
-    ("section", "key"),
-    [
-        ("input", "limit"),
-        ("model", "pretrained"),
-        ("preprocessing", "mean"),
-        ("analysis", "heads"),
-        ("runtime", "seed"),
-        ("visualization", "padding"),
-        ("output", "raw_format"),
-    ],
-)
-def test_yaml_requires_every_setting_even_when_overridden(tmp_path, section, key):
+def test_yaml_uses_parser_defaults_for_omitted_settings(tmp_path):
     raw = yaml.safe_load(
         (Path(__file__).parents[1] / "configs/vit_attention.yaml").read_text()
     )
-    raw[section].pop(key)
-    path = tmp_path / "incomplete.yaml"
+    path = tmp_path / "minimal.yaml"
     path.write_text(yaml.safe_dump(raw))
 
-    with pytest.raises(ValueError, match=f"Missing setting.*{section}:.*{key}"):
-        load_config(path, overrides={section: {key: None}})
+    config = load_config(path)
 
-
-def test_yaml_requires_all_video_settings(tmp_path):
-    raw = yaml.safe_load(
-        (Path(__file__).parents[1] / "configs/vit_attention.video.yaml").read_text()
-    )
-    raw["video"].pop("codec")
-    path = tmp_path / "incomplete-video.yaml"
-    path.write_text(yaml.safe_dump(raw))
-
-    with pytest.raises(ValueError, match="Missing setting.*video: codec"):
-        load_config(path)
+    assert config.model.pretrained is True
+    assert config.runtime.batch_size == 8
+    assert config.visualization.grid_format == "png"
+    assert config.output.raw_arrays is False
 
 
 def test_yaml_rejects_removed_preset_key(tmp_path):
@@ -538,7 +578,24 @@ def test_model_img_size_option_is_rejected_in_favor_of_authoritative_setting():
     raw_config = _minimal_config()
     raw_config["model"]["options"] = {"img_size": 672}
 
-    with pytest.raises(ValueError, match="preprocessing.image_size"):
+    with pytest.raises(ValueError, match="managed loader argument.*img_size"):
+        parse_config(raw_config)
+
+
+@pytest.mark.parametrize(
+    ("backend", "architecture", "option"),
+    [("timm", "vit", "pretrained"), ("torchvision", "cnn", "weights")],
+)
+def test_model_loader_managed_options_are_rejected(backend, architecture, option):
+    method = "attention" if backend == "timm" else "gradcam"
+    raw_config = _minimal_config(
+        method=method,
+        architecture=architecture,
+        backend=backend,
+    )
+    raw_config["model"]["options"] = {option: None}
+
+    with pytest.raises(ValueError, match=f"managed loader argument.*{option}"):
         parse_config(raw_config)
 
 
@@ -572,7 +629,7 @@ def test_resolved_config_contains_defaults_and_absolute_paths():
 
 def test_missing_input_is_rejected_before_model_loading(tmp_path):
     raw_config = _minimal_config()
-    raw_config["input"]["paths"] = ["missing.jpg"]
+    raw_config["input"]["files"] = ["missing.jpg"]
 
     with pytest.raises(ValueError, match="Input file.*missing.jpg"):
         parse_config(raw_config, base_dir=tmp_path)
@@ -609,7 +666,7 @@ def test_all_new_controls_are_parsed_and_resolved(tmp_path):
         backend="torchvision",
     )
     raw_config["analysis"].update({"target_layer": "layer3", "target_class": 7})
-    raw_config["input"]["paths"] = [str(Path("examples/1.jpg").resolve())]
+    raw_config["input"]["files"] = [str(Path("examples/1.jpg").resolve())]
     raw_config["preprocessing"] = {
         "image_size": 224,
         "resize": "longest",
@@ -647,8 +704,8 @@ def test_all_new_controls_are_parsed_and_resolved(tmp_path):
         {
             "heatmaps": False,
             "overlays": True,
-            "grids": False,
             "raw_arrays": True,
+            "grids": True,
             "image_format": "webp",
             "raw_format": "npz",
             "overwrite": "error",
@@ -677,6 +734,25 @@ def test_fixed_normalization_requires_a_range():
         parse_config(raw_config)
 
 
+@pytest.mark.parametrize(
+    ("section", "field", "value"),
+    [
+        ("preprocessing", "mean", [float("nan"), 0, 0]),
+        ("preprocessing", "std", [1, float("inf"), 1]),
+        ("visualization", "normalization_range", [float("nan"), 1]),
+        ("visualization", "normalization_range", [0, float("inf")]),
+    ],
+)
+def test_numeric_sequences_must_contain_only_finite_values(section, field, value):
+    raw = _minimal_config()
+    raw[section][field] = value
+    if field == "normalization_range":
+        raw["visualization"]["normalization"] = "fixed"
+
+    with pytest.raises(ValueError, match=f"{section}.{field}.*finite"):
+        parse_config(raw)
+
+
 @pytest.mark.parametrize("interpolation", ["mask", "bicubic"])
 def test_visualization_interpolation_rejects_unknown_modes(interpolation):
     with pytest.raises(ValueError, match="visualization.interpolation"):
@@ -703,7 +779,7 @@ def test_anyup_soft_requires_query_chunking():
 
 def test_pca_projection_paths_resolve_from_config_and_load_must_exist(tmp_path):
     raw_config = _minimal_config(method="patch_pca")
-    raw_config["input"]["paths"] = [str(Path("examples/1.jpg").resolve())]
+    raw_config["input"]["files"] = [str(Path("examples/1.jpg").resolve())]
     raw_config["analysis"].update(
         {
             "projection": "fit",
@@ -720,6 +796,110 @@ def test_pca_projection_paths_resolve_from_config_and_load_must_exist(tmp_path):
     }
     with pytest.raises(ValueError, match="projection file does not exist"):
         parse_config(raw_config, base_dir=tmp_path)
+
+
+def test_patch_pca_projection_modes_reject_irrelevant_settings(tmp_path):
+    projection_path = tmp_path / "projection.npz"
+    projection_path.touch()
+    raw = _minimal_config(method="patch_pca")
+    raw["input"]["files"] = [str(Path("examples/1.jpg").resolve())]
+    raw["analysis"]["projection_path"] = str(projection_path)
+
+    with pytest.raises(ValueError, match="Unknown key.*projection_path"):
+        parse_config(raw, base_dir=tmp_path)
+
+    raw["analysis"] = {
+        "method": "patch_pca",
+        "projection": "load",
+        "projection_path": str(projection_path),
+        "foreground_threshold": 0.2,
+    }
+    with pytest.raises(ValueError, match="Unknown key.*foreground_threshold"):
+        parse_config(raw, base_dir=tmp_path)
+
+    raw["analysis"].pop("foreground_threshold")
+    raw["analysis"]["save_projection"] = "copy.npz"
+    with pytest.raises(ValueError, match="Unknown key.*save_projection"):
+        parse_config(raw, base_dir=tmp_path)
+
+
+def test_patch_pca_can_fit_only_a_saved_projection(tmp_path):
+    raw = _minimal_config(method="patch_pca")
+    raw["analysis"]["save_projection"] = str(tmp_path / "projection.npz")
+    raw["output"].update(
+        {"heatmaps": False, "grids": False, "raw_arrays": False}
+    )
+
+    config = parse_config(raw)
+
+    assert config.analysis.save_projection == tmp_path / "projection.npz"
+
+
+def test_loaded_patch_pca_projection_uses_only_saved_projection_settings(tmp_path):
+    projection_path = tmp_path / "projection.npz"
+    projection_path.touch()
+    raw = _minimal_config(method="patch_pca")
+    raw["analysis"] = {
+        "method": "patch_pca",
+        "projection": "load",
+        "projection_path": str(projection_path),
+    }
+
+    config = parse_config(raw)
+
+    assert config.analysis.foreground_separation is None
+    assert config_to_dict(config)["analysis"] == {
+        "method": "patch_pca",
+        "projection": "load",
+        "projection_path": str(projection_path),
+    }
+
+
+def test_workflow_specific_no_op_settings_are_rejected(tmp_path):
+    source = tmp_path / "clip.mp4"
+    source.touch()
+    raw = _minimal_config()
+    raw["input"] = {"files": [str(source)]}
+    raw["video"] = {}
+
+    for section, key, value in (
+        ("preprocessing", "resize", "stretch"),
+        ("runtime", "workers", 0),
+        ("visualization", "grid_format", "png"),
+        ("video", "pca_fit_frames", 32),
+    ):
+        candidate = yaml.safe_load(yaml.safe_dump(raw))
+        candidate[section][key] = value
+        with pytest.raises(ValueError, match=key):
+            parse_config(candidate)
+
+    image = _minimal_config()
+    image["preprocessing"].update({"normalize": False, "mean": [0, 0, 0]})
+    with pytest.raises(ValueError, match="preprocessing.mean"):
+        parse_config(image)
+
+    pca = _minimal_config(method="patch_pca")
+    pca["visualization"]["cmap"] = "magma"
+    with pytest.raises(ValueError, match="visualization.cmap"):
+        parse_config(pca)
+
+    pca = _minimal_config(method="patch_pca")
+    pca["output"]["overlays"] = False
+    with pytest.raises(ValueError, match="output.overlays"):
+        parse_config(pca)
+
+    video_rollout = _minimal_config(method="rollout")
+    video_rollout["input"] = {"files": [str(source)]}
+    video_rollout["analysis"]["heads"] = [0]
+    video_rollout["video"] = {}
+    with pytest.raises(ValueError, match="Unknown key.*heads"):
+        parse_config(video_rollout)
+
+    gridless_rollout = _minimal_config(method="rollout")
+    gridless_rollout["analysis"]["head_fusion"] = "max"
+    gridless_rollout["output"]["grids"] = False
+    with pytest.raises(ValueError, match="Unknown key.*head_fusion"):
+        parse_config(gridless_rollout)
 
 
 def test_patch_pca_rejects_unsupported_overlay_output():

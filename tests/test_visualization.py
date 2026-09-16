@@ -270,6 +270,15 @@ def test_image_grid_caps_columns_to_the_number_of_items():
     assert grid.size == (24, 10)
 
 
+def test_image_grid_automatically_balances_four_items():
+    grid = image_grid(
+        [Image.new("RGB", (10, 10), "white")] * 4,
+        gap=4,
+    )
+
+    assert grid.size == (24, 24)
+
+
 def test_image_comparison_grid_keeps_expected_output_dimensions(tmp_path):
     output_path = tmp_path / "comparison.svg"
     grid = make_image_comparison_grid(

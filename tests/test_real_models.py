@@ -44,6 +44,7 @@ pytestmark = [
         (
             "patch_pca.dinov2.yaml",
             {
+                "foreground_separation": True,
                 "foreground_threshold": 0.5,
                 "foreground_side": "high",
                 "projection": "fit",

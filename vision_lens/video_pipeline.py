@@ -34,6 +34,7 @@ from vision_lens.feature_pca import (
     project_patch_embeddings,
     save_patch_pca_projection,
 )
+from vision_lens.manifest import can_write_output as _can_write
 from vision_lens.manifest import check_manifest_overwrite, write_run_manifest
 from vision_lens.models import LoadedModel, load_model
 from vision_lens.processing import (
@@ -56,7 +57,7 @@ from vision_lens.video import (
     resolve_sampling_rate,
     resolved_output_resolution,
 )
-from vision_lens.visualization import image_grid, overlay_attention, render_heatmap
+from vision_lens.visualization import overlay_attention, render_heatmap
 
 
 @dataclass(frozen=True)
@@ -229,6 +230,7 @@ def _run_single_video_from_config(
                     embeddings,
                     patch_grid=_patch_grid(loaded_model),
                     image_size=(resolution[1], resolution[0]),
+                    foreground_separation=False,
                     projection=projection,
                     interpolation=config.visualization.interpolation,
                     anyup_query_chunk_size=(
@@ -248,9 +250,8 @@ def _run_single_video_from_config(
                 )
                 exports.write_pca_batch(
                     frame_batch.frames,
-                    original_frames,
                     pca_images,
-                    pca.foreground_mask,
+                    pca.rgb_patches,
                     frame_batch.index,
                 )
             else:
@@ -356,7 +357,7 @@ class _VideoExports:
                         normalization_range=normalization_range,
                     )
                     self._write_video(f"{stream.name}_heatmap", heatmap)
-                if self.config.output.overlays or self.config.output.grids:
+                if self.config.output.overlays:
                     display_frame = _frame_at_output_size(original, self.resolution)
                     overlay = overlay_attention(
                         display_frame,
@@ -373,13 +374,7 @@ class _VideoExports:
                         normalization=normalization,
                         normalization_range=normalization_range,
                     )
-                    if self.config.output.overlays:
-                        self._write_video(f"{stream.name}_overlay", overlay)
-                    if self.config.output.grids:
-                        self._write_video(
-                            f"{stream.name}_comparison",
-                            _comparison_frame(display_frame, overlay, self.config),
-                        )
+                    self._write_video(f"{stream.name}_overlay", overlay)
             if self.config.output.raw_arrays:
                 self._write_raw_batch(
                     stream.name,
@@ -391,24 +386,18 @@ class _VideoExports:
     def write_pca_batch(
         self,
         frames: tuple[SampledVideoFrame, ...],
-        originals: tuple[Image.Image, ...],
         pca_images: tuple[Image.Image, ...],
-        foreground_mask: Any,
+        rgb_patches: Any,
         batch_index: int,
     ) -> None:
-        for original, pca_image in zip(originals, pca_images, strict=True):
+        for pca_image in pca_images:
             if self.config.output.heatmaps:
                 self._write_video("patch_pca", pca_image)
-            if self.config.output.grids:
-                display_frame = _frame_at_output_size(original, self.resolution)
-                self._write_video(
-                    "patch_pca_comparison",
-                    _comparison_frame(display_frame, pca_image, self.config),
-                )
         if self.config.output.raw_arrays:
+            assert rgb_patches is not None
             self._write_raw_batch(
-                "patch_pca_foreground",
-                foreground_mask,
+                "patch_pca_rgb",
+                rgb_patches,
                 frames,
                 batch_index,
             )
@@ -421,9 +410,6 @@ class _VideoExports:
     def _write_video(self, name: str, image: Image.Image) -> None:
         path = self.config.output.directory / f"{self.source_stem}_{name}.mp4"
         resolution = self.resolution
-        if name.endswith("_comparison"):
-            width = round(image.width * resolution[1] / image.height)
-            resolution = (width + width % 2, resolution[1])
         if self.config.visualization.interpolation == "nearest" and name.endswith(
             "_heatmap"
         ):
@@ -543,9 +529,9 @@ def _video_pca_projection(
         status("Fitting PCA projection")
         return fit_patch_pca_projection_batches(
             embedding_batches,
-            foreground_threshold=config.analysis.foreground_threshold,
-            foreground_side=config.analysis.foreground_side,
-            rgb_fit_scope=config.analysis.rgb_fit_scope,
+            foreground_separation=False,
+            rgb_fit_scope="all",
+            rgb_percentile_bounds=(0.01, 0.99),
         )
 
 
@@ -756,22 +742,6 @@ def _preprocess_frames(
     )
 
 
-def _comparison_frame(
-    original: Image.Image,
-    visualization: Image.Image,
-    config: VisionLensConfig,
-) -> Image.Image:
-    return image_grid(
-        (original, _frame_at_output_size(visualization, original.size)),
-        columns=2,
-        background=config.visualization.background or "black",
-        gap=0 if config.visualization.spacing is None else config.visualization.spacing,
-        padding=(
-            0 if config.visualization.padding is None else config.visualization.padding
-        ),
-    )
-
-
 def _frame_at_output_size(
     frame: Image.Image,
     output_size: tuple[int, int],
@@ -861,16 +831,6 @@ def _validate_gradcam_class(
             f"analysis.target_class={target_class} is outside the model's class "
             f"range 0 through {class_count - 1}."
         )
-
-
-def _can_write(path: Path, policy: str) -> bool:
-    if not path.exists() or policy == "replace":
-        return True
-    if policy == "skip":
-        return False
-    raise FileExistsError(
-        f"Output already exists: {path}. Set output.overwrite to 'replace' or 'skip'."
-    )
 
 
 def _as_numpy(value: Any) -> np.ndarray:

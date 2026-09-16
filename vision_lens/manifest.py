@@ -14,6 +14,16 @@ from vision_lens.models import LoadedModel
 MANIFEST_NAME = "run-manifest.json"
 
 
+def can_write_output(path: Path, policy: str) -> bool:
+    if not path.exists() or policy == "replace":
+        return True
+    if policy == "skip":
+        return False
+    raise FileExistsError(
+        f"Output already exists: {path}. Set output.overwrite to 'replace' or 'skip'."
+    )
+
+
 def manifest_path(config: VisionLensConfig) -> Path:
     return config.output.directory / MANIFEST_NAME
 

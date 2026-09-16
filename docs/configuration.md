@@ -1,11 +1,12 @@
 # Configuration
 
-Vision Lens requires seven YAML sections: `input`, `model`, `preprocessing`,
-`analysis`, `runtime`, `visualization`, and `output`. A video run also requires
-the `video` section. Every setting in each section must be present, even if its
-value is `null` or an empty list. Unknown, missing, and incompatible settings
-are rejected before model weights are loaded. Copy an example from `configs/`
-to start a new workflow.
+Vision Lens configurations use `input`, `model`, `preprocessing`, `analysis`,
+`runtime`, `visualization`, and `output` sections. The presence of a `video`
+section selects a video workflow. Settings with parser defaults may be omitted;
+the resolved manifest records the applicable defaults actually used. Unknown,
+missing required, incompatible, and workflow-inapplicable settings are rejected
+before model weights are loaded. Copy an example from `configs/` to start a new
+workflow.
 
 All relative paths in YAML files and `--set` overrides are resolved
 from the project root (the nearest ancestor containing `pyproject.toml`). The
@@ -13,10 +14,9 @@ loader searches upward from the config file first, then from the working
 directory. If neither is inside a project, paths use the working directory.
 Absolute paths remain unchanged. The path given to `--config` itself is a
 normal shell path; this rule applies to paths *inside* the configuration.
-CLI `--set` values override the YAML values. The YAML must contain every
-setting before overrides are applied. The “Example value” column below shows
-common values; the “Parser default” column describes the Python parser's
-programmatic defaults, not values that a YAML file may omit.
+CLI `--set` values override the YAML values. The “Example value” column below
+shows common values; the “Parser default” column is the value used when that
+setting is omitted.
 
 ## Input
 
@@ -37,9 +37,7 @@ input:
 | `recursive` | `false` | Search inside nested folders. | `true` |
 | `limit` | `null` | Maximum inputs after expansion; `null` means all. | `50` |
 
-At least one file must be selected. Duplicate paths are removed. The legacy
-`input.paths` spelling remains accepted as an alias for `input.files`, but the
-two cannot be used together.
+At least one file must be selected. Duplicate paths are removed.
 
 ## Model
 
@@ -60,8 +58,9 @@ model:
 | `pretrained` | `true` | Load pretrained weights. | `false` |
 | `options` | `null` | Additional backend loader arguments. | `{drop_rate: 0.1}` |
 
-`model.options.img_size` is forbidden. `preprocessing.image_size` is the one
-authoritative input size.
+Loader arguments managed by Vision Lens cannot be repeated in `model.options`:
+`img_size` and `pretrained` for timm, and `weights` for torchvision.
+`preprocessing.image_size` is the authoritative input size.
 
 ## Preprocessing
 
@@ -87,6 +86,9 @@ preprocessing:
 | `normalize` | `true` | Apply channel normalization. | `false` |
 | `mean` | `null` | Model-derived RGB means, or three custom values. | `[0.5, 0.5, 0.5]` |
 | `std` | `null` | Model-derived positive RGB standard deviations. | `[0.5, 0.5, 0.5]` |
+
+`mean` and `std` apply only when `normalize: true`; omit them when normalization
+is disabled. All numeric preprocessing values must be finite.
 
 For images, `stretch` preserves the existing no-crop behavior. To retain aspect ratio, use
 `longest` with `pad: center`, or `shortest` with `crop: center`. A transformed
@@ -115,8 +117,8 @@ analysis:
 |---|---|---|---|
 | `method` | `attention` | `attention` or `rollout`. | `rollout` |
 | `layers` | required | Layer indices or `all`. | `[2, 5, 8, 11]` |
-| `heads` | `null` | Head indices; `null` selects all. | `[0, 1]` |
-| `head_fusion` | `mean` | `mean`, `max`, or `none`. | `none` |
+| `heads` | `null` | Head indices; `null` selects all. For rollout, applies only to image comparison grids. | `[0, 1]` |
+| `head_fusion` | `mean` | `mean`, `max`, or `none`. For rollout, applies only to image comparison grids. | `none` |
 
 ### Grad-CAM
 
@@ -138,6 +140,7 @@ analysis:
 ```yaml
 analysis:
   method: patch_pca
+  foreground_separation: true
   foreground_threshold: 0.5
   foreground_side: low
   rgb_fit_scope: foreground
@@ -149,19 +152,33 @@ analysis:
 | Setting | Parser default | Description | Example |
 |---|---|---|---|
 | `method` | required | Must be `patch_pca`. | `patch_pca` |
+| `foreground_separation` | `true` | For images, use PC1 to mask one side of the patch distribution. Set to `false` to render every patch and fit RGB PCA from the full image set. Video PCA always uses full-frame mode. | `false` |
 | `foreground_threshold` | `0.5` | Normalized first-component cutoff, or `auto` to choose an Otsu split from the fit data. | `auto` |
 | `foreground_side` | `high` | Keep the `high` or `low` side. | `low` |
-| `rgb_fit_scope` | `foreground` | Fit the RGB PCA basis and bounds from foreground patches or from `all` patches. The foreground mask is still applied afterward. | `all` |
+| `rgb_fit_scope` | `foreground` | With foreground separation enabled, fit the RGB PCA basis and bounds from foreground patches or from `all` patches. Full-frame mode always uses `all`. | `all` |
 | `projection` | `fit` | Fit a shared projection or `load` one. | `load` |
 | `projection_path` | `null` | Saved `.npz` loaded when `projection: load`. | `pca.npz` |
 | `save_projection` | `null` | Save the fitted basis and normalization ranges. | `pca.npz` |
 
-A loaded projection reuses its fitted foreground rule, RGB fit scope, and color ranges, so new
-images remain in the same PCA color space.
-With `foreground_threshold: auto`, PCA fits one threshold from the normalized
-first component and stores the resulting number in the projection. Video uses
-the representative fit frames, so the threshold stays fixed throughout the
-clip. A flat component uses `0.5`. `foreground_side` remains explicit because
+The four foreground/RGB-scope settings are image-only and are omitted from
+video configurations and resolved video manifests. They are not valid video
+PCA settings.
+
+`projection: fit` accepts the image foreground settings and optional
+`save_projection`; `projection_path` is invalid in this mode. `projection:
+load` accepts only `projection_path` and reuses all fitted settings, so
+foreground settings and `save_projection` are invalid. Saving a fitted
+projection counts as an output, allowing a projection-only run with every
+media and raw-array output disabled.
+
+A loaded projection reuses its fitted foreground mode, rule, RGB fit scope, and
+color ranges, so new images remain in the same PCA color space. For images,
+`foreground_separation: false` skips the PC1 split, renders every patch, and
+forces the RGB fit scope to `all`; `foreground_threshold` and `foreground_side`
+then have no effect.
+With `foreground_threshold: auto`, image PCA fits one threshold from the
+normalized first component and stores the resulting number in the projection.
+A flat component uses `0.5`. `foreground_side` remains explicit because
 PCA cannot identify which side of the split is the subject. An automatic split
 is most useful when the first-component values form two distinct groups.
 PCA components use the approximate low-rank method. All images selected by one
@@ -188,7 +205,7 @@ runtime:
 |---|---|---|---|
 | `batch_size` | `8` | Maximum images read, preprocessed, and analyzed together. | `4` |
 | `device` | `auto` | `auto`, `cpu`, `cuda`, or `mps`. | `cuda` |
-| `workers` | `0` | Threads used to read images; `0` reads sequentially. | `4` |
+| `workers` | `0` | Threads used to read images; image workflows only. `0` reads sequentially. | `4` |
 | `precision` | `float32` | `float32`, `float16`, or `bfloat16`. | `float16` |
 | `seed` | `null` | Seed Python, NumPy, and PyTorch; `null` leaves RNG state unchanged. | `42` |
 
@@ -239,11 +256,11 @@ visualization:
 | Setting | Parser default | Description | Example |
 |---|---|---|---|
 | `tile_size` | `null` | `[width, height]`; `null` retains each workflow's historical size. | `[320, 240]` |
-| `columns` | `null` | Grid columns; `null` retains the workflow layout. | `2` |
-| `items_per_grid` | `null` | Maximum images/layers per grid file; extra pages receive `_part-001` names. | `6` |
+| `columns` | `null` | Grid columns; `null` chooses a balanced, near-square layout. | `2` |
+| `items_per_grid` | `null` | Maximum images/layers per grid file across the complete comparison; extra pages receive `_part-001` names. Inference batch boundaries never create parts. | `6` |
 | `spacing` | `null` | Pixels between tiles; `null` retains workflow spacing. | `8` |
 | `padding` | `null` | Outer padding in pixels. | `12` |
-| `labels` | `null` | Show labels; `null` keeps workflow behavior. | `false` |
+| `labels` | `null` | Show labels on non-PCA image grids; patch PCA grids deliberately contain no text. | `false` |
 | `background` | `null` | Pillow/Matplotlib color. | `"#101010"` |
 | `dpi` | `null` | Output DPI; `null` retains workflow behavior. | `150` |
 | `output_size` | `null` | Standalone visualization size: `null` keeps the model-processed size, `match` uses each source's dimensions, a positive integer produces a square output, and `[width, height]` sets an exact size. Video dimensions must be even. | `[1280, 720]` |
@@ -257,16 +274,28 @@ visualization:
 | `normalization` | `per_map` | `per_map`, `shared`, or `fixed`. | `shared` |
 | `normalization_range` | `null` | Required `[min, max]` for `fixed`; otherwise must be `null`. | `[0, 1]` |
 
+Grid layout settings are valid only for image runs with `output.grids: true`;
+video configurations reject them. Patch PCA grids always omit labels and reject
+map colormap, overlay, and normalization settings. Overlay styling requires an
+overlay or comparison-grid output. Colormap settings require rendered map
+output.
+
+`spacing` controls the gaps between tiles, while `padding` controls the outer
+border around the complete grid. Set either to `0` to remove it. Part-numbered
+files are only produced when the number of comparison items exceeds
+`items_per_grid`; leave `items_per_grid: null` to write one grid file.
+
 `per_map` is the historical attention and Grad-CAM behavior. `shared` computes
 one range across the run. `fixed` clips to an explicit range.
 `nearest` preserves one constant-color block per attention, Grad-CAM activation,
 or PCA patch. `bilinear` smoothly interpolates all maps. For attention, rollout,
-and Grad-CAM, `bilinear_mask` is identical to `bilinear`. For patch PCA,
-`bilinear_mask` fits the RGB PCA basis and scaling bounds from foreground patches,
-projects every patch through that foreground basis, bilinearly interpolates those
-colors, and then applies the foreground mask with nearest-neighbor upscaling. This
-avoids blending foreground colors with black while keeping a sharp foreground
-boundary.
+and Grad-CAM, `bilinear_mask` is identical to `bilinear`. For image patch PCA
+with foreground separation enabled, `bilinear_mask` fits the RGB PCA basis and
+scaling bounds from the configured scope, projects every patch through that
+basis, bilinearly interpolates those colors, and then applies the foreground
+mask with nearest-neighbor upscaling. This avoids blending foreground colors
+with black while keeping a sharp foreground boundary. Without foreground
+separation—including every video run—it behaves like full-frame `bilinear`.
 
 The four AnyUp modes replace bilinear feature-map upscaling with the
 [official AnyUp model](https://github.com/wimmerth/anyup). For attention,
@@ -303,11 +332,13 @@ linear projection without changing the intended attention calculation.
 
 `output_size: match` makes image heatmaps, overlays, and patch PCA images use
 the dimensions of each source image. For video it uses codec-compatible even
-source dimensions. An explicit integer or `[width, height]` renders every
-standalone output at that size; choosing a smaller size also reduces the memory
-needed by learned `anyup` interpolation. `null` retains the model-processed
-dimensions. Composite grid dimensions remain controlled by the grid layout and
-`tile_size`.
+source dimensions. This mode intentionally performs analysis interpolation,
+including AnyUp, at the model-processed resolution and then resizes the finished
+visualization to the source dimensions (nearest for `nearest` heatmaps and
+bilinear otherwise). To run AnyUp at a particular final resolution, specify an
+explicit integer or `[width, height]`; choosing a smaller size also reduces its
+memory use. `null` retains the model-processed dimensions. Composite grid
+dimensions remain controlled by the grid layout and `tile_size`.
 Set `overlay_alpha_curve` to `null` to use the constant `overlay_alpha` alone.
 When the curve is enabled, the normalized map value first controls per-pixel
 opacity through an endpoint-normalized sigmoid. `overlay_alpha` then uniformly
@@ -347,14 +378,16 @@ output:
 |---|---|---|---|
 | `directory` | required | Output folder. | `outputs/run-1` |
 | `heatmaps` | `true` | Export heatmaps or PCA color maps. | `false` |
-| `overlays` | `true` (`false` for PCA) | Export overlays where supported. | `false` |
-| `grids` | `true` | Export comparison grids. A single-image PCA run skips its redundant one-tile comparison. | `false` |
-| `raw_arrays` | `false` | Export analysis arrays without rendering. | `true` |
-| `image_format` | `png` | `png`, `jpeg`, `tiff`, or `webp`. | `webp` |
-| `raw_format` | `npy` | `npy` or compressed `npz`. | `npz` |
+| `overlays` | `true` | Export attention, rollout, or Grad-CAM overlays. Omit for patch PCA. | `false` |
+| `grids` | `true` | Export image comparison grids. Image configurations only; omit this setting from video configurations. A single-image PCA run skips its redundant one-tile comparison. | `false` |
+| `raw_arrays` | `false` | Export analysis arrays without rendering. Video PCA exports the normalized full-frame RGB patch projection, not a foreground mask. | `true` |
+| `image_format` | `png` | `png`, `jpeg`, `tiff`, or `webp`; standalone image outputs only. | `webp` |
+| `raw_format` | `npy` | `npy` or compressed `npz`; valid only when `raw_arrays: true`. | `npz` |
 | `overwrite` | `error` | `replace`, `error`, or `skip` existing files. | `error` |
 
-At least one output type must be enabled.
+At least one output type must be enabled. Video configurations do not support
+comparison grids, so `output.grids` is rejected when a `video` section is
+present.
 
 Every completed image or single-video run also writes `run-manifest.json` in the output directory.
 It records the fully resolved configuration, model identity and input size,
@@ -381,9 +414,10 @@ Video inference preserves each source frame's aspect ratio. The longer side is
 scaled to `preprocessing.image_size`; ViT dimensions are then rounded to the
 nearest multiples of the model patch size. For example, a 1920×1080 video with
 `image_size: 672` and 14×14 patches runs at 672×378. CNNs use the proportional
-dimensions directly. Video frames are not cropped or padded, so set
-`preprocessing.crop` and `preprocessing.pad` to `none`. Image preprocessing
-keeps its configured resize behavior. Spatial maps are rendered at
+dimensions directly. Video frames are not cropped or padded, so `resize`,
+`crop`, and `pad` are image-only settings and must be omitted from
+video configurations. Image preprocessing keeps its configured resize
+behavior. Spatial maps are rendered at
 `visualization.output_size`; the manifest records both the rectangular model
 input and resolved output resolution.
 
@@ -413,6 +447,11 @@ video:
 | `temporal_smoothing` | `0.0` | Previous-frame blend strength from `0` (off) to `1` (strongest). | `0.35` |
 | `codec` | `libx264` | PyAV/FFmpeg encoder name for MP4 outputs. | `libx264` |
 
+`pca_fit_frames` applies only when fitting a video patch-PCA projection.
+`codec` applies only when a rendered video output is enabled. For patch PCA,
+`temporal_smoothing` applies only to the rendered PCA video. Video decoding is
+sequential, so the image-only `runtime.workers` setting must be omitted.
+
 Sampling follows decoded presentation timestamps rather than assuming the
 source has a constant frame rate. Output frames receive consecutive timestamps
 spaced at exactly `1 / sampling_rate`, making the playback duration explicitly
@@ -422,18 +461,23 @@ stops with an error; set a numeric FPS for that video. For variable-frame-rate
 sources, `auto` uses the reported average FPS and still exports constant-FPS
 video.
 
-For attention and rollout, Vision Lens writes one stream per selected
-layer/head map. `output.heatmaps`, `output.overlays`, and `output.grids` select
-heatmap, overlay, and original/visualization comparison videos. Grad-CAM uses
-the same controls; set `analysis.target_class` to an integer to freeze its
-target across the clip. Patch PCA uses `output.heatmaps` for its RGB PCA video
-and `output.grids` for the side-by-side comparison.
+For attention and rollout, Vision Lens writes one heatmap stream and one overlay
+stream per selected layer/head map when `output.heatmaps` and `output.overlays`
+are enabled. Grad-CAM uses the same controls; set `analysis.target_class` to an
+integer to freeze its target across the clip. Patch PCA uses `output.heatmaps`
+for its RGB PCA video.
 
-Video PCA fits one projection from representative sampled frames, then freezes
-the projection, foreground threshold/side, and RGB normalization bounds before
-processing the complete clip. A loaded projection remains frozen in the same
-way. Temporal smoothing is applied only when its strength is greater than zero
-and operates sequentially across batch boundaries.
+Video PCA is deliberately a full-frame feature visualization, not a foreground
+segmenter. It fits one clip-global RGB PCA basis from every patch in evenly
+distributed representative frames, fixes its color normalization to the 1st and
+99th percentiles of those projected patches, and reuses that projection for the
+complete clip. This keeps colors comparable across frames while avoiding the
+unreliable assumption that PC1 separates subject from background. The colors
+show dominant DINO patch-feature variation; they are not object classes,
+attention, or a semantic mask. A loaded RGB projection remains frozen, and
+video rendering still covers the full frame. Temporal smoothing is applied only
+when its strength is greater than zero and operates sequentially across batch
+boundaries.
 
 Generated videos are silent. Source audio is deliberately omitted rather than
 copied or time-stretched; this is recorded in `run-manifest.json`. Raw arrays,
