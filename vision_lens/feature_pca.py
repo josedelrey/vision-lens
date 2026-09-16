@@ -27,6 +27,7 @@ Interpolation = Literal[
     "anyup",
     "anyup_mask",
     "anyup_soft",
+    "anyup_soft_mask",
 ]
 _OTSU_BINS = 256
 
@@ -136,18 +137,22 @@ def project_patch_embeddings(
         "anyup",
         "anyup_mask",
         "anyup_soft",
+        "anyup_soft_mask",
     }
     if interpolation not in choices:
         raise ValueError(
             "interpolation must be one of: nearest, bilinear, bilinear_mask, "
-            "anyup, anyup_mask, anyup_soft."
+            "anyup, anyup_mask, anyup_soft, anyup_soft_mask."
         )
     if is_anyup_interpolation(interpolation) and guidance_image is None:
         raise ValueError(
             f"guidance_image is required for interpolation={interpolation!r}."
         )
-    if interpolation == "anyup_soft" and anyup_query_chunk_size is None:
-        raise ValueError("anyup_soft interpolation requires anyup_query_chunk_size.")
+    if (
+        interpolation in {"anyup_soft", "anyup_soft_mask"}
+        and anyup_query_chunk_size is None
+    ):
+        raise ValueError("soft AnyUp interpolation requires anyup_query_chunk_size.")
 
     embeddings = torch.as_tensor(patch_embeddings).detach().float().cpu()
     if embeddings.ndim != 3:
@@ -193,7 +198,7 @@ def project_patch_embeddings(
     )
     projected_mask = (
         torch.ones_like(foreground_mask)
-        if interpolation in {"bilinear_mask", "anyup_mask", "anyup_soft"}
+        if interpolation == "bilinear_mask" or is_anyup_interpolation(interpolation)
         else foreground_mask
     )
     projected_embeddings = flattened[projected_mask]
@@ -209,7 +214,7 @@ def project_patch_embeddings(
     batched_rgb_patches = rgb_patches.reshape(batch_size, patch_count, 3)
     batched_foreground_mask = foreground_mask.reshape(batch_size, patch_count)
     if is_anyup_interpolation(interpolation):
-        images = _render_anyup_pca_images(
+        images, output_foreground_mask = _render_anyup_pca_images(
             embeddings,
             batched_foreground_mask,
             patch_grid,
@@ -227,10 +232,11 @@ def project_patch_embeddings(
             image_size,
             interpolation,
         )
+        output_foreground_mask = batched_foreground_mask
 
     return PatchPCAResult(
         patch_embeddings=embeddings,
-        foreground_mask=batched_foreground_mask,
+        foreground_mask=output_foreground_mask,
         images=images,
         patch_grid=patch_grid,
         image_size=image_size,
@@ -291,8 +297,10 @@ def _render_anyup_pca_images(
     interpolation: Interpolation,
     guidance_image: Any,
     anyup_query_chunk_size: int | None,
-) -> tuple[Image.Image, ...]:
+) -> tuple[tuple[Image.Image, ...], Any]:
     batch_size, _patch_count, feature_count = embeddings.shape
+    dense_mask = interpolation in {"anyup", "anyup_soft"}
+    soft_attention = interpolation in {"anyup_soft", "anyup_soft_mask"}
     feature_map = embeddings.reshape(
         batch_size,
         patch_grid[0],
@@ -312,14 +320,27 @@ def _render_anyup_pca_images(
             projection.rgb_minimum,
             projection.rgb_maximum,
         )[:, :3]
+        if dense_mask:
+            dense_first_component = _apply_projection(
+                flattened,
+                projection.foreground_components,
+                projection.foreground_minimum,
+                projection.foreground_maximum,
+            )[:, 0]
     else:
+        value_components = projection.rgb_components
+        if dense_mask:
+            value_components = torch.cat(
+                (value_components, projection.foreground_components),
+                dim=1,
+            )
         projected_values = (
-            (embeddings @ projection.rgb_components)
+            (embeddings @ value_components)
             .reshape(
                 batch_size,
                 patch_grid[0],
                 patch_grid[1],
-                3,
+                value_components.shape[1],
             )
             .permute(0, 3, 1, 2)
         )
@@ -329,45 +350,50 @@ def _render_anyup_pca_images(
             image_size,
             values=projected_values,
             q_chunk_size=anyup_query_chunk_size,
-            attention_mode="soft" if interpolation == "anyup_soft" else "hard",
+            attention_mode="soft" if soft_attention else "hard",
         )
-        flattened = upsampled_projection.permute(0, 2, 3, 1).reshape(-1, 3)
+        flattened = upsampled_projection.permute(0, 2, 3, 1).reshape(
+            -1,
+            value_components.shape[1],
+        )
         rendered = _normalize_with_bounds(
-            flattened,
+            flattened[:, :3],
             projection.rgb_minimum,
             projection.rgb_maximum,
         )
+        if dense_mask:
+            dense_first_component = _normalize_with_bounds(
+                flattened[:, 3:4],
+                projection.foreground_minimum,
+                projection.foreground_maximum,
+            )[:, 0]
     rendered = rendered.reshape(batch_size, *image_size, 3).permute(0, 3, 1, 2)
 
-    patch_masks = foreground_mask.reshape(batch_size, 1, *patch_grid).float()
-    if interpolation in {"anyup_mask", "anyup_soft"}:
+    if dense_mask:
+        if projection.foreground_side == "high":
+            dense_foreground = dense_first_component > projection.foreground_threshold
+        else:
+            dense_foreground = dense_first_component < projection.foreground_threshold
+        upsampled_mask = dense_foreground.reshape(
+            batch_size,
+            1,
+            *image_size,
+        ).float()
+    else:
+        patch_masks = foreground_mask.reshape(batch_size, 1, *patch_grid).float()
         upsampled_mask = functional.interpolate(
             patch_masks,
             size=image_size,
             mode="nearest",
         )
-    else:
-        upsampled_mask = (
-            upsample_features(
-                guidance_image,
-                patch_masks,
-                image_size,
-            )
-            if anyup_query_chunk_size is None
-            else upsample_values_streaming(
-                guidance_image,
-                patch_masks,
-                image_size,
-                q_chunk_size=anyup_query_chunk_size,
-            )
-        ).clamp(0, 1)
     rendered = rendered * upsampled_mask
 
     arrays = rendered.clamp(0, 1).permute(0, 2, 3, 1).numpy()
-    return tuple(
+    images = tuple(
         Image.fromarray((array * 255).round().astype(np.uint8), mode="RGB")
         for array in arrays
     )
+    return images, upsampled_mask[:, 0].bool().cpu()
 
 
 def fit_patch_pca_projection_batches(
