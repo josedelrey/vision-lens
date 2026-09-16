@@ -209,6 +209,79 @@ def test_streaming_anyup_matches_full_attention_with_compact_values():
     assert torch.allclose(actual, expected, atol=1e-6)
 
 
+def test_memory_efficient_attention_matches_multihead_attention():
+    torch.manual_seed(7)
+    cross_attention = _FakeCrossAttention()
+    cross_attention.attention = torch.nn.MultiheadAttention(
+        4,
+        2,
+        dropout=0.0,
+        batch_first=True,
+    )
+    queries = cross_attention.norm_q(torch.rand(2, 5, 4))
+    keys = cross_attention.norm_k(torch.rand(2, 6, 4))
+    values = torch.rand(2, 6, 3)
+    hard_mask = torch.tensor(
+        [
+            [False, False, True, True, True, True],
+            [False, False, False, True, True, True],
+            [True, False, False, False, True, True],
+            [True, True, False, False, False, True],
+            [True, True, True, False, False, False],
+        ]
+    )
+
+    expected = anyup._materialized_attention_values(
+        cross_attention.attention,
+        queries,
+        keys,
+        values,
+        hard_mask,
+    )
+    actual = anyup._attention_weighted_values(
+        cross_attention,
+        queries,
+        keys,
+        values,
+        hard_mask,
+    )
+
+    assert torch.allclose(actual, expected, atol=1e-6)
+
+
+def test_memory_efficient_attention_matches_soft_attention_bias():
+    torch.manual_seed(11)
+    cross_attention = _FakeCrossAttention()
+    queries = cross_attention.norm_q(torch.rand(1, 4, 4))
+    keys = cross_attention.norm_k(torch.rand(1, 3, 4))
+    values = torch.rand(1, 3, 2)
+    soft_bias = torch.tensor(
+        [
+            [0.0, -0.5, float("-inf")],
+            [-0.2, 0.0, -1.0],
+            [-1.0, -0.2, 0.0],
+            [float("-inf"), -0.5, 0.0],
+        ]
+    )
+
+    expected = anyup._materialized_attention_values(
+        cross_attention.attention,
+        queries,
+        keys,
+        values,
+        soft_bias,
+    )
+    actual = anyup._attention_weighted_values(
+        cross_attention,
+        queries,
+        keys,
+        values,
+        soft_bias,
+    )
+
+    assert torch.allclose(actual, expected, atol=1e-6)
+
+
 def _full_anyup_values(model, image, features, values, output_size):
     encoded = model.image_encoder(image)
     height, width = encoded.shape[-2:]

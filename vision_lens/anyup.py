@@ -319,7 +319,11 @@ def _stream_anyup_values(
 
     output_height, output_width = output_size
     rows_per_chunk = max(1, q_chunk_size // output_width)
-    chunks = []
+    upsampled = torch.empty(
+        (values.shape[0], values.shape[1], output_height, output_width),
+        device=output_device,
+        dtype=output_dtype,
+    )
     for row_start in range(0, output_height, rows_per_chunk):
         row_end = min(row_start + rows_per_chunk, output_height)
         halo_start = max(0, row_start - 1)
@@ -362,22 +366,125 @@ def _stream_anyup_values(
                 *mask_arguments,
                 device=normalized_queries.device,
             )
-        _ignored, attention = cross_attention.attention(
+        output = _attention_weighted_values(
+            cross_attention,
             normalized_queries,
             normalized_keys,
-            key_sequence,
-            average_attn_weights=True,
-            attn_mask=attention_mask,
+            value_sequence,
+            attention_mask,
         )
-        output = torch.einsum("bij,bjd->bid", attention, value_sequence)
         output = output.reshape(
             output.shape[0],
             row_end - row_start,
             output_width,
             output.shape[-1],
         ).permute(0, 3, 1, 2)
-        chunks.append(output.to(device=output_device, dtype=output_dtype))
-    return torch.cat(chunks, dim=2)
+        upsampled[:, :, row_start:row_end, :].copy_(
+            output.to(device=output_device, dtype=output_dtype)
+        )
+    return upsampled
+
+
+def _attention_weighted_values(
+    cross_attention: Any,
+    queries: Any,
+    keys: Any,
+    values: Any,
+    attention_mask: Any | None,
+) -> Any:
+    """Apply AnyUp attention to custom values without storing attention weights.
+
+    The official implementation asks ``MultiheadAttention`` for its averaged
+    attention matrix, discards the module's projected output, then multiplies
+    that matrix by the original feature values. Scaled dot-product attention
+    can perform the same weighted reduction directly, avoiding both the unused
+    value/output projections and the large query-by-key attention tensor.
+    """
+    attention = cross_attention.attention
+    if not isinstance(attention, torch.nn.MultiheadAttention):
+        return _materialized_attention_values(
+            attention,
+            queries,
+            keys,
+            values,
+            attention_mask,
+        )
+    if (
+        attention.dropout != 0
+        or attention.add_zero_attn
+        or attention.bias_k is not None
+        or attention.bias_v is not None
+    ):
+        return _materialized_attention_values(
+            attention,
+            queries,
+            keys,
+            values,
+            attention_mask,
+        )
+
+    embed_dim = attention.embed_dim
+    head_count = attention.num_heads
+    head_dim = embed_dim // head_count
+    projection_bias = attention.in_proj_bias
+    query_bias = None if projection_bias is None else projection_bias[:embed_dim]
+    key_bias = (
+        None if projection_bias is None else projection_bias[embed_dim : 2 * embed_dim]
+    )
+    if attention._qkv_same_embed_dim:
+        query_weight = attention.in_proj_weight[:embed_dim]
+        key_weight = attention.in_proj_weight[embed_dim : 2 * embed_dim]
+    else:
+        query_weight = attention.q_proj_weight
+        key_weight = attention.k_proj_weight
+
+    projected_queries = functional.linear(queries, query_weight, query_bias)
+    projected_keys = functional.linear(keys, key_weight, key_bias)
+    projected_queries = projected_queries.reshape(
+        projected_queries.shape[0],
+        projected_queries.shape[1],
+        head_count,
+        head_dim,
+    ).transpose(1, 2)
+    projected_keys = projected_keys.reshape(
+        projected_keys.shape[0],
+        projected_keys.shape[1],
+        head_count,
+        head_dim,
+    ).transpose(1, 2)
+    head_values = values.unsqueeze(1).expand(-1, head_count, -1, -1)
+    if attention_mask is not None:
+        attention_mask = attention_mask[None, None]
+        if attention_mask.dtype == torch.bool:
+            # MultiheadAttention uses True for blocked positions, whereas SDPA
+            # uses True for positions that participate in attention.
+            attention_mask = ~attention_mask
+
+    attended = functional.scaled_dot_product_attention(
+        projected_queries,
+        projected_keys,
+        head_values,
+        attn_mask=attention_mask,
+        dropout_p=0.0,
+    )
+    return attended.mean(dim=1)
+
+
+def _materialized_attention_values(
+    attention: Any,
+    queries: Any,
+    keys: Any,
+    values: Any,
+    attention_mask: Any | None,
+) -> Any:
+    _ignored, weights = attention(
+        queries,
+        keys,
+        keys,
+        average_attn_weights=True,
+        attn_mask=attention_mask,
+    )
+    return torch.einsum("bij,bjd->bid", weights, values)
 
 
 def _adaptive_pool_rows(

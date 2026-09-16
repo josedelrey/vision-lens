@@ -233,10 +233,12 @@ class VideoWriter:
         self._closed = False
 
     def write(self, image: Image.Image) -> None:
-        resized = image.convert("RGB").resize(
-            self._resolution,
-            resample=Image.Resampling.BILINEAR,
-        )
+        resized = image if image.mode == "RGB" else image.convert("RGB")
+        if resized.size != self._resolution:
+            resized = resized.resize(
+                self._resolution,
+                resample=Image.Resampling.BILINEAR,
+            )
         frame = self._av.VideoFrame.from_ndarray(
             np.asarray(resized),
             format="rgb24",

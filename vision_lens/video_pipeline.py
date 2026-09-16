@@ -347,38 +347,39 @@ class _VideoExports:
             normalization = "fixed"
         for stream in streams:
             for frame_index, original in enumerate(originals):
-                display_frame = _frame_at_output_size(original, self.resolution)
-                heatmap = render_heatmap(
-                    stream.maps,
-                    cmap=self.config.visualization.render_cmap,
-                    batch_index=frame_index,
-                    normalization=normalization,
-                    normalization_range=normalization_range,
-                )
-                overlay = overlay_attention(
-                    display_frame,
-                    stream.maps,
-                    alpha=self.config.visualization.overlay_alpha,
-                    alpha_curve_steepness=(
-                        self.config.visualization.overlay_alpha_curve_steepness
-                    ),
-                    alpha_curve_midpoint=(
-                        self.config.visualization.overlay_alpha_curve_midpoint
-                    ),
-                    cmap=self.config.visualization.render_cmap,
-                    batch_index=frame_index,
-                    normalization=normalization,
-                    normalization_range=normalization_range,
-                )
                 if self.config.output.heatmaps:
-                    self._write_video(f"{stream.name}_heatmap", heatmap)
-                if self.config.output.overlays:
-                    self._write_video(f"{stream.name}_overlay", overlay)
-                if self.config.output.grids:
-                    self._write_video(
-                        f"{stream.name}_comparison",
-                        _comparison_frame(display_frame, overlay, self.config),
+                    heatmap = render_heatmap(
+                        stream.maps,
+                        cmap=self.config.visualization.render_cmap,
+                        batch_index=frame_index,
+                        normalization=normalization,
+                        normalization_range=normalization_range,
                     )
+                    self._write_video(f"{stream.name}_heatmap", heatmap)
+                if self.config.output.overlays or self.config.output.grids:
+                    display_frame = _frame_at_output_size(original, self.resolution)
+                    overlay = overlay_attention(
+                        display_frame,
+                        stream.maps,
+                        alpha=self.config.visualization.overlay_alpha,
+                        alpha_curve_steepness=(
+                            self.config.visualization.overlay_alpha_curve_steepness
+                        ),
+                        alpha_curve_midpoint=(
+                            self.config.visualization.overlay_alpha_curve_midpoint
+                        ),
+                        cmap=self.config.visualization.render_cmap,
+                        batch_index=frame_index,
+                        normalization=normalization,
+                        normalization_range=normalization_range,
+                    )
+                    if self.config.output.overlays:
+                        self._write_video(f"{stream.name}_overlay", overlay)
+                    if self.config.output.grids:
+                        self._write_video(
+                            f"{stream.name}_comparison",
+                            _comparison_frame(display_frame, overlay, self.config),
+                        )
             if self.config.output.raw_arrays:
                 self._write_raw_batch(
                     stream.name,
@@ -396,10 +397,10 @@ class _VideoExports:
         batch_index: int,
     ) -> None:
         for original, pca_image in zip(originals, pca_images, strict=True):
-            display_frame = _frame_at_output_size(original, self.resolution)
             if self.config.output.heatmaps:
                 self._write_video("patch_pca", pca_image)
             if self.config.output.grids:
+                display_frame = _frame_at_output_size(original, self.resolution)
                 self._write_video(
                     "patch_pca_comparison",
                     _comparison_frame(display_frame, pca_image, self.config),
@@ -761,7 +762,7 @@ def _comparison_frame(
     config: VisionLensConfig,
 ) -> Image.Image:
     return image_grid(
-        (original, visualization.resize(original.size, Image.Resampling.BILINEAR)),
+        (original, _frame_at_output_size(visualization, original.size)),
         columns=2,
         background=config.visualization.background or "black",
         gap=0 if config.visualization.spacing is None else config.visualization.spacing,
