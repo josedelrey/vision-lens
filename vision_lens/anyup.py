@@ -27,7 +27,12 @@ __all__ = [
 
 def is_anyup_interpolation(interpolation: str) -> bool:
     """Return whether an interpolation mode uses AnyUp."""
-    return interpolation in {"anyup", "anyup_mask", "anyup_soft"}
+    return interpolation in {
+        "anyup",
+        "anyup_mask",
+        "anyup_soft",
+        "anyup_soft_mask",
+    }
 
 
 def prepare_anyup_image(

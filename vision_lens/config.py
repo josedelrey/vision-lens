@@ -21,6 +21,7 @@ VisualizationInterpolation = Literal[
     "anyup",
     "anyup_mask",
     "anyup_soft",
+    "anyup_soft_mask",
 ]
 
 DEFAULT_INPUT_PATTERNS = ("*.jpg", "*.jpeg", "*.png", "*.webp")
@@ -481,6 +482,7 @@ def parse_config(
                     "anyup",
                     "anyup_mask",
                     "anyup_soft",
+                    "anyup_soft_mask",
                 },
             ),
             anyup_query_chunk_size=_optional_positive_int(
@@ -636,20 +638,19 @@ def validate_config(config: VisionLensConfig) -> None:
     if (
         config.visualization.anyup_query_chunk_size is not None
         and config.visualization.interpolation
-        not in {"anyup", "anyup_mask", "anyup_soft"}
+        not in {"anyup", "anyup_mask", "anyup_soft", "anyup_soft_mask"}
     ):
         raise ValueError(
             "visualization.anyup_query_chunk_size requires "
             "visualization.interpolation to be 'anyup', 'anyup_mask', or "
-            "'anyup_soft'."
+            "'anyup_soft', or 'anyup_soft_mask'."
         )
     if (
-        config.visualization.interpolation == "anyup_soft"
+        config.visualization.interpolation in {"anyup_soft", "anyup_soft_mask"}
         and config.visualization.anyup_query_chunk_size is None
     ):
         raise ValueError(
-            "visualization.interpolation='anyup_soft' requires "
-            "visualization.anyup_query_chunk_size."
+            "soft AnyUp interpolation requires visualization.anyup_query_chunk_size."
         )
     if (
         config.visualization.normalization == "fixed"

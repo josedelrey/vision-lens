@@ -20,6 +20,7 @@ Interpolation = Literal[
     "anyup",
     "anyup_mask",
     "anyup_soft",
+    "anyup_soft_mask",
 ]
 
 
@@ -372,11 +373,12 @@ def _interpolate_maps(
         "anyup",
         "anyup_mask",
         "anyup_soft",
+        "anyup_soft_mask",
     }
     if interpolation not in choices:
         raise ValueError(
             "interpolation must be one of: nearest, bilinear, bilinear_mask, "
-            "anyup, anyup_mask, anyup_soft."
+            "anyup, anyup_mask, anyup_soft, anyup_soft_mask."
         )
     if is_anyup_interpolation(interpolation):
         if guidance_image is None:
@@ -388,7 +390,9 @@ def _interpolate_maps(
             maps,
             image_size,
             q_chunk_size=anyup_query_chunk_size,
-            attention_mode="soft" if interpolation == "anyup_soft" else "hard",
+            attention_mode=(
+                "soft" if interpolation in {"anyup_soft", "anyup_soft_mask"} else "hard"
+            ),
         )
     mode = "nearest" if interpolation == "nearest" else "bilinear"
     options = {} if mode == "nearest" else {"align_corners": False}

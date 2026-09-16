@@ -255,7 +255,10 @@ def test_patch_pca_bilinear_mask_interpolates_colors_then_applies_sharp_mask():
     assert np.all(bilinear_masked_pixels[:, 4, 0] > 0)
 
 
-@pytest.mark.parametrize("interpolation", ["anyup", "anyup_mask", "anyup_soft"])
+@pytest.mark.parametrize(
+    "interpolation",
+    ["anyup", "anyup_mask", "anyup_soft", "anyup_soft_mask"],
+)
 def test_patch_pca_anyup_streams_projected_values(
     monkeypatch,
     interpolation,
@@ -312,17 +315,79 @@ def test_patch_pca_anyup_streams_projected_values(
         calls[0][1],
         embeddings.reshape(1, 1, 2, 3).permute(0, 3, 1, 2),
     )
-    assert torch.equal(calls[0][2], calls[0][1])
+    if interpolation in {"anyup", "anyup_soft"}:
+        assert calls[0][2].shape == (1, 4, 1, 2)
+        assert torch.equal(calls[0][2][:, :3], calls[0][1])
+        assert torch.equal(calls[0][2][:, 3:], calls[0][1][:, :1])
+    else:
+        assert torch.equal(calls[0][2], calls[0][1])
     assert calls[0][3] == (2, 4)
     assert calls[0][4] == 7
-    assert calls[0][5] == ("soft" if interpolation == "anyup_soft" else "hard")
+    assert calls[0][5] == (
+        "soft" if interpolation in {"anyup_soft", "anyup_soft_mask"} else "hard"
+    )
     assert pixels.shape == (2, 4, 3)
-    if interpolation == "anyup":
-        assert len(calls) == 2
-        assert calls[1][1].shape == (1, 1, 1, 2)
-        assert calls[1][2] is None
-    else:
-        assert len(calls) == 1
+    assert result.foreground_mask.shape == (1, 2, 4)
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize(
+    ("dense_mode", "coarse_mode"),
+    [("anyup", "anyup_mask"), ("anyup_soft", "anyup_soft_mask")],
+)
+def test_patch_pca_anyup_dense_mask_thresholds_upsampled_pc1(
+    monkeypatch,
+    dense_mode,
+    coarse_mode,
+):
+    embeddings = torch.tensor([[[0.0, 3.0, 0.0], [3.0, 0.0, 0.0]]])
+    projection = _two_patch_projection()
+    projection = PatchPCAProjection(
+        **{
+            **projection.__dict__,
+            "foreground_threshold": 0.2,
+        }
+    )
+
+    def fake_stream(
+        _image,
+        features,
+        output_size,
+        *,
+        values=None,
+        q_chunk_size,
+        attention_mode="hard",
+    ):
+        del q_chunk_size, attention_mode
+        source = features if values is None else values
+        return torch.nn.functional.interpolate(
+            source,
+            size=output_size,
+            mode="bilinear",
+            align_corners=False,
+        )
+
+    monkeypatch.setattr(
+        "vision_lens.feature_pca.upsample_values_streaming",
+        fake_stream,
+    )
+    options = {
+        "patch_grid": (1, 2),
+        "image_size": (2, 4),
+        "projection": projection,
+        "guidance_image": torch.rand(1, 3, 2, 4),
+        "anyup_query_chunk_size": 7,
+    }
+
+    dense = project_patch_embeddings(embeddings, interpolation=dense_mode, **options)
+    coarse = project_patch_embeddings(embeddings, interpolation=coarse_mode, **options)
+
+    dense_pixels = np.asarray(dense.images[0])
+    coarse_pixels = np.asarray(coarse.images[0])
+    assert dense.foreground_mask[0, 0, 1]
+    assert not coarse.foreground_mask[0, 0, 1]
+    assert np.any(dense_pixels[:, 1] > 0)
+    assert np.all(coarse_pixels[:, 1] == 0)
 
 
 def test_patch_pca_anyup_fits_projection_from_original_features(monkeypatch):
