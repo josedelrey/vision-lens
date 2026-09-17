@@ -12,6 +12,21 @@ import torch
 from PIL import Image
 
 from vision_lens.anyup import is_anyup_interpolation
+from vision_lens.artifacts import (
+    PATCH_PCA_GRID_STEM,
+    attention_image_stem,
+    attention_images_grid_stem,
+    attention_layers_grid_stem,
+    check_artifact_overwrite,
+    gradcam_grid_stem,
+    gradcam_image_stem,
+    grid_page_path,
+    image_artifact_path,
+    named_artifact_path,
+    rollout_grid_stem,
+    rollout_image_stem,
+    unique_input_labels,
+)
 from vision_lens.attention import (
     AttentionExtractionResult,
     GradCamResult,
@@ -25,6 +40,7 @@ from vision_lens.config import (
     VisionLensConfig,
     VisualizationConfig,
     load_config,
+    validate_config,
 )
 from vision_lens.feature_pca import (
     ForegroundThreshold,
@@ -40,14 +56,13 @@ from vision_lens.feature_pca import (
     save_patch_pca_projection,
 )
 from vision_lens.manifest import can_write_output as _can_write
-from vision_lens.manifest import check_manifest_overwrite, write_run_manifest
+from vision_lens.manifest import write_run_manifest
 from vision_lens.models import LoadedModel, load_model
 from vision_lens.processing import (
     InputBatch,
     build_batch_preprocessor,
     iter_input_batches,
     preprocess_batch,
-    unique_input_labels,
 )
 from vision_lens.progress import status, track_image_batches, track_units
 from vision_lens.runtime import anyup_guidance, apply_seed
@@ -176,7 +191,7 @@ class _FigureGridCollector:
         return tuple(self.output_paths)
 
     def _write_page(self, stem: str, series: _GridSeries) -> None:
-        output_path = _page_path(
+        output_path = grid_page_path(
             self.output_dir,
             stem,
             self.grid_format,
@@ -245,9 +260,9 @@ class _PatchPCAGridCollector:
         return tuple(self.output_paths)
 
     def _write_page(self) -> None:
-        output_path = _page_path(
+        output_path = grid_page_path(
             self.output_dir,
-            "patch_pca_comparison",
+            PATCH_PCA_GRID_STEM,
             self.visualization.grid_format,
             self.series.page_index,
             self.page_count,
@@ -288,6 +303,7 @@ def run_patch_pca(
 def run_patch_pca_from_config(
     config: VisionLensConfig,
 ) -> PatchPCAPipelineResult:
+    validate_config(config)
     if config.task != "patch_pca":
         raise ValueError(f"Expected task='patch_pca', got {config.task!r}.")
     if config.model.architecture != "vit":
@@ -300,7 +316,7 @@ def run_patch_pca_from_config(
     fit_settings = _pca_fit_settings(config)
 
     started_at = datetime.now(timezone.utc)
-    check_manifest_overwrite(config)
+    check_artifact_overwrite(config)
     labels = unique_input_labels(config.input.paths)
     projection = (
         load_patch_pca_projection(config.analysis.projection_path)
@@ -356,6 +372,7 @@ def run_patch_pca_from_config(
     )
     output_paths: list[Path] = []
     retained_patch_pca = None
+    render_pca_images = config.output.heatmaps or config.output.grids
 
     if projection is not None:
         for input_batch in _tracked_input_batches(config, labels, "Project images"):
@@ -371,9 +388,14 @@ def run_patch_pca_from_config(
                 loaded_model.metadata,
                 projection=projection,
                 interpolation=config.visualization.interpolation,
-                guidance_image=anyup_guidance(config, loaded_model, batch.inputs),
+                guidance_image=(
+                    anyup_guidance(config, loaded_model, batch.inputs)
+                    if render_pca_images
+                    else None
+                ),
                 output_size=_analysis_output_size(config, loaded_model),
                 anyup_query_chunk_size=(config.visualization.anyup_query_chunk_size),
+                render_images=render_pca_images,
             )
             if len(config.input.paths) <= config.runtime.batch_size:
                 retained_patch_pca = patch_pca
@@ -406,9 +428,14 @@ def run_patch_pca_from_config(
                 foreground_side=fit_settings[2],
                 rgb_fit_scope=fit_settings[3],
                 interpolation=config.visualization.interpolation,
-                guidance_image=anyup_guidance(config, loaded_model, batch.inputs),
+                guidance_image=(
+                    anyup_guidance(config, loaded_model, batch.inputs)
+                    if render_pca_images
+                    else None
+                ),
                 output_size=_analysis_output_size(config, loaded_model),
                 anyup_query_chunk_size=(config.visualization.anyup_query_chunk_size),
+                render_images=render_pca_images,
             )
             projection = patch_pca.projection
             retained_patch_pca = patch_pca
@@ -454,7 +481,11 @@ def run_patch_pca_from_config(
                     Path(temporary_directory) / f"batch-{input_batch.index}.npy"
                 )
                 _save_array(embeddings, staged_path)
-                guidance = anyup_guidance(config, loaded_model, batch.inputs)
+                guidance = (
+                    anyup_guidance(config, loaded_model, batch.inputs)
+                    if render_pca_images
+                    else None
+                )
                 guidance_path = None
                 if guidance is not None:
                     guidance_path = (
@@ -501,7 +532,7 @@ def run_patch_pca_from_config(
             ) in track_units(
                 staged_batches,
                 total=len(config.input.paths),
-                description="Render PCA",
+                description="Project PCA",
                 unit="image",
                 size=lambda item: len(item[1]),
             ):
@@ -523,6 +554,7 @@ def run_patch_pca_from_config(
                             np.load(guidance_path, allow_pickle=False)
                         ).to(loaded_model.metadata.device)
                     ),
+                    render_images=render_pca_images,
                 )
                 output_paths.extend(
                     export_patch_pca_outputs(
@@ -537,10 +569,7 @@ def run_patch_pca_from_config(
                     )
                 )
 
-    if config.output.grids and (
-        len(config.input.paths) > 1
-        or (not config.output.heatmaps and not config.output.raw_arrays)
-    ):
+    if config.output.grids:
         output_paths.extend(grid_collector.finish())
     if config.analysis.save_projection is not None:
         assert projection is not None
@@ -570,16 +599,15 @@ def run_patch_pca_from_config(
 
 def run_vit_rollout_comparison(
     config_path: str | Path = "configs/vit_attention.yaml",
-    output_dir: str | Path | None = None,
 ) -> PipelineResult:
     config = load_config(config_path)
-    return run_vit_rollout_comparison_from_config(config, output_dir=output_dir)
+    return run_vit_rollout_comparison_from_config(config)
 
 
 def run_vit_rollout_comparison_from_config(
     config: VisionLensConfig,
-    output_dir: str | Path | None = None,
 ) -> PipelineResult:
+    validate_config(config)
     from vision_lens.attention import extract_attention_rollout
 
     if config.task not in {"vit_attention", "vit_rollout"}:
@@ -592,7 +620,7 @@ def run_vit_rollout_comparison_from_config(
         raise ValueError("ViT rollout comparison grids require attention settings.")
 
     started_at = datetime.now(timezone.utc)
-    check_manifest_overwrite(config)
+    check_artifact_overwrite(config)
     labels = unique_input_labels(config.input.paths)
     apply_seed(config.runtime.seed)
     loaded_model = _load_model_with_status(config)
@@ -665,16 +693,13 @@ def run_vit_rollout_comparison_from_config(
         )
         if len(config.input.paths) <= config.runtime.batch_size:
             retained_rollout = rollout
-        resolved_output_dir = (
-            Path(output_dir) if output_dir else config.output.directory
-        )
         output_paths.extend(
             export_rollout_comparison_outputs(
                 images=_visualization_images(batch, rendering),
                 image_paths=input_batch.paths,
                 layer_attention=layer_attention,
                 rollout=rollout,
-                output_dir=resolved_output_dir,
+                output_dir=config.output.directory,
                 alpha=config.visualization.overlay_alpha,
                 cmap=config.visualization.render_cmap,
                 grid_format=config.visualization.grid_format,
@@ -709,11 +734,12 @@ def run_gradcam(
 
 
 def run_gradcam_from_config(config: VisionLensConfig) -> GradCamPipelineResult:
+    validate_config(config)
     if config.model.architecture != "cnn":
         raise ValueError("Grad-CAM pipeline expects a CNN model config.")
 
     started_at = datetime.now(timezone.utc)
-    check_manifest_overwrite(config)
+    check_artifact_overwrite(config)
     labels = unique_input_labels(config.input.paths)
     apply_seed(config.runtime.seed)
     loaded_model = _load_model_with_status(config)
@@ -826,13 +852,14 @@ def run_gradcam_from_config(config: VisionLensConfig) -> GradCamPipelineResult:
 
 
 def run_vit_attention_from_config(config: VisionLensConfig) -> PipelineResult:
+    validate_config(config)
     if config.task != "vit_attention":
         raise ValueError(f"Expected task='vit_attention', got {config.task!r}.")
     if config.analysis.layers is None or config.analysis.head_fusion is None:
         raise ValueError("ViT attention pipeline requires attention settings.")
 
     started_at = datetime.now(timezone.utc)
-    check_manifest_overwrite(config)
+    check_artifact_overwrite(config)
     labels = unique_input_labels(config.input.paths)
     apply_seed(config.runtime.seed)
     loaded_model = _load_model_with_status(config)
@@ -954,10 +981,14 @@ def export_attention_outputs(
             image_layer = _layer_for_image(layer, image_index)
             for head_index in range(_head_count(image_layer)):
                 suffix = _head_suffix(image_layer, head_index)
-                stem = f"{labels[image_index]}_layer-{layer.layer_index}_{suffix}"
+                stem = attention_image_stem(
+                    labels[image_index], layer.layer_index, suffix
+                )
 
                 if output.heatmaps:
-                    path = output_dir / f"{stem}_heatmap.{output.image_format}"
+                    path = image_artifact_path(
+                        output_dir, stem, "heatmap", output.image_format
+                    )
                     if _can_write(path, output.overwrite):
                         heatmap = render_heatmap(
                             image_layer.maps,
@@ -973,7 +1004,9 @@ def export_attention_outputs(
                         )
                         output_paths.append(save_image(heatmap, path))
                 if output.overlays:
-                    path = output_dir / f"{stem}_overlay.{output.image_format}"
+                    path = image_artifact_path(
+                        output_dir, stem, "overlay", output.image_format
+                    )
                     if _can_write(path, output.overwrite):
                         overlay = overlay_attention(
                             image,
@@ -992,7 +1025,7 @@ def export_attention_outputs(
                         )
                         output_paths.append(save_image(overlay, path))
                 if output.raw_arrays:
-                    path = output_dir / f"{stem}.{output.raw_format}"
+                    path = named_artifact_path(output_dir, stem, output.raw_format)
                     if _can_write(path, output.overwrite):
                         output_paths.append(
                             _save_array(image_layer.maps[0, head_index], path)
@@ -1009,8 +1042,8 @@ def export_attention_outputs(
             suffix = _head_suffix(image_layers[0], head_index)
             pages = _chunks(image_layers, visualization.items_per_grid)
             for page_index, layer_page in enumerate(pages):
-                stem = f"{labels[image_index]}_layers_{suffix}"
-                output_path = _page_path(
+                stem = attention_layers_grid_stem(labels[image_index], suffix)
+                output_path = grid_page_path(
                     output_dir,
                     stem,
                     grid_format,
@@ -1044,7 +1077,7 @@ def export_attention_outputs(
         image_maps = [_slice_batch(layer.maps, index) for index in range(len(images))]
         for head_index in range(_head_count(layer)):
             suffix = _head_suffix(layer, head_index)
-            stem = f"layer-{layer.layer_index}_images_{suffix}"
+            stem = attention_images_grid_stem(layer.layer_index, suffix)
             if grid_collector is not None:
                 overlays = [
                     overlay_attention(
@@ -1070,7 +1103,7 @@ def export_attention_outputs(
                 tuple(range(len(images))), visualization.items_per_grid
             )
             for page_index, indices in enumerate(image_pages):
-                output_path = _page_path(
+                output_path = grid_page_path(
                     output_dir,
                     stem,
                     grid_format,
@@ -1116,42 +1149,54 @@ def export_patch_pca_outputs(
     total_grid_pages: int | None = None,
     grid_collector: _PatchPCAGridCollector | None = None,
 ) -> tuple[Path, ...]:
-    if len(patch_pca.images) != len(image_paths):
-        raise ValueError("Patch PCA images and image_paths must have the same length.")
-
     output = output_config or OutputConfig(output_dir)
     visualization = visualization_config or VisualizationConfig()
-    if input_sizes is not None and len(input_sizes) != len(patch_pca.images):
-        raise ValueError("Patch PCA images and input_sizes must have the same length.")
-    if visualization.output_size == "match" and input_sizes is None:
-        raise ValueError("input_sizes are required when output_size is 'match'.")
-    rendered_images = tuple(
-        _render_pca_at_output_size(
-            patch_pca,
-            index,
-            _resolved_image_output_size(
-                visualization,
-                input_sizes[index] if input_sizes is not None else None,
-                image.size,
-            ),
-            visualization,
-        )
-        for index, image in enumerate(patch_pca.images)
-    )
     labels = input_labels or tuple(path.stem for path in image_paths)
+    if len(labels) != len(image_paths):
+        raise ValueError("input_labels and image_paths must have the same length.")
+    renders_images = output.heatmaps or output.grids
+    if renders_images and len(patch_pca.images) != len(image_paths):
+        raise ValueError(
+            "Rendered patch PCA images and image_paths must have the same length."
+        )
+    if input_sizes is not None and len(input_sizes) != len(image_paths):
+        raise ValueError("input_sizes and image_paths must have the same length.")
+    if renders_images and visualization.output_size == "match" and input_sizes is None:
+        raise ValueError("input_sizes are required when output_size is 'match'.")
+    rendered_images = (
+        tuple(
+            _render_pca_at_output_size(
+                patch_pca,
+                index,
+                _resolved_image_output_size(
+                    visualization,
+                    input_sizes[index] if input_sizes is not None else None,
+                    image.size,
+                ),
+                visualization,
+            )
+            for index, image in enumerate(patch_pca.images)
+        )
+        if renders_images
+        else ()
+    )
     output_dir.mkdir(parents=True, exist_ok=True)
     output_paths = []
     if output.heatmaps:
         for label, image in zip(labels, rendered_images, strict=True):
-            output_path = output_dir / f"{label}_patch_pca.{output.image_format}"
+            output_path = image_artifact_path(
+                output_dir, label, "patch_pca", output.image_format
+            )
             if _can_write(output_path, output.overwrite):
                 output_paths.append(save_image(image, output_path))
     if output.raw_arrays:
         for index, label in enumerate(labels):
-            embedding_path = (
-                output_dir / f"{label}_patch_embeddings.{output.raw_format}"
+            embedding_path = image_artifact_path(
+                output_dir, label, "patch_embeddings", output.raw_format
             )
-            mask_path = output_dir / f"{label}_foreground_mask.{output.raw_format}"
+            mask_path = image_artifact_path(
+                output_dir, label, "foreground_mask", output.raw_format
+            )
             if _can_write(embedding_path, output.overwrite):
                 output_paths.append(
                     _save_array(patch_pca.patch_embeddings[index], embedding_path)
@@ -1164,14 +1209,7 @@ def export_patch_pca_outputs(
         return tuple(output_paths)
 
     if grid_collector is not None:
-        if grid_collector.total_items > 1 or (
-            not output.heatmaps and not output.raw_arrays
-        ):
-            grid_collector.add(list(rendered_images), list(labels))
-        return tuple(output_paths)
-
-    single_image_run = len(patch_pca.images) == 1 and total_grid_pages in {None, 1}
-    if single_image_run and (output.heatmaps or output.raw_arrays):
+        grid_collector.add(list(rendered_images), list(labels))
         return tuple(output_paths)
 
     indices_pages = _chunks(
@@ -1181,9 +1219,9 @@ def export_patch_pca_outputs(
     for page_index, indices in enumerate(indices_pages):
         page_images = [rendered_images[index] for index in indices]
         page_labels = [labels[index] for index in indices]
-        output_path = _page_path(
+        output_path = grid_page_path(
             output_dir,
-            "patch_pca_comparison",
+            PATCH_PCA_GRID_STEM,
             visualization.grid_format,
             grid_page_offset + page_index,
             total_grid_pages or len(indices_pages),
@@ -1241,9 +1279,11 @@ def export_rollout_comparison_outputs(
     for image_index, image in enumerate(images):
         for rollout_layer in rollout.layers:
             rollout_for_image = _layer_for_image(rollout_layer, image_index)
-            stem = f"{labels[image_index]}_rollout-{rollout_layer.layer_index}"
+            stem = rollout_image_stem(labels[image_index], rollout_layer.layer_index)
             if output.heatmaps:
-                path = output_dir / f"{stem}_heatmap.{output.image_format}"
+                path = image_artifact_path(
+                    output_dir, stem, "heatmap", output.image_format
+                )
                 if _can_write(path, output.overwrite):
                     output_paths.append(
                         save_image(
@@ -1261,7 +1301,9 @@ def export_rollout_comparison_outputs(
                         )
                     )
             if output.overlays:
-                path = output_dir / f"{stem}_overlay.{output.image_format}"
+                path = image_artifact_path(
+                    output_dir, stem, "overlay", output.image_format
+                )
                 if _can_write(path, output.overwrite):
                     output_paths.append(
                         save_image(
@@ -1283,7 +1325,7 @@ def export_rollout_comparison_outputs(
                         )
                     )
             if output.raw_arrays:
-                path = output_dir / f"{stem}.{output.raw_format}"
+                path = named_artifact_path(output_dir, stem, output.raw_format)
                 if _can_write(path, output.overwrite):
                     output_paths.append(_save_array(rollout_for_image.maps[0, 0], path))
 
@@ -1297,9 +1339,9 @@ def export_rollout_comparison_outputs(
             for page_index, indices in enumerate(layer_pages):
                 layer_page = _attention_subset(layer_attention, indices)
                 rollout_page = _attention_subset(rollout, indices)
-                grid_path = _page_path(
+                grid_path = grid_page_path(
                     output_dir,
-                    f"{labels[image_index]}_rollout_comparison",
+                    rollout_grid_stem(labels[image_index]),
                     grid_format,
                     page_index,
                     len(layer_pages),
@@ -1372,9 +1414,9 @@ def export_gradcam_outputs(
 
     for image_index, image in enumerate(images):
         maps = _slice_batch(gradcam.maps, image_index)
-        stem = f"{labels[image_index]}_gradcam"
+        stem = gradcam_image_stem(labels[image_index])
         if output.heatmaps:
-            path = output_dir / f"{stem}_heatmap.{output.image_format}"
+            path = image_artifact_path(output_dir, stem, "heatmap", output.image_format)
             if _can_write(path, output.overwrite):
                 output_paths.append(
                     save_image(
@@ -1392,7 +1434,7 @@ def export_gradcam_outputs(
                     )
                 )
         if output.overlays:
-            path = output_dir / f"{stem}_overlay.{output.image_format}"
+            path = image_artifact_path(output_dir, stem, "overlay", output.image_format)
             if _can_write(path, output.overwrite):
                 output_paths.append(
                     save_image(
@@ -1414,7 +1456,7 @@ def export_gradcam_outputs(
                     )
                 )
         if output.raw_arrays:
-            path = output_dir / f"{stem}.{output.raw_format}"
+            path = named_artifact_path(output_dir, stem, output.raw_format)
             if _can_write(path, output.overwrite):
                 output_paths.append(_save_array(maps[0, 0], path))
 
@@ -1426,25 +1468,21 @@ def export_gradcam_outputs(
                     image,
                     image_map,
                     alpha=alpha,
-                    alpha_curve_steepness=(
-                        visualization.overlay_alpha_curve_steepness
-                    ),
-                    alpha_curve_midpoint=(
-                        visualization.overlay_alpha_curve_midpoint
-                    ),
+                    alpha_curve_steepness=(visualization.overlay_alpha_curve_steepness),
+                    alpha_curve_midpoint=(visualization.overlay_alpha_curve_midpoint),
                     cmap=cmap,
                     normalization=visualization.normalization,
                     normalization_range=normalization_range,
                 )
                 for image, image_map in zip(images, image_maps, strict=True)
             ]
-            grid_collector.add("gradcam_images", overlays, labels)
+            grid_collector.add(gradcam_grid_stem(), overlays, labels)
             return tuple(output_paths)
         image_pages = _chunks(tuple(range(len(images))), visualization.items_per_grid)
         for page_index, indices in enumerate(image_pages):
-            grid_path = _page_path(
+            grid_path = grid_page_path(
                 output_dir,
-                "gradcam_images",
+                gradcam_grid_stem(),
                 grid_format,
                 grid_page_offset + page_index,
                 total_grid_pages or len(image_pages),
@@ -1832,18 +1870,6 @@ def _save_array(value: Any, path: Path) -> Path:
         else:
             np.save(file, array)
     return path
-
-
-def _page_path(
-    directory: Path,
-    stem: str,
-    extension: str,
-    page_index: int,
-    page_count: int,
-) -> Path:
-    if page_count == 1:
-        return directory / f"{stem}.{extension}"
-    return directory / f"{stem}_part-{page_index + 1:03d}.{extension}"
 
 
 def _attention_subset(

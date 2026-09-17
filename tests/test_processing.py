@@ -2,7 +2,8 @@ from pathlib import Path
 
 from PIL import Image
 
-from vision_lens.processing import iter_input_batches, unique_input_labels
+from vision_lens.artifacts import unique_input_labels
+from vision_lens.processing import iter_input_batches
 
 
 def test_input_batches_load_only_the_configured_batch_size(monkeypatch, tmp_path):

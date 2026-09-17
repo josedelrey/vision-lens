@@ -1,13 +1,20 @@
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 import yaml
 
+from vision_lens.artifacts import artifact_plan
 from vision_lens.config import (
+    AttentionAnalysisConfig,
+    GradCAMAnalysisConfig,
+    PatchPCAAnalysisConfig,
+    RolloutAnalysisConfig,
     config_to_dict,
     load_config,
     parse_config,
     resolved_config_yaml,
+    validate_config,
 )
 
 
@@ -170,9 +177,7 @@ def test_video_rejects_crop_and_pad_that_shift_spatial_maps(tmp_path):
     raw["video"] = {}
     for field in ("crop", "pad"):
         raw["preprocessing"] = {"image_size": 672, field: "center"}
-        with pytest.raises(
-            ValueError, match="preprocessing.crop and preprocessing.pad"
-        ):
+        with pytest.raises(ValueError, match=f"preprocessing.{field}.*not applicable"):
             parse_config(raw)
 
 
@@ -270,7 +275,7 @@ def test_removed_match_input_size_is_rejected():
 
 
 def test_anyup_query_chunk_size_requires_anyup_interpolation():
-    with pytest.raises(ValueError, match="requires.*interpolation"):
+    with pytest.raises(ValueError, match="anyup_query_chunk_size.*not applicable"):
         parse_config(_minimal_config({"anyup_query_chunk_size": 4096}))
 
     with pytest.raises(ValueError, match="positive integer"):
@@ -828,6 +833,194 @@ def test_saved_projection_cannot_collide_with_run_artifacts(tmp_path, collision)
         parse_config(raw)
 
 
+def test_saved_projection_cannot_collide_with_planned_media(tmp_path):
+    raw = _minimal_config(method="patch_pca")
+    raw["output"]["directory"] = str(tmp_path)
+    raw["analysis"]["save_projection"] = str(tmp_path / "1_patch_pca.png")
+
+    with pytest.raises(ValueError, match="save_projection.*planned output"):
+        parse_config(raw)
+
+
+def test_loaded_projection_cannot_collide_with_planned_media(tmp_path):
+    projection_path = tmp_path / "1_patch_pca.png"
+    projection_path.touch()
+    raw = _minimal_config(method="patch_pca")
+    raw["output"]["directory"] = str(tmp_path)
+    raw["analysis"].update(
+        {
+            "projection": "load",
+            "projection_path": str(projection_path),
+        }
+    )
+
+    with pytest.raises(ValueError, match="projection_path.*protected input"):
+        parse_config(raw)
+
+
+def test_loaded_video_projection_cannot_collide_with_planned_media(tmp_path):
+    source = tmp_path / "clip.mp4"
+    source.touch()
+    output_directory = tmp_path / "outputs"
+    output_directory.mkdir()
+    projection_path = output_directory / "clip_patch_pca.mp4"
+    projection_path.touch()
+    raw = _minimal_config(method="patch_pca")
+    raw["input"] = {"files": [str(source)]}
+    raw["output"]["directory"] = str(output_directory)
+    raw["analysis"].update(
+        {
+            "projection": "load",
+            "projection_path": str(projection_path),
+        }
+    )
+    raw["video"] = {}
+
+    with pytest.raises(ValueError, match="projection_path.*protected input"):
+        parse_config(raw)
+
+
+def test_generated_output_cannot_overwrite_an_input_file(tmp_path):
+    source = tmp_path / "source.jpg"
+    collision = tmp_path / "source_gradcam_heatmap.png"
+    source.touch()
+    collision.touch()
+    raw = _minimal_config(
+        method="gradcam",
+        architecture="cnn",
+        backend="torchvision",
+    )
+    raw["input"]["files"] = [str(source), str(collision)]
+    raw["output"]["directory"] = str(tmp_path)
+
+    with pytest.raises(ValueError, match="generated output would overwrite"):
+        parse_config(raw)
+
+
+def test_output_directory_may_contain_inputs_without_name_collisions(tmp_path):
+    source = tmp_path / "source.jpg"
+    source.touch()
+    raw = _minimal_config()
+    raw["input"]["files"] = [str(source)]
+    raw["output"]["directory"] = str(tmp_path)
+
+    config = parse_config(raw)
+
+    assert config.output.directory == tmp_path
+
+
+def test_multi_video_output_subdirectories_are_validated(tmp_path):
+    first = tmp_path / "first.mp4"
+    second = tmp_path / "second.mp4"
+    first.touch()
+    second.touch()
+    output = tmp_path / "outputs"
+    output.mkdir()
+    (output / "first").touch()
+    raw = _minimal_config()
+    raw["input"]["files"] = [str(first), str(second)]
+    raw["output"]["directory"] = str(output)
+    raw["video"] = {}
+
+    with pytest.raises(ValueError, match="output.directory.*not a file"):
+        parse_config(raw)
+
+
+def test_match_output_size_is_rejected_for_raw_only_output():
+    raw = _minimal_config({"output_size": "match"})
+    raw["output"].update(
+        {"heatmaps": False, "overlays": False, "grids": False, "raw_arrays": True}
+    )
+
+    with pytest.raises(ValueError, match="output_size='match'.*rendered"):
+        parse_config(raw)
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    (("interpolation", "nearest"), ("output_size", 128)),
+)
+def test_raw_only_patch_pca_rejects_rendering_settings(key, value):
+    raw = _minimal_config(method="patch_pca")
+    raw["output"].update({"heatmaps": False, "grids": False, "raw_arrays": True})
+    raw["visualization"][key] = value
+
+    with pytest.raises(ValueError, match=rf"visualization.{key}.*not applicable"):
+        parse_config(raw)
+
+
+def test_direct_configs_cannot_bypass_workflow_applicability(tmp_path):
+    source = tmp_path / "clip.mp4"
+    source.touch()
+    raw = _minimal_config()
+    raw["input"] = {"files": [str(source)]}
+    raw["output"]["directory"] = str(tmp_path / "outputs")
+    raw["video"] = {}
+    config = parse_config(raw)
+    invalid = replace(config, output=replace(config.output, grids=True))
+
+    with pytest.raises(ValueError, match="output.grids.*not applicable"):
+        validate_config(invalid)
+    with pytest.raises(ValueError, match="output.grids.*not applicable"):
+        config_to_dict(invalid)
+
+
+def test_direct_configs_cannot_bypass_value_validation():
+    config = parse_config(_minimal_config())
+    invalid_configs = (
+        (
+            replace(config, runtime=replace(config.runtime, seed=2**32)),
+            "runtime.seed",
+        ),
+        (
+            replace(
+                config,
+                visualization=replace(
+                    config.visualization,
+                    overlay_alpha=float("nan"),
+                ),
+            ),
+            "visualization.overlay_alpha",
+        ),
+        (
+            replace(config, model=replace(config.model, options={1: "value"})),
+            "model.options",
+        ),
+    )
+
+    for invalid, field_name in invalid_configs:
+        with pytest.raises(ValueError, match=field_name):
+            validate_config(invalid)
+        with pytest.raises(ValueError, match=field_name):
+            config_to_dict(invalid)
+
+
+@pytest.mark.parametrize(
+    ("method", "expected_type", "architecture", "backend"),
+    [
+        ("attention", AttentionAnalysisConfig, "vit", "timm"),
+        ("rollout", RolloutAnalysisConfig, "vit", "timm"),
+        ("gradcam", GradCAMAnalysisConfig, "cnn", "torchvision"),
+        ("patch_pca", PatchPCAAnalysisConfig, "vit", "timm"),
+    ],
+)
+def test_analysis_uses_method_specific_config_types(
+    method,
+    expected_type,
+    architecture,
+    backend,
+):
+    config = parse_config(
+        _minimal_config(
+            method=method,
+            architecture=architecture,
+            backend=backend,
+        )
+    )
+
+    assert isinstance(config.analysis, expected_type)
+
+
 def test_patch_pca_projection_modes_reject_irrelevant_settings(tmp_path):
     projection_path = tmp_path / "projection.npz"
     projection_path.touch()
@@ -865,12 +1058,44 @@ def test_patch_pca_can_fit_only_a_saved_projection(tmp_path):
     assert config.analysis.save_projection == tmp_path / "projection.npz"
 
 
-def test_single_image_grids_only_patch_pca_warns():
+def test_single_image_grids_only_patch_pca_is_valid():
     raw = _minimal_config(method="patch_pca")
     raw["output"].update({"heatmaps": False, "grids": True, "raw_arrays": False})
 
-    with pytest.warns(UserWarning, match="one-tile comparison grid"):
-        parse_config(raw)
+    config = parse_config(raw)
+
+    assert config.output.grids is True
+
+
+def test_artifact_plan_reserves_grid_pages_beyond_three_digits(tmp_path):
+    raw = _minimal_config()
+    raw["output"]["directory"] = str(tmp_path)
+    config = parse_config(raw)
+
+    assert artifact_plan(config).matches(
+        tmp_path / "layer-0_images_heads-mean_part-1000.png"
+    )
+
+
+def test_artifact_plan_reserves_video_batches_beyond_six_digits(tmp_path):
+    source = tmp_path / "clip.mp4"
+    source.touch()
+    raw = _minimal_config()
+    raw["input"] = {"files": [str(source)]}
+    raw["output"].update(
+        {
+            "directory": str(tmp_path / "outputs"),
+            "heatmaps": False,
+            "overlays": False,
+            "raw_arrays": True,
+        }
+    )
+    raw["video"] = {}
+    config = parse_config(raw)
+
+    assert artifact_plan(config).matches(
+        config.output.directory / "clip_attention_layer-0_heads-mean_frames-1000000.npy"
+    )
 
 
 def test_choice_settings_reject_wrong_shaped_values_cleanly():
@@ -1065,7 +1290,7 @@ def test_patch_pca_rejects_unsupported_overlay_output():
     raw_config = _minimal_config(method="patch_pca")
     raw_config["output"]["overlays"] = True
 
-    with pytest.raises(ValueError, match="overlays is not supported"):
+    with pytest.raises(ValueError, match="output.overlays.*not applicable"):
         parse_config(raw_config)
 
 

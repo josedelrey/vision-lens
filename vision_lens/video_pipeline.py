@@ -10,6 +10,14 @@ import numpy as np
 import torch
 from PIL import Image
 
+from vision_lens.artifacts import (
+    check_artifact_overwrite,
+    map_stream_name,
+    rendered_stream_name,
+    video_artifact_path,
+    video_raw_batch_path,
+    video_run_layouts,
+)
 from vision_lens.attention import (
     AttentionExtractionResult,
     GradCamResult,
@@ -18,7 +26,14 @@ from vision_lens.attention import (
     extract_gradcam,
     infer_patch_grid_from_image,
 )
-from vision_lens.config import VisionLensConfig
+from vision_lens.config import (
+    AttentionAnalysisConfig,
+    GradCAMAnalysisConfig,
+    PatchPCAAnalysisConfig,
+    RolloutAnalysisConfig,
+    VisionLensConfig,
+    validate_config,
+)
 from vision_lens.feature_pca import (
     PatchPCAProjection,
     extract_patch_embeddings,
@@ -28,13 +43,12 @@ from vision_lens.feature_pca import (
     save_patch_pca_projection,
 )
 from vision_lens.manifest import can_write_output as _can_write
-from vision_lens.manifest import check_manifest_overwrite, write_run_manifest
+from vision_lens.manifest import write_run_manifest
 from vision_lens.models import LoadedModel, load_model
 from vision_lens.processing import (
     InputBatch,
     build_batch_preprocessor,
     preprocess_batch,
-    unique_input_labels,
 )
 from vision_lens.progress import status, track_video_batches
 from vision_lens.runtime import anyup_guidance, apply_seed
@@ -81,34 +95,30 @@ class _MapStream:
 def run_video_from_config(
     config: VisionLensConfig,
 ) -> VideoPipelineResult | VideoBatchPipelineResult:
+    validate_config(config)
     if config.video is None:
         raise ValueError("Video pipeline requires a video configuration section.")
     if len(config.input.paths) == 1:
         return _run_single_video_from_config(config)
 
     video_configs = []
-    for source_path, label in zip(
-        config.input.paths, unique_input_labels(config.input.paths), strict=True
-    ):
+    for layout in video_run_layouts(config):
         analysis = config.analysis
-        if analysis.save_projection is not None:
-            projection_path = analysis.save_projection
+        if isinstance(analysis, PatchPCAAnalysisConfig):
             analysis = replace(
                 analysis,
-                save_projection=projection_path.with_name(
-                    f"{projection_path.stem}_{label}{projection_path.suffix}"
-                ),
+                save_projection=layout.projection_path,
             )
         video_config = replace(
             config,
             input=replace(
                 config.input,
-                paths=(source_path,),
+                paths=(layout.source_path,),
             ),
-            output=replace(config.output, directory=config.output.directory / label),
+            output=replace(config.output, directory=layout.output_directory),
             analysis=analysis,
         )
-        check_manifest_overwrite(video_config)
+        check_artifact_overwrite(video_config)
         video_configs.append(video_config)
 
     require_video_dependencies()
@@ -136,7 +146,7 @@ def _run_single_video_from_config(
     assert config.video is not None
 
     started_at = datetime.now(timezone.utc)
-    check_manifest_overwrite(config)
+    check_artifact_overwrite(config)
     if loaded_model is None:
         require_video_dependencies()
     source_path = config.input.paths[0]
@@ -181,20 +191,24 @@ def _run_single_video_from_config(
         replace(config.preprocessing, resize="stretch", crop="none", pad="none"),
     )
     projection = _video_pca_projection(config, loaded_model, transform, source)
+    pca_analysis = (
+        config.analysis if isinstance(config.analysis, PatchPCAAnalysisConfig) else None
+    )
     projection_only = (
-        config.analysis.method == "patch_pca"
-        and config.analysis.projection == "fit"
-        and config.analysis.save_projection is not None
+        pca_analysis is not None
+        and pca_analysis.projection == "fit"
+        and pca_analysis.save_projection is not None
         and not config.output.heatmaps
         and not config.output.raw_arrays
     )
     if projection_only:
         assert projection is not None
-        assert config.analysis.save_projection is not None
+        assert pca_analysis is not None
+        assert pca_analysis.save_projection is not None
         output_paths: tuple[Path, ...] = ()
-        if _can_write(config.analysis.save_projection, config.output.overwrite):
-            save_patch_pca_projection(projection, config.analysis.save_projection)
-            output_paths = (config.analysis.save_projection,)
+        if _can_write(pca_analysis.save_projection, config.output.overwrite):
+            save_patch_pca_projection(projection, pca_analysis.save_projection)
+            output_paths = (pca_analysis.save_projection,)
         write_run_manifest(
             requested_config,
             loaded_model,
@@ -307,10 +321,14 @@ def _run_single_video_from_config(
         raise ValueError("The configured video time range selected no frames.")
 
     output_paths = list(exports.output_paths)
-    if config.analysis.save_projection is not None and projection is not None:
-        if _can_write(config.analysis.save_projection, config.output.overwrite):
-            save_patch_pca_projection(projection, config.analysis.save_projection)
-            output_paths.insert(0, config.analysis.save_projection)
+    if (
+        pca_analysis is not None
+        and pca_analysis.save_projection is not None
+        and projection is not None
+    ):
+        if _can_write(pca_analysis.save_projection, config.output.overwrite):
+            save_patch_pca_projection(projection, pca_analysis.save_projection)
+            output_paths.insert(0, pca_analysis.save_projection)
     output_paths_tuple = tuple(output_paths)
     encoded_duration = processed_frames / config.video.sampling_rate
     write_run_manifest(
@@ -382,7 +400,9 @@ class _VideoExports:
                         normalization=normalization,
                         normalization_range=normalization_range,
                     )
-                    self._write_video(f"{stream.name}_heatmap", heatmap)
+                    self._write_video(
+                        rendered_stream_name(stream.name, "heatmap"), heatmap
+                    )
                 if self.config.output.overlays:
                     display_frame = _frame_at_output_size(original, self.resolution)
                     overlay = overlay_attention(
@@ -400,7 +420,9 @@ class _VideoExports:
                         normalization=normalization,
                         normalization_range=normalization_range,
                     )
-                    self._write_video(f"{stream.name}_overlay", overlay)
+                    self._write_video(
+                        rendered_stream_name(stream.name, "overlay"), overlay
+                    )
             if self.config.output.raw_arrays:
                 self._write_raw_batch(
                     stream.name,
@@ -434,7 +456,11 @@ class _VideoExports:
         )
 
     def _write_video(self, name: str, image: Image.Image) -> None:
-        path = self.config.output.directory / f"{self.source_stem}_{name}.mp4"
+        path = video_artifact_path(
+            self.config.output.directory,
+            self.source_stem,
+            name,
+        )
         resolution = self.resolution
         if self.config.visualization.interpolation == "nearest" and name.endswith(
             "_heatmap"
@@ -467,8 +493,12 @@ class _VideoExports:
         batch_index: int,
     ) -> None:
         extension = self.config.output.raw_format
-        path = self.config.output.directory / (
-            f"{self.source_stem}_{name}_frames-{batch_index:06d}.{extension}"
+        path = video_raw_batch_path(
+            self.config.output.directory,
+            self.source_stem,
+            name,
+            batch_index,
+            extension,
         )
         if not _can_write(path, self.config.output.overwrite):
             return
@@ -489,10 +519,11 @@ def _video_pca_projection(
     transform: Any,
     source: VideoMetadata,
 ) -> PatchPCAProjection | None:
-    if config.analysis.method != "patch_pca":
+    if not isinstance(config.analysis, PatchPCAAnalysisConfig):
         return None
-    if config.analysis.projection == "load":
-        return load_patch_pca_projection(config.analysis.projection_path)
+    analysis = config.analysis
+    if analysis.projection == "load":
+        return load_patch_pca_projection(analysis.projection_path)
 
     assert config.video is not None
     sample_count = estimated_sample_count(source, config.video)
@@ -626,6 +657,7 @@ def _analyze_maps(
 ) -> AttentionExtractionResult | GradCamResult:
     guidance_image = anyup_guidance(config, loaded_model, inputs)
     if config.analysis.method == "attention":
+        assert isinstance(config.analysis, AttentionAnalysisConfig)
         return extract_attention_maps(
             loaded_model.model,
             inputs,
@@ -640,6 +672,7 @@ def _analyze_maps(
             anyup_query_chunk_size=config.visualization.anyup_query_chunk_size,
         )
     if config.analysis.method == "rollout":
+        assert isinstance(config.analysis, RolloutAnalysisConfig)
         return extract_attention_rollout(
             loaded_model.model,
             inputs,
@@ -651,6 +684,7 @@ def _analyze_maps(
             output_size=output_size,
             anyup_query_chunk_size=config.visualization.anyup_query_chunk_size,
         )
+    assert isinstance(config.analysis, GradCAMAnalysisConfig)
     target_classes = (
         None
         if config.analysis.target_class is None
@@ -690,7 +724,7 @@ def _map_streams(
                 head_name = f"head-{layer.head_indices[map_index]}"
             streams.append(
                 _MapStream(
-                    f"{method}_layer-{layer.layer_index}_{head_name}",
+                    map_stream_name(method, layer.layer_index, head_name),
                     layer.maps[:, map_index : map_index + 1],
                 )
             )
@@ -823,11 +857,12 @@ def _validate_gradcam_class(
     config: VisionLensConfig,
     loaded_model: LoadedModel,
 ) -> None:
+    if not isinstance(config.analysis, GradCAMAnalysisConfig):
+        return
     target_class = config.analysis.target_class
     class_count = loaded_model.metadata.num_classes
     if (
-        config.analysis.method == "gradcam"
-        and target_class is not None
+        target_class is not None
         and class_count is not None
         and target_class >= class_count
     ):

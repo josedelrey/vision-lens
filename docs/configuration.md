@@ -170,7 +170,8 @@ load` accepts only `projection_path` and reuses all fitted settings, so
 foreground settings and `save_projection` are invalid. Saving a fitted
 projection counts as an output, allowing a projection-only run with every
 media and raw-array output disabled. The save path cannot be an input file or
-the output directory's reserved `run-manifest.json` path.
+any path reserved for the run manifest, rendered media, grid pages, or raw
+arrays. A loaded projection is protected by the same collision check.
 
 A loaded projection reuses its fitted foreground mode, rule, RGB fit scope, and
 color ranges, so new images remain in the same PCA color space. For images,
@@ -239,7 +240,6 @@ visualization:
   dpi: 150
   output_size: match
   interpolation: bilinear_mask
-  anyup_query_chunk_size: null
   overlay_alpha: 0.6
   overlay_alpha_curve:
     steepness: 10
@@ -251,7 +251,6 @@ visualization:
     transparent: true
   grid_format: pdf
   normalization: shared
-  normalization_range: null
 ```
 
 | Setting | Parser default | Description | Example |
@@ -273,7 +272,11 @@ visualization:
 | `cmap_black` | `null` | Optional black start using 0–255 palette positions. `threshold` stays black through that position; `blend_width` controls the linear transition; `transparent` reveals the source beneath pure black in overlays. | `{threshold: 20, blend_width: 35, transparent: true}` |
 | `grid_format` | `png` | `png`, `pdf`, or `svg`. | `pdf` |
 | `normalization` | `per_map` | `per_map`, `shared`, or `fixed`. | `shared` |
-| `normalization_range` | `null` | Required `[min, max]` for `fixed`; otherwise must be `null`. | `[0, 1]` |
+| `normalization_range` | `null` | Required `[min, max]` for `fixed`; omit it for other normalization modes. | `[0, 1]` |
+
+The example intentionally omits conditional settings rather than writing them
+as `null`: add `anyup_query_chunk_size` only for an AnyUp interpolation mode,
+and add `normalization_range` only with `normalization: fixed`.
 
 Grid layout settings are valid only for image runs with `output.grids: true`;
 video configurations reject them. Patch PCA grids always omit labels and reject
@@ -384,7 +387,7 @@ output:
 | `directory` | required | Output folder. An existing path must be a directory. | `outputs/run-1` |
 | `heatmaps` | `true` | Export heatmaps or PCA color maps. | `false` |
 | `overlays` | `true` | Export attention, rollout, or Grad-CAM overlays. Omit for patch PCA. | `false` |
-| `grids` | `true` | Export image comparison grids. Image configurations only; omit this setting from video configurations. A single-image PCA run skips its redundant one-tile grid when another per-image output is enabled; a grids-only run exports the one-tile grid and warns. | `false` |
+| `grids` | `true` | Export image comparison grids. Image configurations only; omit this setting from video configurations. A single-image run exports a one-tile grid. | `false` |
 | `raw_arrays` | `false` | Export analysis arrays without rendering. Video PCA exports the normalized full-frame RGB patch projection, not a foreground mask. | `true` |
 | `image_format` | `png` | `png`, `jpeg`, `tiff`, or `webp`; standalone image outputs only. | `webp` |
 | `raw_format` | `npy` | `npy` or compressed `npz`; valid only when `raw_arrays: true`. | `npz` |
