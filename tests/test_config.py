@@ -663,6 +663,15 @@ def test_input_folders_patterns_recursion_and_limit_are_resolved(tmp_path):
     assert config_to_dict(config)["input"] == {"files": [str(image_dir / "a.jpg")]}
 
 
+@pytest.mark.parametrize("pattern", ["/tmp/*.jpg", "../*.jpg", r"C:\\*.jpg"])
+def test_input_glob_patterns_must_be_relative_and_contained(tmp_path, pattern):
+    raw_config = _minimal_config()
+    raw_config["input"] = {"folders": [str(tmp_path)], "patterns": [pattern]}
+
+    with pytest.raises(ValueError, match="relative glob patterns"):
+        parse_config(raw_config)
+
+
 def test_all_new_controls_are_parsed_and_resolved(tmp_path):
     raw_config = _minimal_config(
         method="gradcam",
@@ -802,6 +811,23 @@ def test_pca_projection_paths_resolve_from_config_and_load_must_exist(tmp_path):
         parse_config(raw_config, base_dir=tmp_path)
 
 
+@pytest.mark.parametrize("collision", ["input", "manifest"])
+def test_saved_projection_cannot_collide_with_run_artifacts(tmp_path, collision):
+    input_path = Path("examples/1.jpg").resolve()
+    output_directory = tmp_path / "outputs"
+    raw = _minimal_config(method="patch_pca")
+    raw["input"]["files"] = [str(input_path)]
+    raw["output"]["directory"] = str(output_directory)
+    raw["analysis"]["save_projection"] = (
+        str(input_path)
+        if collision == "input"
+        else str(output_directory / "run-manifest.json")
+    )
+
+    with pytest.raises(ValueError, match="must not (overwrite|use)"):
+        parse_config(raw)
+
+
 def test_patch_pca_projection_modes_reject_irrelevant_settings(tmp_path):
     projection_path = tmp_path / "projection.npz"
     projection_path.touch()
@@ -832,9 +858,7 @@ def test_patch_pca_projection_modes_reject_irrelevant_settings(tmp_path):
 def test_patch_pca_can_fit_only_a_saved_projection(tmp_path):
     raw = _minimal_config(method="patch_pca")
     raw["analysis"]["save_projection"] = str(tmp_path / "projection.npz")
-    raw["output"].update(
-        {"heatmaps": False, "grids": False, "raw_arrays": False}
-    )
+    raw["output"].update({"heatmaps": False, "grids": False, "raw_arrays": False})
 
     config = parse_config(raw)
 
@@ -854,6 +878,60 @@ def test_choice_settings_reject_wrong_shaped_values_cleanly():
     raw["preprocessing"]["resize"] = []
 
     with pytest.raises(ValueError, match="preprocessing.resize must be one of"):
+        parse_config(raw)
+
+
+def test_attention_heads_must_be_non_empty_when_configured():
+    raw = _minimal_config()
+    raw["analysis"]["heads"] = []
+
+    with pytest.raises(ValueError, match="analysis.heads must be a non-empty list"):
+        parse_config(raw)
+
+
+def test_model_option_keys_must_be_strings():
+    raw = _minimal_config()
+    raw["model"]["options"] = {1: "value"}
+
+    with pytest.raises(ValueError, match="model.options keys must be strings"):
+        parse_config(raw)
+
+
+@pytest.mark.parametrize(
+    ("location", "message"),
+    [("top level", "top level"), ("section", "runtime")],
+)
+def test_configuration_keys_must_be_strings(location, message):
+    raw = _minimal_config()
+    if location == "top level":
+        raw[1] = {}
+    else:
+        raw["runtime"][1] = "value"
+
+    with pytest.raises(ValueError, match=f"{message} keys must be strings"):
+        parse_config(raw)
+
+
+@pytest.mark.parametrize(
+    ("device", "precision"),
+    [("cpu", "float16"), ("mps", "bfloat16")],
+)
+def test_static_device_precision_incompatibilities_are_rejected(device, precision):
+    raw = _minimal_config()
+    raw["runtime"].update({"device": device, "precision": precision})
+
+    with pytest.raises(ValueError, match=f"{precision}.*{device.upper()}"):
+        parse_config(raw)
+
+
+@pytest.mark.parametrize("nested", [False, True])
+def test_output_directory_cannot_be_a_file_or_descend_from_one(tmp_path, nested):
+    file_path = tmp_path / "not-a-directory"
+    file_path.touch()
+    raw = _minimal_config()
+    raw["output"]["directory"] = str(file_path / "child" if nested else file_path)
+
+    with pytest.raises(ValueError, match="output.directory.*not a (file|directory)"):
         parse_config(raw)
 
 

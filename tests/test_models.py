@@ -5,11 +5,15 @@ import pytest
 import torch
 
 from vision_lens.attention import extract_attention_maps
-from vision_lens.config import ModelConfig, PreprocessingConfig, RuntimeConfig
+from vision_lens.config import (
+    ModelConfig,
+    PreprocessingConfig,
+    RuntimeConfig,
+    validate_precision_device_pair,
+)
 from vision_lens.feature_pca import extract_patch_embeddings
 from vision_lens.models import (
     _accepted_timm_image_size,
-    _validate_precision,
     load_timm_vit,
 )
 
@@ -126,4 +130,4 @@ def test_dynamic_timm_loader_rejects_user_managed_dynamic_size_option():
 
 def test_unsupported_precision_device_pair_fails_before_model_creation():
     with pytest.raises(ValueError, match="float16.*CPU"):
-        _validate_precision("float16", "cpu")
+        validate_precision_device_pair("float16", "cpu")
