@@ -33,7 +33,7 @@ input:
 |---|---|---|---|
 | `files` | `[]` | Explicit image files, kept in the listed order. | `[cat.jpg]` |
 | `folders` | `[]` | Folders searched for matching files. | `[photos]` |
-| `patterns` | `['*.jpg', '*.jpeg', '*.png', '*.webp']` | Glob patterns applied to every folder. | `["*.jpg"]` |
+| `patterns` | `['*.jpg', '*.jpeg', '*.png', '*.webp']` | Relative glob patterns applied within every folder. Absolute paths and `..` traversal are rejected. | `["*.jpg"]` |
 | `recursive` | `false` | Search inside nested folders. | `true` |
 | `limit` | `null` | Maximum inputs after expansion; `null` means all. | `50` |
 
@@ -60,7 +60,8 @@ model:
 
 Loader arguments managed by Vision Lens cannot be repeated in `model.options`:
 `img_size` and `pretrained` for timm, and `weights` for torchvision.
-`preprocessing.image_size` is the authoritative input size.
+Option keys must be strings. `preprocessing.image_size` is the authoritative
+input size.
 
 ## Preprocessing
 
@@ -117,7 +118,7 @@ analysis:
 |---|---|---|---|
 | `method` | `attention` | `attention` or `rollout`. | `rollout` |
 | `layers` | required | Layer indices or `all`. | `[2, 5, 8, 11]` |
-| `heads` | `null` | Head indices; `null` selects all. For rollout, applies only to image comparison grids. | `[0, 1]` |
+| `heads` | `null` | Non-empty head-index list; `null` selects all. For rollout, applies only to image comparison grids. | `[0, 1]` |
 | `head_fusion` | `mean` | `mean`, `max`, or `none`. For rollout, applies only to image comparison grids. | `none` |
 
 ### Grad-CAM
@@ -168,7 +169,8 @@ PCA settings.
 load` accepts only `projection_path` and reuses all fitted settings, so
 foreground settings and `save_projection` are invalid. Saving a fitted
 projection counts as an output, allowing a projection-only run with every
-media and raw-array output disabled.
+media and raw-array output disabled. The save path cannot be an input file or
+the output directory's reserved `run-manifest.json` path.
 
 A loaded projection reuses its fitted foreground mode, rule, RGB fit scope, and
 color ranges, so new images remain in the same PCA color space. For images,
@@ -205,7 +207,7 @@ runtime:
 | `batch_size` | `8` | Maximum images read, preprocessed, and analyzed together. | `4` |
 | `device` | `auto` | `auto`, `cpu`, `cuda`, or `mps`. | `cuda` |
 | `workers` | `0` | Threads used to read images; image workflows only. `0` reads sequentially. | `4` |
-| `precision` | `float32` | `float32`, `float16`, or `bfloat16`. | `float16` |
+| `precision` | `float32` | `float32`, `float16`, or `bfloat16`. CPU does not support `float16`; MPS does not support `bfloat16`. | `float16` |
 | `seed` | `null` | Seed Python, NumPy, and PyTorch; `null` leaves RNG state unchanged. | `42` |
 
 The model and preprocessing transform are created once per run. Vision Lens
@@ -321,9 +323,10 @@ guidance-image preparation, and generic `upsample_features` function.
 
 Set `anyup_query_chunk_size` when a full AnyUp attention operation does not fit
 in VRAM. Chunking preserves the requested output resolution and attention
-calculation while processing fewer output queries at once. The included video
-configurations use conservative chunk sizes; lower them further if memory is
-still exhausted, or raise them for better throughput when more VRAM is
+calculation while processing fewer output queries at once. Set the chunk size
+explicitly when selecting an AnyUp mode; the included video configurations use
+`bilinear_mask` by default and therefore do not set one. Lower chunk sizes use
+less memory, while higher values improve throughput when more VRAM is
 available. For patch PCA, the configured chunking path projects the
 low-resolution values to RGB before AnyUp,
 generates query features and locality masks one chunk at a time, and transfers
@@ -378,10 +381,10 @@ output:
 
 | Setting | Parser default | Description | Example |
 |---|---|---|---|
-| `directory` | required | Output folder. | `outputs/run-1` |
+| `directory` | required | Output folder. An existing path must be a directory. | `outputs/run-1` |
 | `heatmaps` | `true` | Export heatmaps or PCA color maps. | `false` |
 | `overlays` | `true` | Export attention, rollout, or Grad-CAM overlays. Omit for patch PCA. | `false` |
-| `grids` | `true` | Export image comparison grids. Image configurations only; omit this setting from video configurations. A single-image PCA run skips its redundant one-tile comparison. | `false` |
+| `grids` | `true` | Export image comparison grids. Image configurations only; omit this setting from video configurations. A single-image PCA run skips its redundant one-tile grid when another per-image output is enabled; a grids-only run exports the one-tile grid and warns. | `false` |
 | `raw_arrays` | `false` | Export analysis arrays without rendering. Video PCA exports the normalized full-frame RGB patch projection, not a foreground mask. | `true` |
 | `image_format` | `png` | `png`, `jpeg`, `tiff`, or `webp`; standalone image outputs only. | `webp` |
 | `raw_format` | `npy` | `npy` or compressed `npz`; valid only when `raw_arrays: true`. | `npz` |

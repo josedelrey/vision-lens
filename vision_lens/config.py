@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import MISSING, dataclass, fields, is_dataclass
 from math import isfinite
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any, Literal
 from warnings import warn
 
@@ -26,98 +26,8 @@ VisualizationInterpolation = Literal[
 ]
 
 DEFAULT_INPUT_PATTERNS = ("*.jpg", "*.jpeg", "*.png", "*.webp")
+RUN_MANIFEST_NAME = "run-manifest.json"
 
-TOP_LEVEL_KEYS = {
-    "input",
-    "model",
-    "preprocessing",
-    "analysis",
-    "runtime",
-    "visualization",
-    "output",
-    "video",
-}
-SECTION_KEYS = {
-    "input": {"files", "folders", "patterns", "recursive", "limit"},
-    "model": {"architecture", "backend", "name", "pretrained", "options"},
-    "preprocessing": {
-        "image_size",
-        "resize",
-        "crop",
-        "pad",
-        "interpolation",
-        "normalize",
-        "mean",
-        "std",
-    },
-    "runtime": {"batch_size", "device", "workers", "precision", "seed"},
-    "visualization": {
-        "tile_size",
-        "columns",
-        "items_per_grid",
-        "spacing",
-        "padding",
-        "labels",
-        "background",
-        "dpi",
-        "output_size",
-        "interpolation",
-        "anyup_query_chunk_size",
-        "overlay_alpha",
-        "overlay_alpha_curve",
-        "cmap",
-        "cmap_black",
-        "grid_format",
-        "normalization",
-        "normalization_range",
-    },
-    "output": {
-        "directory",
-        "heatmaps",
-        "overlays",
-        "grids",
-        "raw_arrays",
-        "image_format",
-        "raw_format",
-        "overwrite",
-    },
-    "video": {
-        "start_time",
-        "end_time",
-        "sampling_rate",
-        "frame_limit",
-        "pca_fit_frames",
-        "temporal_smoothing",
-        "codec",
-    },
-}
-VIDEO_OUTPUT_KEYS = SECTION_KEYS["output"] - {"grids", "image_format"}
-GRID_VISUALIZATION_KEYS = {
-    "tile_size",
-    "columns",
-    "items_per_grid",
-    "spacing",
-    "padding",
-    "labels",
-    "background",
-    "dpi",
-    "grid_format",
-}
-ANALYSIS_KEYS = {
-    "attention": {"method", "layers", "heads", "head_fusion"},
-    "rollout": {"method", "layers", "heads", "head_fusion"},
-    "gradcam": {"method", "target_layer", "target_class"},
-    "patch_pca": {
-        "method",
-        "foreground_separation",
-        "foreground_threshold",
-        "foreground_side",
-        "rgb_fit_scope",
-        "projection",
-        "projection_path",
-        "save_projection",
-    },
-}
 METHOD_TASKS = {
     "attention": "vit_attention",
     "rollout": "vit_rollout",
@@ -285,11 +195,65 @@ class VisionLensConfig:
         return METHOD_TASKS[self.analysis.method]
 
 
-DEFAULT_PREPROCESSING_CONFIG = PreprocessingConfig()
-DEFAULT_RUNTIME_CONFIG = RuntimeConfig()
-DEFAULT_VISUALIZATION_CONFIG = VisualizationConfig()
-DEFAULT_OUTPUT_CONFIG = OutputConfig(Path("."))
-DEFAULT_VIDEO_CONFIG = VideoConfig()
+SECTION_CONFIG_TYPES = {
+    "model": ModelConfig,
+    "preprocessing": PreprocessingConfig,
+    "runtime": RuntimeConfig,
+    "visualization": VisualizationConfig,
+    "output": OutputConfig,
+    "video": VideoConfig,
+}
+SECTION_KEYS = {
+    "input": {"files", "folders", "patterns", "recursive", "limit"},
+    **{
+        section: {field.name for field in fields(config_type)}
+        for section, config_type in SECTION_CONFIG_TYPES.items()
+    },
+}
+TOP_LEVEL_KEYS = set(SECTION_KEYS) | {"analysis"}
+VIDEO_OUTPUT_KEYS = SECTION_KEYS["output"] - {"grids", "image_format"}
+GRID_VISUALIZATION_KEYS = {
+    "tile_size",
+    "columns",
+    "items_per_grid",
+    "spacing",
+    "padding",
+    "labels",
+    "background",
+    "dpi",
+    "grid_format",
+}
+ANALYSIS_KEYS = {
+    "attention": {"method", "layers", "heads", "head_fusion"},
+    "rollout": {"method", "layers", "heads", "head_fusion"},
+    "gradcam": {"method", "target_layer", "target_class"},
+    "patch_pca": {
+        "method",
+        "foreground_separation",
+        "foreground_threshold",
+        "foreground_side",
+        "rgb_fit_scope",
+        "projection",
+        "projection_path",
+        "save_projection",
+    },
+}
+
+
+def _dataclass_defaults(config_type: type[Any]) -> dict[str, Any]:
+    defaults = {}
+    for field in fields(config_type):
+        if field.default is not MISSING:
+            defaults[field.name] = field.default
+        elif field.default_factory is not MISSING:
+            defaults[field.name] = field.default_factory()
+    return defaults
+
+
+SECTION_DEFAULTS = {
+    section: _dataclass_defaults(config_type)
+    for section, config_type in SECTION_CONFIG_TYPES.items()
+}
 
 
 def load_config(
@@ -341,7 +305,9 @@ def parse_config(
             backend=_required_str(model_section, "backend", "model"),
             name=_required_str(model_section, "name", "model"),
             pretrained=_bool(
-                model_section.get("pretrained", True),
+                model_section.get(
+                    "pretrained", SECTION_DEFAULTS["model"]["pretrained"]
+                ),
                 "model.pretrained",
             ),
             options=_optional_mapping(
@@ -352,24 +318,28 @@ def parse_config(
         preprocessing=PreprocessingConfig(
             image_size=_positive_int(
                 preprocessing_section.get(
-                    "image_size", DEFAULT_PREPROCESSING_CONFIG.image_size
+                    "image_size", SECTION_DEFAULTS["preprocessing"]["image_size"]
                 ),
                 "preprocessing.image_size",
             ),
             resize=_choice(
                 preprocessing_section.get(
-                    "resize", DEFAULT_PREPROCESSING_CONFIG.resize
+                    "resize", SECTION_DEFAULTS["preprocessing"]["resize"]
                 ),
                 "preprocessing.resize",
                 {"stretch", "shortest", "longest", "none"},
             ),
             crop=_choice(
-                preprocessing_section.get("crop", DEFAULT_PREPROCESSING_CONFIG.crop),
+                preprocessing_section.get(
+                    "crop", SECTION_DEFAULTS["preprocessing"]["crop"]
+                ),
                 "preprocessing.crop",
                 {"none", "center"},
             ),
             pad=_choice(
-                preprocessing_section.get("pad", DEFAULT_PREPROCESSING_CONFIG.pad),
+                preprocessing_section.get(
+                    "pad", SECTION_DEFAULTS["preprocessing"]["pad"]
+                ),
                 "preprocessing.pad",
                 {"none", "center"},
             ),
@@ -380,7 +350,7 @@ def parse_config(
             ),
             normalize=_bool(
                 preprocessing_section.get(
-                    "normalize", DEFAULT_PREPROCESSING_CONFIG.normalize
+                    "normalize", SECTION_DEFAULTS["preprocessing"]["normalize"]
                 ),
                 "preprocessing.normalize",
             ),
@@ -402,18 +372,22 @@ def parse_config(
         ),
         runtime=RuntimeConfig(
             device=_device(
-                runtime_section.get("device", DEFAULT_RUNTIME_CONFIG.device)
+                runtime_section.get("device", SECTION_DEFAULTS["runtime"]["device"])
             ),
             batch_size=_positive_int(
-                runtime_section.get("batch_size", DEFAULT_RUNTIME_CONFIG.batch_size),
+                runtime_section.get(
+                    "batch_size", SECTION_DEFAULTS["runtime"]["batch_size"]
+                ),
                 "runtime.batch_size",
             ),
             workers=_non_negative_int_value(
-                runtime_section.get("workers", DEFAULT_RUNTIME_CONFIG.workers),
+                runtime_section.get("workers", SECTION_DEFAULTS["runtime"]["workers"]),
                 "runtime.workers",
             ),
             precision=_choice(
-                runtime_section.get("precision", DEFAULT_RUNTIME_CONFIG.precision),
+                runtime_section.get(
+                    "precision", SECTION_DEFAULTS["runtime"]["precision"]
+                ),
                 "runtime.precision",
                 {"float32", "float16", "bfloat16"},
             ),
@@ -460,7 +434,8 @@ def parse_config(
             ),
             interpolation=_choice(
                 visualization_section.get(
-                    "interpolation", DEFAULT_VISUALIZATION_CONFIG.interpolation
+                    "interpolation",
+                    SECTION_DEFAULTS["visualization"]["interpolation"],
                 ),
                 "visualization.interpolation",
                 {
@@ -479,26 +454,30 @@ def parse_config(
             ),
             overlay_alpha=_unit_interval(
                 visualization_section.get(
-                    "overlay_alpha", DEFAULT_VISUALIZATION_CONFIG.overlay_alpha
+                    "overlay_alpha",
+                    SECTION_DEFAULTS["visualization"]["overlay_alpha"],
                 ),
                 "visualization.overlay_alpha",
             ),
             overlay_alpha_curve=_overlay_alpha_curve(
                 visualization_section.get("overlay_alpha_curve")
             ),
-            cmap=_optional_str(
-                visualization_section.get("cmap", DEFAULT_VISUALIZATION_CONFIG.cmap),
+            cmap=_non_empty_string(
+                visualization_section.get(
+                    "cmap", SECTION_DEFAULTS["visualization"]["cmap"]
+                ),
                 "visualization.cmap",
             ),
             cmap_black=_cmap_black(visualization_section.get("cmap_black")),
             grid_format=_grid_format(
                 visualization_section.get(
-                    "grid_format", DEFAULT_VISUALIZATION_CONFIG.grid_format
+                    "grid_format", SECTION_DEFAULTS["visualization"]["grid_format"]
                 )
             ),
             normalization=_choice(
                 visualization_section.get(
-                    "normalization", DEFAULT_VISUALIZATION_CONFIG.normalization
+                    "normalization",
+                    SECTION_DEFAULTS["visualization"]["normalization"],
                 ),
                 "visualization.normalization",
                 {"per_map", "shared", "fixed"},
@@ -514,30 +493,44 @@ def parse_config(
                 base,
             ),
             heatmaps=_bool(
-                output_section.get("heatmaps", DEFAULT_OUTPUT_CONFIG.heatmaps),
+                output_section.get("heatmaps", SECTION_DEFAULTS["output"]["heatmaps"]),
                 "output.heatmaps",
             ),
             overlays=_bool(
-                output_section.get("overlays", method != "patch_pca"),
+                output_section.get(
+                    "overlays",
+                    method != "patch_pca" and SECTION_DEFAULTS["output"]["overlays"],
+                ),
                 "output.overlays",
             ),
             grids=(
                 False
                 if "video" in resolved
-                else _bool(output_section.get("grids", True), "output.grids")
+                else _bool(
+                    output_section.get("grids", SECTION_DEFAULTS["output"]["grids"]),
+                    "output.grids",
+                )
             ),
             raw_arrays=_bool(
-                output_section.get("raw_arrays", DEFAULT_OUTPUT_CONFIG.raw_arrays),
+                output_section.get(
+                    "raw_arrays", SECTION_DEFAULTS["output"]["raw_arrays"]
+                ),
                 "output.raw_arrays",
             ),
             image_format=_image_format(
-                output_section.get("image_format", DEFAULT_OUTPUT_CONFIG.image_format)
+                output_section.get(
+                    "image_format", SECTION_DEFAULTS["output"]["image_format"]
+                )
             ),
             raw_format=_raw_format(
-                output_section.get("raw_format", DEFAULT_OUTPUT_CONFIG.raw_format)
+                output_section.get(
+                    "raw_format", SECTION_DEFAULTS["output"]["raw_format"]
+                )
             ),
             overwrite=_choice(
-                output_section.get("overwrite", DEFAULT_OUTPUT_CONFIG.overwrite),
+                output_section.get(
+                    "overwrite", SECTION_DEFAULTS["output"]["overwrite"]
+                ),
                 "output.overwrite",
                 {"replace", "error", "skip"},
             ),
@@ -547,7 +540,9 @@ def parse_config(
             if "video" not in resolved
             else VideoConfig(
                 start_time=_non_negative_number(
-                    video_section.get("start_time", DEFAULT_VIDEO_CONFIG.start_time),
+                    video_section.get(
+                        "start_time", SECTION_DEFAULTS["video"]["start_time"]
+                    ),
                     "video.start_time",
                 ),
                 end_time=_optional_non_negative_number(
@@ -556,7 +551,7 @@ def parse_config(
                 ),
                 sampling_rate=_video_sampling_rate(
                     video_section.get(
-                        "sampling_rate", DEFAULT_VIDEO_CONFIG.sampling_rate
+                        "sampling_rate", SECTION_DEFAULTS["video"]["sampling_rate"]
                     ),
                 ),
                 frame_limit=_optional_positive_int(
@@ -565,18 +560,19 @@ def parse_config(
                 ),
                 pca_fit_frames=_positive_int(
                     video_section.get(
-                        "pca_fit_frames", DEFAULT_VIDEO_CONFIG.pca_fit_frames
+                        "pca_fit_frames", SECTION_DEFAULTS["video"]["pca_fit_frames"]
                     ),
                     "video.pca_fit_frames",
                 ),
                 temporal_smoothing=_unit_interval(
                     video_section.get(
-                        "temporal_smoothing", DEFAULT_VIDEO_CONFIG.temporal_smoothing
+                        "temporal_smoothing",
+                        SECTION_DEFAULTS["video"]["temporal_smoothing"],
                     ),
                     "video.temporal_smoothing",
                 ),
-                codec=_optional_str(
-                    video_section.get("codec", DEFAULT_VIDEO_CONFIG.codec),
+                codec=_non_empty_string(
+                    video_section.get("codec", SECTION_DEFAULTS["video"]["codec"]),
                     "video.codec",
                 ),
             )
@@ -590,6 +586,8 @@ def parse_config(
 def validate_config(config: VisionLensConfig) -> None:
     method = config.analysis.method
     applicable = _applicable_setting_keys(config)
+    _validate_output_directory(config.output.directory)
+    validate_precision_device_pair(config.runtime.precision, config.runtime.device)
     if config.video is not None:
         if config.preprocessing.crop != "none" or config.preprocessing.pad != "none":
             raise ValueError(
@@ -665,8 +663,7 @@ def validate_config(config: VisionLensConfig) -> None:
         )
     if (
         "interpolation" in applicable["visualization"]
-        and config.visualization.interpolation
-        in {"anyup_soft", "anyup_soft_mask"}
+        and config.visualization.interpolation in {"anyup_soft", "anyup_soft_mask"}
         and config.visualization.anyup_query_chunk_size is None
     ):
         raise ValueError(
@@ -718,6 +715,8 @@ def validate_config(config: VisionLensConfig) -> None:
                 "PCA projection file does not exist: "
                 f"{config.analysis.projection_path}."
             )
+        if config.analysis.save_projection is not None:
+            _validate_projection_output(config)
 
     if "cmap" in applicable["visualization"]:
         _validate_colormap(config.visualization.cmap)
@@ -742,117 +741,104 @@ def validate_config(config: VisionLensConfig) -> None:
         )
 
 
+def validate_precision_device_pair(precision: str, device: str) -> None:
+    if precision == "float16" and device == "cpu":
+        raise ValueError(
+            "runtime.precision='float16' is not supported on CPU; use "
+            "float32 or bfloat16."
+        )
+    if precision == "bfloat16" and device == "mps":
+        raise ValueError(
+            "runtime.precision='bfloat16' is not supported on MPS; use "
+            "float32 or float16."
+        )
+
+
+def _validate_output_directory(path: Path) -> None:
+    if path.exists():
+        if not path.is_dir():
+            raise ValueError(
+                f"output.directory must be a directory, not a file: {path}."
+            )
+        return
+    _validate_existing_parent(path, "output.directory")
+
+
+def _validate_projection_output(config: VisionLensConfig) -> None:
+    path = config.analysis.save_projection
+    assert path is not None
+    if path.exists() and path.is_dir():
+        raise ValueError(
+            f"analysis.save_projection must be a file path, not a directory: {path}."
+        )
+    _validate_existing_parent(path, "analysis.save_projection")
+    if path in config.input.paths:
+        raise ValueError("analysis.save_projection must not overwrite an input file.")
+    manifest = config.output.directory / RUN_MANIFEST_NAME
+    if path == manifest:
+        raise ValueError(
+            "analysis.save_projection must not use the reserved run manifest path: "
+            f"{manifest}."
+        )
+
+
+def _validate_existing_parent(path: Path, field_name: str) -> None:
+    parent = path.parent
+    while not parent.exists():
+        parent = parent.parent
+    if not parent.is_dir():
+        raise ValueError(
+            f"{field_name} cannot be created because a parent path is not a "
+            f"directory: {parent}."
+        )
+
+
 def config_to_dict(config: VisionLensConfig) -> dict[str, Any]:
-    resolved: dict[str, dict[str, Any]] = {}
-    resolved["input"] = {"files": [str(path) for path in config.input.paths]}
-    resolved["model"] = {
-        "architecture": config.model.architecture,
-        "backend": config.model.backend,
-        "name": config.model.name,
-        "pretrained": config.model.pretrained,
-        "options": config.model.options,
-    }
-    resolved["preprocessing"] = {
-        "image_size": config.preprocessing.image_size,
-        "resize": config.preprocessing.resize,
-        "crop": config.preprocessing.crop,
-        "pad": config.preprocessing.pad,
-        "interpolation": config.preprocessing.interpolation,
-        "normalize": config.preprocessing.normalize,
-        "mean": (
-            None
-            if config.preprocessing.mean is None
-            else list(config.preprocessing.mean)
-        ),
-        "std": (
-            None if config.preprocessing.std is None else list(config.preprocessing.std)
-        ),
-    }
-    resolved["analysis"] = _analysis_to_dict(config.analysis)
-    resolved["runtime"] = {
-        "batch_size": config.runtime.batch_size,
-        "device": config.runtime.device,
-        "workers": config.runtime.workers,
-        "precision": config.runtime.precision,
-        "seed": config.runtime.seed,
-    }
-    resolved["visualization"] = {
-        "tile_size": (
-            None
-            if config.visualization.tile_size is None
-            else list(config.visualization.tile_size)
-        ),
-        "columns": config.visualization.columns,
-        "items_per_grid": config.visualization.items_per_grid,
-        "spacing": config.visualization.spacing,
-        "padding": config.visualization.padding,
-        "labels": config.visualization.labels,
-        "background": config.visualization.background,
-        "dpi": config.visualization.dpi,
-        "output_size": (
-            list(config.visualization.output_size)
-            if isinstance(config.visualization.output_size, tuple)
-            else config.visualization.output_size
-        ),
-        "interpolation": config.visualization.interpolation,
-        "anyup_query_chunk_size": config.visualization.anyup_query_chunk_size,
-        "overlay_alpha": config.visualization.overlay_alpha,
-        "overlay_alpha_curve": (
-            None
-            if config.visualization.overlay_alpha_curve is None
-            else {
-                "steepness": config.visualization.overlay_alpha_curve.steepness,
-                "midpoint": config.visualization.overlay_alpha_curve.midpoint,
-            }
-        ),
-        "cmap": config.visualization.cmap,
-        "cmap_black": (
-            None
-            if config.visualization.cmap_black is None
-            else {
-                "threshold": config.visualization.cmap_black[0],
-                "blend_width": config.visualization.cmap_black[1],
-                "transparent": config.visualization.cmap_black[2],
-            }
-        ),
-        "grid_format": config.visualization.grid_format,
-        "normalization": config.visualization.normalization,
-        "normalization_range": (
-            None
-            if config.visualization.normalization_range is None
-            else list(config.visualization.normalization_range)
-        ),
-    }
-    resolved["output"] = {
-        "directory": str(config.output.directory),
-        "heatmaps": config.output.heatmaps,
-        "overlays": config.output.overlays,
-        "grids": config.output.grids,
-        "raw_arrays": config.output.raw_arrays,
-        "image_format": config.output.image_format,
-        "raw_format": config.output.raw_format,
-        "overwrite": config.output.overwrite,
+    resolved = {
+        "input": {"files": [str(path) for path in config.input.paths]},
+        "model": _config_dataclass_to_dict(config.model),
+        "preprocessing": _config_dataclass_to_dict(config.preprocessing),
+        "analysis": _analysis_to_dict(config.analysis),
+        "runtime": _config_dataclass_to_dict(config.runtime),
+        "visualization": _config_dataclass_to_dict(config.visualization),
+        "output": _config_dataclass_to_dict(config.output),
     }
     if config.video is not None:
-        resolved["video"] = {
-            "start_time": config.video.start_time,
-            "end_time": config.video.end_time,
-            "sampling_rate": config.video.sampling_rate,
-            "frame_limit": config.video.frame_limit,
-            "pca_fit_frames": config.video.pca_fit_frames,
-            "temporal_smoothing": config.video.temporal_smoothing,
-            "codec": config.video.codec,
-        }
+        resolved["video"] = _config_dataclass_to_dict(config.video)
 
     applicable = _applicable_setting_keys(config)
     return {
         section: {
-            key: value
-            for key, value in values.items()
-            if key in applicable[section]
+            key: value for key, value in values.items() if key in applicable[section]
         }
         for section, values in resolved.items()
     }
+
+
+def _config_dataclass_to_dict(value: Any) -> dict[str, Any]:
+    resolved = {
+        field.name: _config_value(getattr(value, field.name)) for field in fields(value)
+    }
+    if isinstance(value, VisualizationConfig) and value.cmap_black is not None:
+        threshold, blend_width, transparent = value.cmap_black
+        resolved["cmap_black"] = {
+            "threshold": threshold,
+            "blend_width": blend_width,
+            "transparent": transparent,
+        }
+    return resolved
+
+
+def _config_value(value: Any) -> Any:
+    if isinstance(value, Path):
+        return str(value)
+    if is_dataclass(value):
+        return _config_dataclass_to_dict(value)
+    if isinstance(value, tuple):
+        return [_config_value(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _config_value(item) for key, item in value.items()}
+    return value
 
 
 def resolved_config_yaml(config: VisionLensConfig) -> str:
@@ -869,7 +855,7 @@ def _parse_input(section: dict[str, Any], base_dir: Path) -> InputConfig:
         _resolve_path(path, base_dir) for path in _list(raw_folders, "input.folders")
     )
     patterns = tuple(
-        _non_empty_string(pattern, "input.patterns")
+        _relative_glob_pattern(pattern, "input.patterns")
         for pattern in _list(
             section.get("patterns", list(DEFAULT_INPUT_PATTERNS)),
             "input.patterns",
@@ -929,7 +915,7 @@ def _parse_analysis(
             target_layer=(
                 None
                 if target_layer is None
-                else _optional_str(target_layer, "analysis.target_layer")
+                else _non_empty_string(target_layer, "analysis.target_layer")
             ),
             target_class=_optional_non_negative_int(
                 section.get("target_class"),
@@ -1173,6 +1159,8 @@ def _reject_unknown_keys(
     section: dict[str, Any],
     allowed: set[str],
 ) -> None:
+    if not all(isinstance(key, str) for key in section):
+        raise ValueError(f"{section_name} keys must be strings.")
     unknown = sorted(set(section) - allowed)
     if unknown:
         keys = ", ".join(unknown)
@@ -1187,7 +1175,7 @@ def _validate_colormap(name: str) -> None:
 
     if name not in colormaps:
         raise ValueError(
-            "visualization.cmap is not a known Matplotlib colormap: " f"{name!r}."
+            f"visualization.cmap is not a known Matplotlib colormap: {name!r}."
         )
 
 
@@ -1267,12 +1255,6 @@ def _section(config: dict[str, Any], name: str) -> dict[str, Any]:
     return section
 
 
-def _optional_str(value: Any, field_name: str) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"{field_name} must be a non-empty string.")
-    return value
-
-
 def _optional_string(value: Any, field_name: str) -> str | None:
     if value is None:
         return None
@@ -1281,8 +1263,24 @@ def _optional_string(value: Any, field_name: str) -> str | None:
 
 def _non_empty_string(value: Any, field_name: str) -> str:
     if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"{field_name} values must be non-empty strings.")
+        raise ValueError(f"{field_name} must be a non-empty string.")
     return value
+
+
+def _relative_glob_pattern(value: Any, field_name: str) -> str:
+    pattern = _non_empty_string(value, field_name)
+    windows_pattern = PureWindowsPath(pattern)
+    if (
+        Path(pattern).is_absolute()
+        or windows_pattern.is_absolute()
+        or windows_pattern.drive
+        or ".." in Path(pattern).parts
+        or ".." in windows_pattern.parts
+    ):
+        raise ValueError(
+            f"{field_name} must contain relative glob patterns without '..'."
+        )
+    return pattern
 
 
 def _required_str(section: dict[str, Any], key: str, section_name: str) -> str:
@@ -1312,6 +1310,8 @@ def _optional_mapping(value: Any, field_name: str) -> dict[str, Any] | None:
         return None
     if not isinstance(value, dict):
         raise ValueError(f"{field_name} must be a mapping or null.")
+    if not all(isinstance(key, str) for key in value):
+        raise ValueError(f"{field_name} keys must be strings.")
     return dict(value)
 
 
@@ -1351,9 +1351,8 @@ def _non_negative_ints(values: list[Any], field_name: str) -> list[int]:
 def _optional_non_negative_ints(value: Any, field_name: str) -> tuple[int, ...] | None:
     if value is None:
         return None
-    if not isinstance(value, list):
-        raise ValueError(f"{field_name} must be a list or null.")
-    return tuple(_non_negative_ints(value, field_name))
+    values = _list(value, field_name, allow_empty=False)
+    return tuple(_non_negative_ints(values, field_name))
 
 
 def _non_negative_int(value: Any, field_name: str) -> int:

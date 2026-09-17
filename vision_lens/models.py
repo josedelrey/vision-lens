@@ -13,6 +13,7 @@ from vision_lens.config import (
     PreprocessingConfig,
     RuntimeConfig,
     VisionLensConfig,
+    validate_precision_device_pair,
 )
 
 
@@ -82,7 +83,7 @@ def load_torchvision_cnn(
     runtime_config: RuntimeConfig,
 ) -> LoadedModel:
     device = resolve_device(runtime_config.device)
-    _validate_precision(runtime_config.precision, device)
+    validate_precision_device_pair(runtime_config.precision, device)
     model_options = model_config.options or {}
     weights = None
     class_labels = _imagenet_labels()
@@ -149,7 +150,7 @@ def load_timm_vit(
     dynamic_img_size: bool = False,
 ) -> LoadedModel:
     device = resolve_device(runtime_config.device)
-    _validate_precision(runtime_config.precision, device)
+    validate_precision_device_pair(runtime_config.precision, device)
     model_options = dict(model_config.options or {})
     if dynamic_img_size and "dynamic_img_size" in model_options:
         raise ValueError(
@@ -258,19 +259,6 @@ def _move_model(model: Any, device: str, precision: str) -> None:
         model.to(dtype=torch.float16)
     elif precision == "bfloat16":
         model.to(dtype=torch.bfloat16)
-
-
-def _validate_precision(precision: str, device: str) -> None:
-    if precision == "float16" and device == "cpu":
-        raise ValueError(
-            "runtime.precision='float16' is not supported on CPU; use "
-            "float32 or bfloat16."
-        )
-    if precision == "bfloat16" and device == "mps":
-        raise ValueError(
-            "runtime.precision='bfloat16' is not supported on MPS; use "
-            "float32 or float16."
-        )
 
 
 def _apply_preprocessing_overrides(

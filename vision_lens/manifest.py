@@ -8,10 +8,8 @@ from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
-from vision_lens.config import VisionLensConfig, config_to_dict
+from vision_lens.config import RUN_MANIFEST_NAME, VisionLensConfig, config_to_dict
 from vision_lens.models import LoadedModel
-
-MANIFEST_NAME = "run-manifest.json"
 
 
 def can_write_output(path: Path, policy: str) -> bool:
@@ -25,7 +23,7 @@ def can_write_output(path: Path, policy: str) -> bool:
 
 
 def manifest_path(config: VisionLensConfig) -> Path:
-    return config.output.directory / MANIFEST_NAME
+    return config.output.directory / RUN_MANIFEST_NAME
 
 
 def check_manifest_overwrite(config: VisionLensConfig) -> None:
