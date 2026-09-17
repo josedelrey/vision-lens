@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -30,27 +29,6 @@ class PreprocessedBatch:
     source: InputBatch
     inputs: Any
     display_images: tuple[Any, ...]
-
-
-def unique_input_labels(paths: Sequence[Path]) -> tuple[str, ...]:
-    stem_counts: dict[str, int] = {}
-    for path in paths:
-        key = path.stem.casefold()
-        stem_counts[key] = stem_counts.get(key, 0) + 1
-
-    labels = []
-    used = set()
-    for index, path in enumerate(paths):
-        stem = path.stem
-        label = stem
-        if stem_counts[stem.casefold()] > 1 or label.casefold() in used:
-            digest = hashlib.sha256(str(path.resolve()).encode("utf-8")).hexdigest()[:8]
-            label = f"{stem}_{digest}"
-        while label.casefold() in used:
-            label = f"{stem}_{digest}_{index + 1}"
-        labels.append(label)
-        used.add(label.casefold())
-    return tuple(labels)
 
 
 def iter_input_batches(

@@ -16,19 +16,15 @@ from vision_lens.anyup import (
     upsample_values_streaming,
 )
 from vision_lens.attention import infer_patch_grid_from_image
+from vision_lens.config_options import (
+    VISUALIZATION_INTERPOLATION_CHOICES,
+    VisualizationInterpolation,
+)
 from vision_lens.models import ModelMetadata
 
 ForegroundThreshold = float | Literal["auto"]
 RGBFitScope = Literal["foreground", "all"]
-Interpolation = Literal[
-    "nearest",
-    "bilinear",
-    "bilinear_mask",
-    "anyup",
-    "anyup_mask",
-    "anyup_soft",
-    "anyup_soft_mask",
-]
+Interpolation = VisualizationInterpolation
 _OTSU_BINS = 256
 
 
@@ -71,6 +67,7 @@ def extract_patch_pca(
     guidance_image: Any | None = None,
     output_size: tuple[int, int] | None = None,
     anyup_query_chunk_size: int | None = None,
+    render_images: bool = True,
 ) -> PatchPCAResult:
     """Extract ViT patch tokens and render their shared PCA projection as RGB."""
     if metadata.patch_size is None:
@@ -92,6 +89,7 @@ def extract_patch_pca(
         interpolation=interpolation,
         guidance_image=inputs if guidance_image is None else guidance_image,
         anyup_query_chunk_size=anyup_query_chunk_size,
+        render_images=render_images,
     )
 
 
@@ -139,16 +137,7 @@ def project_patch_embeddings(
         raise ValueError("foreground_side must be one of: high, low.")
     if rgb_fit_scope not in {"foreground", "all"}:
         raise ValueError("rgb_fit_scope must be one of: foreground, all.")
-    choices = {
-        "nearest",
-        "bilinear",
-        "bilinear_mask",
-        "anyup",
-        "anyup_mask",
-        "anyup_soft",
-        "anyup_soft_mask",
-    }
-    if interpolation not in choices:
+    if interpolation not in VISUALIZATION_INTERPOLATION_CHOICES:
         raise ValueError(
             "interpolation must be one of: nearest, bilinear, bilinear_mask, "
             "anyup, anyup_mask, anyup_soft, anyup_soft_mask."
@@ -215,13 +204,9 @@ def project_patch_embeddings(
     if resolved_foreground_separation:
         assert first_component is not None
         if projection.foreground_side == "high":
-            foreground_mask = (
-                first_component[:, 0] > projection.foreground_threshold
-            )
+            foreground_mask = first_component[:, 0] > projection.foreground_threshold
         else:
-            foreground_mask = (
-                first_component[:, 0] < projection.foreground_threshold
-            )
+            foreground_mask = first_component[:, 0] < projection.foreground_threshold
     else:
         foreground_mask = torch.ones(
             batch_size * patch_count,
@@ -595,8 +580,7 @@ def load_patch_pca_projection(path: str | Path) -> PatchPCAProjection:
         missing = sorted(required - set(values.files))
         if missing:
             raise ValueError(
-                "PCA projection is missing required value(s): "
-                f"{', '.join(missing)}."
+                f"PCA projection is missing required value(s): {', '.join(missing)}."
             )
         return PatchPCAProjection(
             foreground_components=torch.from_numpy(values["foreground_components"]),
@@ -692,9 +676,7 @@ def _fit_projection(
     resolved_rgb_fit_scope: RGBFitScope = (
         "all" if not foreground_separation else rgb_fit_scope
     )
-    rgb_values = (
-        values if resolved_rgb_fit_scope == "all" else values[foreground_mask]
-    )
+    rgb_values = values if resolved_rgb_fit_scope == "all" else values[foreground_mask]
     if rgb_values.numel():
         rgb_projected, rgb_components = _fit_pca_projection(rgb_values, components=3)
         rgb_minimum, rgb_maximum = _value_bounds(rgb_projected)

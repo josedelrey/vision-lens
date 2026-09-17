@@ -7,8 +7,10 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 
-from vision_lens.config import RUN_MANIFEST_NAME, VisionLensConfig, config_to_dict
+from vision_lens.artifacts import run_manifest_path
+from vision_lens.config import VisionLensConfig, config_to_dict
 from vision_lens.models import LoadedModel
 
 
@@ -23,16 +25,7 @@ def can_write_output(path: Path, policy: str) -> bool:
 
 
 def manifest_path(config: VisionLensConfig) -> Path:
-    return config.output.directory / RUN_MANIFEST_NAME
-
-
-def check_manifest_overwrite(config: VisionLensConfig) -> None:
-    path = manifest_path(config)
-    if path.exists() and config.output.overwrite == "error":
-        raise FileExistsError(
-            f"Run manifest already exists: {path}. Choose a new output directory or "
-            "set output.overwrite to 'replace' or 'skip'."
-        )
+    return run_manifest_path(config.output.directory)
 
 
 def write_run_manifest(
@@ -86,11 +79,23 @@ def write_run_manifest(
     }
     if run_details is not None:
         payload["run"] = dict(run_details)
-    temporary_path = path.with_suffix(".json.tmp")
-    with temporary_path.open("w", encoding="utf-8") as file:
-        json.dump(payload, file, indent=2, sort_keys=True)
-        file.write("\n")
-    temporary_path.replace(path)
+    temporary_path = None
+    try:
+        with NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as file:
+            temporary_path = Path(file.name)
+            json.dump(payload, file, indent=2, sort_keys=True)
+            file.write("\n")
+        temporary_path.replace(path)
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
     return path
 
 

@@ -9,19 +9,11 @@ import torch.nn as nn
 import torch.nn.functional as functional
 
 from vision_lens.anyup import is_anyup_interpolation, upsample_features
+from vision_lens.config_options import HeadFusion, VisualizationInterpolation
 from vision_lens.models import ModelMetadata
 
 LayerSelection = Literal["all"] | int | Iterable[int]
-HeadFusion = Literal["mean", "max", "none"]
-Interpolation = Literal[
-    "nearest",
-    "bilinear",
-    "bilinear_mask",
-    "anyup",
-    "anyup_mask",
-    "anyup_soft",
-    "anyup_soft_mask",
-]
+Interpolation = VisualizationInterpolation
 
 
 @dataclass(frozen=True)

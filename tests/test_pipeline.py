@@ -421,6 +421,86 @@ def test_patch_pca_pipeline_exports_reference_style_images(monkeypatch, tmp_path
         assert comparison.size == (460, 224)
 
 
+def test_raw_only_patch_pca_skips_rendering(monkeypatch, tmp_path):
+    from vision_lens import image_pipeline, processing
+
+    source = tmp_path / "source.jpg"
+    Image.new("RGB", (4, 4), "white").save(source)
+    config = parse_config(
+        {
+            "input": {"files": [str(source)]},
+            "model": {
+                "architecture": "vit",
+                "backend": "timm",
+                "name": "mock_vit",
+                "pretrained": False,
+            },
+            "preprocessing": {"image_size": 4},
+            "analysis": {"method": "patch_pca"},
+            "runtime": {"device": "cpu"},
+            "output": {
+                "directory": str(tmp_path / "outputs"),
+                "heatmaps": False,
+                "grids": False,
+                "raw_arrays": True,
+            },
+        }
+    )
+    loaded_model = LoadedModel(
+        model=object(),
+        metadata=ModelMetadata(
+            architecture="vit",
+            backend="timm",
+            name="mock_vit",
+            pretrained=False,
+            device="cpu",
+            input_size=(3, 4, 4),
+            image_size=(4, 4),
+            patch_size=(2, 2),
+            num_classes=2,
+            data_config={"mean": (0.0, 0.0, 0.0), "std": (1.0, 1.0, 1.0)},
+        ),
+    )
+    calls = []
+
+    def extract(*_args, **kwargs):
+        calls.append(kwargs)
+        return PatchPCAResult(
+            patch_embeddings=torch.rand(1, 4, 3),
+            foreground_mask=torch.ones(1, 4, dtype=torch.bool),
+            images=(),
+            patch_grid=(2, 2),
+            image_size=(4, 4),
+        )
+
+    monkeypatch.setattr(image_pipeline, "load_model", lambda _config: loaded_model)
+    monkeypatch.setattr(
+        processing,
+        "load_images",
+        lambda _paths, workers=0: [Image.new("RGB", (4, 4), "white")],
+    )
+    monkeypatch.setattr(
+        image_pipeline,
+        "build_batch_preprocessor",
+        lambda *_args, **_kwargs: lambda _image: torch.ones(3, 4, 4),
+    )
+    monkeypatch.setattr(image_pipeline, "extract_patch_pca", extract)
+    monkeypatch.setattr(
+        image_pipeline,
+        "anyup_guidance",
+        lambda *_args, **_kwargs: pytest.fail("raw-only PCA must not build guidance"),
+    )
+
+    result = run_patch_pca_from_config(config)
+
+    assert calls[0]["render_images"] is False
+    assert {path.name for path in result.output_paths} == {
+        "source_patch_embeddings.npy",
+        "source_foreground_mask.npy",
+    }
+    assert all(path.is_file() for path in result.output_paths)
+
+
 def test_patch_pca_grid_uses_matplotlib_without_labels(monkeypatch, tmp_path):
     from vision_lens import image_pipeline
 
@@ -514,7 +594,7 @@ def test_loaded_patch_pca_projection_does_not_require_fit_settings(
         run_patch_pca_from_config(config)
 
 
-def test_patch_pca_single_image_run_skips_redundant_comparison(tmp_path):
+def test_patch_pca_single_image_run_exports_heatmap_and_comparison(tmp_path):
     patch_pca = PatchPCAResult(
         patch_embeddings=torch.rand(1, 4, 3),
         foreground_mask=torch.ones(1, 4, dtype=torch.bool),
@@ -529,7 +609,10 @@ def test_patch_pca_single_image_run_skips_redundant_comparison(tmp_path):
         output_dir=tmp_path,
     )
 
-    assert [path.name for path in paths] == ["horse_patch_pca.png"]
+    assert [path.name for path in paths] == [
+        "horse_patch_pca.png",
+        "patch_pca_comparison.png",
+    ]
 
 
 def test_patch_pca_single_image_grids_only_exports_comparison(tmp_path):
@@ -563,7 +646,7 @@ def test_projection_only_image_pca_skips_projection_and_render_pass(
 ):
     from vision_lens import image_pipeline
 
-    projection_path = tmp_path / "projection.npz"
+    projection_path = tmp_path / "run-manifest.json.tmp"
     raw = {
         "input": {"files": ["examples/1.jpg"]},
         "model": {
@@ -626,6 +709,7 @@ def test_projection_only_image_pca_skips_projection_and_render_pass(
 
     assert result.patch_pca is None
     assert result.output_paths == (projection_path,)
+    assert projection_path.is_file()
     assert not (tmp_path / "patch_pca_comparison.png").exists()
 
 
@@ -1045,8 +1129,50 @@ def test_existing_manifest_fails_before_model_loading(monkeypatch, tmp_path):
 
     monkeypatch.setattr(image_pipeline, "load_model", fail_if_loaded)
 
-    with pytest.raises(FileExistsError, match="Run manifest already exists"):
+    with pytest.raises(FileExistsError, match="Output artifact.*run-manifest.json"):
         run_vit_attention_from_config(config)
+
+    assert not loaded
+
+
+def test_existing_saved_projection_fails_before_model_loading(monkeypatch, tmp_path):
+    from vision_lens import image_pipeline
+
+    projection_path = tmp_path / "projection.npz"
+    projection_path.touch()
+    config = parse_config(
+        {
+            "model": {
+                "architecture": "vit",
+                "backend": "timm",
+                "name": "mock_vit",
+                "pretrained": False,
+            },
+            "input": {"files": ["examples/1.jpg"]},
+            "analysis": {
+                "method": "patch_pca",
+                "save_projection": str(projection_path),
+            },
+            "output": {
+                "directory": str(tmp_path / "outputs"),
+                "heatmaps": False,
+                "grids": False,
+                "raw_arrays": False,
+                "overwrite": "error",
+            },
+        }
+    )
+    loaded = False
+
+    def fail_if_loaded(_config):
+        nonlocal loaded
+        loaded = True
+        raise AssertionError("model should not be loaded")
+
+    monkeypatch.setattr(image_pipeline, "load_model", fail_if_loaded)
+
+    with pytest.raises(FileExistsError, match="Output artifact.*projection.npz"):
+        run_patch_pca_from_config(config)
 
     assert not loaded
 
