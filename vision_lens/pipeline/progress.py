@@ -2,15 +2,29 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Callable, Iterable, Iterator
-from typing import Any, TypeVar
+from contextlib import contextmanager
+from contextvars import ContextVar
+from typing import Any
 
 from tqdm import tqdm
 
-T = TypeVar("T")
+_SHOW_PROGRESS: ContextVar[bool] = ContextVar("vision_lens_show_progress", default=True)
+
+
+@contextmanager
+def progress_output(enabled: bool) -> Iterator[None]:
+    """Temporarily enable or silence status and progress output."""
+    token = _SHOW_PROGRESS.set(enabled)
+    try:
+        yield
+    finally:
+        _SHOW_PROGRESS.reset(token)
 
 
 def status(message: str) -> None:
     """Write a short status line without disrupting an active progress bar."""
+    if not _SHOW_PROGRESS.get():
+        return
     tqdm.write(f"vision-lens: {message}", file=sys.stderr)
 
 
@@ -44,7 +58,7 @@ def track_video_batches(
     )
 
 
-def track_units(
+def track_units[T](
     items: Iterable[T],
     *,
     total: int | None,
@@ -66,5 +80,5 @@ def _bar(*, total: int | None, description: str, unit: str) -> Any:
         file=sys.stderr,
         dynamic_ncols=True,
         mininterval=0.5,
-        disable=not sys.stderr.isatty(),
+        disable=not _SHOW_PROGRESS.get() or not sys.stderr.isatty(),
     )

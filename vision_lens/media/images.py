@@ -15,17 +15,6 @@ from torchvision import transforms
 from vision_lens.config import PreprocessingConfig
 
 
-def example_image_paths(example_dir: str | Path = "examples") -> tuple[Path, ...]:
-    directory = Path(example_dir)
-    return tuple(
-        sorted(
-            path
-            for path in directory.iterdir()
-            if path.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}
-        )
-    )
-
-
 def load_image(path: str | Path):
     image_path = Path(path)
     if not image_path.is_file():

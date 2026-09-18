@@ -68,6 +68,27 @@ so foreground selection and colors remain comparable:
 Outputs are written below `outputs/`. Each run also creates a manifest with the
 resolved configuration, model identity, versions, inputs, and generated files.
 
+## Python API
+
+The supported Python API mirrors the configuration-driven CLI:
+
+```python
+from vision_lens import load_config, run_pipeline_from_config
+
+config = load_config("configs/vit_attention.yaml")
+result = run_pipeline_from_config(config, show_progress=False)
+
+for path in result.output_paths:
+    print(path)
+```
+
+Every run result exposes its resolved `config` and generated `output_paths`.
+Method-specific result objects may also retain analysis tensors when the run
+fits in one inference batch. Catch `ConfigurationError` for invalid workflows
+and `PipelineError` for failures after execution starts; both inherit from
+`VisionLensError`. Lower-level analysis, rendering, and export modules remain
+available for advanced use but are not part of this small stable façade.
+
 ## Configure a workflow
 
 Copy an example from `configs/` and edit it for your run. Settings with parser

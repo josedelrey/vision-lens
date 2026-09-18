@@ -4,7 +4,7 @@ import json
 import platform
 import sys
 from collections.abc import Mapping, Sequence
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -46,8 +46,8 @@ def write_run_manifest(
     payload = {
         "schema_version": 1,
         "status": "completed",
-        "started_at": started_at.astimezone(timezone.utc).isoformat(),
-        "completed_at": datetime.now(timezone.utc).isoformat(),
+        "started_at": started_at.astimezone(UTC).isoformat(),
+        "completed_at": datetime.now(UTC).isoformat(),
         "configuration": config_to_dict(config),
         "model": {
             "architecture": metadata.architecture,

@@ -7,7 +7,7 @@ name = "vision-lens"
 version = "0.1.0"
 description = "Visualize attention, Grad-CAM, and patch features for images and video."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [
@@ -26,11 +26,9 @@ classifiers = [
   "Intended Audience :: Developers",
   "Intended Audience :: Science/Research",
   "Operating System :: POSIX :: Linux",
-  "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.10",
-  "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Typing :: Typed",
 ]
 dependencies = [
   "matplotlib>=3.8",
@@ -71,6 +69,9 @@ required-version = ">=0.12.0,<0.13"
 where = ["."]
 include = ["vision_lens*"]
 
+[tool.setuptools.package-data]
+vision_lens = ["py.typed"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
@@ -80,7 +81,7 @@ markers = [
 
 [tool.ruff]
 line-length = 88
-target-version = "py310"
+target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]

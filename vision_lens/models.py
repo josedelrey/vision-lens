@@ -5,7 +5,7 @@ from typing import Any
 
 import timm
 import torch
-from timm.data import ImageNetInfo, resolve_model_data_config
+from timm.data import resolve_model_data_config
 from torchvision.models import get_model, get_model_weights
 
 from vision_lens.config import (
@@ -29,7 +29,6 @@ class ModelMetadata:
     patch_size: tuple[int, int] | None
     num_classes: int | None
     data_config: dict[str, Any]
-    class_labels: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -86,11 +85,9 @@ def load_torchvision_cnn(
     validate_precision_device_pair(runtime_config.precision, device)
     model_options = model_config.options or {}
     weights = None
-    class_labels = _imagenet_labels()
     weights_transform = None
     if model_config.pretrained:
         weights = get_model_weights(model_config.name).DEFAULT
-        class_labels = tuple(weights.meta.get("categories", class_labels or ()))
         weights_transform = weights.transforms()
 
     model = get_model(model_config.name, weights=weights, **model_options)
@@ -137,7 +134,6 @@ def load_torchvision_cnn(
         patch_size=None,
         num_classes=_num_classes(model),
         data_config=data_config,
-        class_labels=class_labels,
     )
     return LoadedModel(model=model, metadata=metadata)
 
@@ -209,7 +205,6 @@ def load_timm_vit(
         patch_size=_patch_size(model),
         num_classes=_num_classes(model),
         data_config=data_config,
-        class_labels=_imagenet_labels(),
     )
     return LoadedModel(model=model, metadata=metadata)
 
@@ -314,7 +309,3 @@ def _num_classes(model: Any) -> int | None:
         if isinstance(cfg_num_classes, int):
             return cfg_num_classes
     return None
-
-
-def _imagenet_labels() -> tuple[str, ...] | None:
-    return tuple(ImageNetInfo().label_descriptions())

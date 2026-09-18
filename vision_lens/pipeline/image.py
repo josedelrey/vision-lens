@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from dataclasses import dataclass, replace
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, Literal
@@ -40,7 +40,6 @@ from vision_lens.config import (
     RolloutAnalysisConfig,
     VisionLensConfig,
     VisualizationConfig,
-    load_config,
     validate_config,
 )
 from vision_lens.media.processing import (
@@ -289,20 +288,6 @@ class _PatchPCAGridCollector:
         self.series.page_index += 1
 
 
-def run_vit_attention(
-    config_path: str | Path = "configs/vit_attention.yaml",
-) -> PipelineResult:
-    config = load_config(config_path)
-    return run_vit_attention_from_config(config)
-
-
-def run_patch_pca(
-    config_path: str | Path = "configs/patch_pca.dinov2.yaml",
-) -> PatchPCAPipelineResult:
-    config = load_config(config_path)
-    return run_patch_pca_from_config(config)
-
-
 def run_patch_pca_from_config(
     config: VisionLensConfig,
 ) -> PatchPCAPipelineResult:
@@ -320,7 +305,7 @@ def run_patch_pca_from_config(
         raise ValueError("Image patch PCA requires foreground analysis settings.")
     fit_settings = _pca_fit_settings(config)
 
-    started_at = datetime.now(timezone.utc)
+    started_at = datetime.now(UTC)
     check_artifact_overwrite(config)
     labels = unique_input_labels(config.input.paths)
     projection = (
@@ -602,13 +587,6 @@ def run_patch_pca_from_config(
     )
 
 
-def run_vit_rollout_comparison(
-    config_path: str | Path = "configs/vit_rollout.dinov2_reg4.yaml",
-) -> PipelineResult:
-    config = load_config(config_path)
-    return run_vit_rollout_comparison_from_config(config)
-
-
 def run_vit_rollout_comparison_from_config(
     config: VisionLensConfig,
 ) -> PipelineResult:
@@ -619,7 +597,7 @@ def run_vit_rollout_comparison_from_config(
         )
     from vision_lens.analysis.attention import extract_attention_rollout
 
-    started_at = datetime.now(timezone.utc)
+    started_at = datetime.now(UTC)
     check_artifact_overwrite(config)
     labels = unique_input_labels(config.input.paths)
     apply_seed(config.runtime.seed)
@@ -726,19 +704,12 @@ def run_vit_rollout_comparison_from_config(
     )
 
 
-def run_gradcam(
-    config_path: str | Path = "configs/gradcam.yaml",
-) -> GradCamPipelineResult:
-    config = load_config(config_path)
-    return run_gradcam_from_config(config)
-
-
 def run_gradcam_from_config(config: VisionLensConfig) -> GradCamPipelineResult:
     validate_config(config)
     if config.model.architecture != "cnn":
         raise ValueError("Grad-CAM pipeline expects a CNN model config.")
 
-    started_at = datetime.now(timezone.utc)
+    started_at = datetime.now(UTC)
     check_artifact_overwrite(config)
     labels = unique_input_labels(config.input.paths)
     apply_seed(config.runtime.seed)
@@ -858,7 +829,7 @@ def run_vit_attention_from_config(config: VisionLensConfig) -> PipelineResult:
             f"Expected analysis.method='attention', got {config.analysis.method!r}."
         )
 
-    started_at = datetime.now(timezone.utc)
+    started_at = datetime.now(UTC)
     check_artifact_overwrite(config)
     labels = unique_input_labels(config.input.paths)
     apply_seed(config.runtime.seed)

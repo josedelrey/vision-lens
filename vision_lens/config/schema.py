@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import MISSING, dataclass, field, fields
 from pathlib import Path
 from typing import Any, Literal, get_args
@@ -308,8 +309,8 @@ ANALYSIS_DEFAULTS = {
 }
 
 
-def config_section(config: dict[str, Any], name: str) -> dict[str, Any]:
+def config_section(config: Mapping[str, Any], name: str) -> dict[str, Any]:
     section = config.get(name, {})
-    if not isinstance(section, dict):
+    if not isinstance(section, Mapping):
         raise ValueError(f"{name} must be a mapping.")
-    return section
+    return dict(section)

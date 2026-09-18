@@ -326,11 +326,11 @@ guidance-image preparation, and generic `upsample_features` function.
 
 Set `anyup_query_chunk_size` when a full AnyUp attention operation does not fit
 in VRAM. Chunking preserves the requested output resolution and attention
-calculation while processing fewer output queries at once. Set the chunk size
-explicitly when selecting an AnyUp mode; the included video configurations use
-`bilinear_mask` by default and therefore do not set one. Lower chunk sizes use
-less memory, while higher values improve throughput when more VRAM is
-available. For patch PCA, the configured chunking path projects the
+calculation while processing fewer output queries at once. It is required for
+soft AnyUp modes and optional for hard AnyUp modes. The included video
+configurations use `bilinear_mask` by default and therefore do not set one.
+Lower chunk sizes use less memory, while higher values improve throughput when
+more VRAM is available. For patch PCA, the configured chunking path projects the
 low-resolution values to RGB before AnyUp,
 generates query features and locality masks one chunk at a time, and transfers
 finished RGB chunks away from the execution device. This avoids materializing
