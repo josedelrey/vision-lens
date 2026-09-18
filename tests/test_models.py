@@ -4,14 +4,14 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from vision_lens.attention import extract_attention_maps
+from vision_lens.analysis.attention import extract_attention_maps
+from vision_lens.analysis.patch_pca import extract_patch_embeddings
 from vision_lens.config import (
     ModelConfig,
     PreprocessingConfig,
     RuntimeConfig,
     validate_precision_device_pair,
 )
-from vision_lens.feature_pca import extract_patch_embeddings
 from vision_lens.models import (
     _accepted_timm_image_size,
     load_timm_vit,

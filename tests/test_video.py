@@ -8,12 +8,10 @@ import pytest
 import torch
 from PIL import Image
 
-from vision_lens.attention import GradCamResult
+from vision_lens.analysis.attention import GradCamResult
 from vision_lens.config import PreprocessingConfig, VideoConfig, parse_config
-from vision_lens.models import LoadedModel, ModelMetadata
-from vision_lens.pipeline import run_pipeline_from_config
-from vision_lens.processing import build_batch_preprocessor
-from vision_lens.video import (
+from vision_lens.media.processing import build_batch_preprocessor
+from vision_lens.media.video import (
     VideoMetadata,
     VideoWriter,
     estimated_sample_count,
@@ -22,7 +20,9 @@ from vision_lens.video import (
     probe_video,
     resolve_sampling_rate,
 )
-from vision_lens.video_pipeline import VideoBatchPipelineResult, _video_model_for_source
+from vision_lens.models import LoadedModel, ModelMetadata
+from vision_lens.pipeline import run_pipeline_from_config
+from vision_lens.pipeline.video import VideoBatchPipelineResult, _video_model_for_source
 
 av = pytest.importorskip("av")
 
@@ -163,7 +163,7 @@ def test_video_writer_skips_resize_for_matching_rgb_frame(monkeypatch, tmp_path)
 
 
 def test_temporal_smoothing_is_sequential_across_batches():
-    from vision_lens.video_pipeline import _MapStream, _smooth_streams
+    from vision_lens.pipeline.video import _MapStream, _smooth_streams
 
     state = {}
     first = _smooth_streams(
@@ -187,7 +187,7 @@ def test_short_pca_video_uses_frozen_projection_and_bounded_batches(
     monkeypatch,
     tmp_path,
 ):
-    from vision_lens import video_pipeline
+    from vision_lens.pipeline import video as video_pipeline
 
     source = tmp_path / "clip.mp4"
     output_dir = tmp_path / "outputs"
@@ -308,7 +308,7 @@ def test_gradcam_video_exports_heatmaps_and_overlays_with_one_fixed_class(
     sampling_rate,
     expected_frames,
 ):
-    from vision_lens import video_pipeline
+    from vision_lens.pipeline import video as video_pipeline
 
     source = tmp_path / "clip.mp4"
     output_dir = tmp_path / "outputs"
@@ -425,7 +425,7 @@ def test_gradcam_video_exports_heatmaps_and_overlays_with_one_fixed_class(
 def test_multiple_videos_have_independent_outputs_and_sampling_rates(
     monkeypatch, tmp_path
 ):
-    from vision_lens import video_pipeline
+    from vision_lens.pipeline import video as video_pipeline
 
     first = tmp_path / "first.mp4"
     second = tmp_path / "second.mp4"
@@ -513,7 +513,7 @@ def test_multiple_videos_have_independent_outputs_and_sampling_rates(
 
 
 def test_projection_only_video_pca_stops_after_fit(monkeypatch, tmp_path):
-    from vision_lens import video_pipeline
+    from vision_lens.pipeline import video as video_pipeline
 
     source = tmp_path / "clip.mp4"
     projection_path = tmp_path / "projection.npz"

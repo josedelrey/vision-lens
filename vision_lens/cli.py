@@ -48,7 +48,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     from vision_lens.pipeline import run_pipeline_from_config
-    from vision_lens.video_pipeline import VideoBatchPipelineResult
+    from vision_lens.pipeline.video import VideoBatchPipelineResult
 
     try:
         result = run_pipeline_from_config(config)

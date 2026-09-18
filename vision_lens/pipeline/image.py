@@ -11,8 +11,46 @@ import numpy as np
 import torch
 from PIL import Image
 
-from vision_lens.anyup import is_anyup_interpolation
-from vision_lens.artifacts import (
+from vision_lens.analysis.anyup import is_anyup_interpolation
+from vision_lens.analysis.attention import (
+    AttentionExtractionResult,
+    GradCamResult,
+    LayerAttentionMaps,
+    extract_gradcam,
+    infer_patch_grid_from_image,
+)
+from vision_lens.analysis.patch_pca import (
+    ForegroundThreshold,
+    PatchPCAProjection,
+    PatchPCAResult,
+    RGBFitScope,
+    extract_patch_embeddings,
+    extract_patch_pca,
+    fit_patch_pca_projection_batches,
+    load_patch_pca_projection,
+    project_patch_embeddings,
+    render_patch_pca_images,
+    save_patch_pca_projection,
+)
+from vision_lens.config import (
+    AttentionAnalysisConfig,
+    ColormapSpec,
+    OutputConfig,
+    PatchPCAAnalysisConfig,
+    RolloutAnalysisConfig,
+    VisionLensConfig,
+    VisualizationConfig,
+    load_config,
+    validate_config,
+)
+from vision_lens.media.processing import (
+    InputBatch,
+    build_batch_preprocessor,
+    iter_input_batches,
+    preprocess_batch,
+)
+from vision_lens.models import LoadedModel, load_model
+from vision_lens.output.artifacts import (
     PATCH_PCA_GRID_STEM,
     attention_image_stem,
     attention_images_grid_stem,
@@ -27,46 +65,9 @@ from vision_lens.artifacts import (
     rollout_image_stem,
     unique_input_labels,
 )
-from vision_lens.attention import (
-    AttentionExtractionResult,
-    GradCamResult,
-    LayerAttentionMaps,
-    extract_gradcam,
-    infer_patch_grid_from_image,
-)
-from vision_lens.config import (
-    ColormapSpec,
-    OutputConfig,
-    VisionLensConfig,
-    VisualizationConfig,
-    load_config,
-    validate_config,
-)
-from vision_lens.feature_pca import (
-    ForegroundThreshold,
-    PatchPCAProjection,
-    PatchPCAResult,
-    RGBFitScope,
-    extract_patch_embeddings,
-    extract_patch_pca,
-    fit_patch_pca_projection_batches,
-    load_patch_pca_projection,
-    project_patch_embeddings,
-    render_patch_pca_images,
-    save_patch_pca_projection,
-)
-from vision_lens.manifest import can_write_output as _can_write
-from vision_lens.manifest import write_run_manifest
-from vision_lens.models import LoadedModel, load_model
-from vision_lens.processing import (
-    InputBatch,
-    build_batch_preprocessor,
-    iter_input_batches,
-    preprocess_batch,
-)
-from vision_lens.progress import status, track_image_batches, track_units
-from vision_lens.runtime import anyup_guidance, apply_seed
-from vision_lens.visualization import (
+from vision_lens.output.manifest import can_write_output as _can_write
+from vision_lens.output.manifest import write_run_manifest
+from vision_lens.output.visualization import (
     make_image_comparison_grid,
     make_layer_comparison_grid,
     overlay_attention,
@@ -75,6 +76,8 @@ from vision_lens.visualization import (
     save_image,
     shared_value_range,
 )
+from vision_lens.pipeline.progress import status, track_image_batches, track_units
+from vision_lens.pipeline.runtime import anyup_guidance, apply_seed
 
 ROLLOUT_GRID_MAX_COLUMNS = 4
 
@@ -304,8 +307,10 @@ def run_patch_pca_from_config(
     config: VisionLensConfig,
 ) -> PatchPCAPipelineResult:
     validate_config(config)
-    if config.task != "patch_pca":
-        raise ValueError(f"Expected task='patch_pca', got {config.task!r}.")
+    if not isinstance(config.analysis, PatchPCAAnalysisConfig):
+        raise ValueError(
+            f"Expected analysis.method='patch_pca', got {config.analysis.method!r}."
+        )
     if config.model.architecture != "vit":
         raise ValueError("Patch PCA pipeline expects a ViT model config.")
     if (
@@ -598,7 +603,7 @@ def run_patch_pca_from_config(
 
 
 def run_vit_rollout_comparison(
-    config_path: str | Path = "configs/vit_attention.yaml",
+    config_path: str | Path = "configs/vit_rollout.dinov2_reg4.yaml",
 ) -> PipelineResult:
     config = load_config(config_path)
     return run_vit_rollout_comparison_from_config(config)
@@ -608,16 +613,11 @@ def run_vit_rollout_comparison_from_config(
     config: VisionLensConfig,
 ) -> PipelineResult:
     validate_config(config)
-    from vision_lens.attention import extract_attention_rollout
-
-    if config.task not in {"vit_attention", "vit_rollout"}:
+    if not isinstance(config.analysis, RolloutAnalysisConfig):
         raise ValueError(
-            f"Expected task='vit_attention' or task='vit_rollout', got {config.task!r}."
+            f"Expected analysis.method='rollout', got {config.analysis.method!r}."
         )
-    if config.analysis.layers is None:
-        raise ValueError("ViT rollout requires layer settings.")
-    if config.output.grids and config.analysis.head_fusion is None:
-        raise ValueError("ViT rollout comparison grids require attention settings.")
+    from vision_lens.analysis.attention import extract_attention_rollout
 
     started_at = datetime.now(timezone.utc)
     check_artifact_overwrite(config)
@@ -853,10 +853,10 @@ def run_gradcam_from_config(config: VisionLensConfig) -> GradCamPipelineResult:
 
 def run_vit_attention_from_config(config: VisionLensConfig) -> PipelineResult:
     validate_config(config)
-    if config.task != "vit_attention":
-        raise ValueError(f"Expected task='vit_attention', got {config.task!r}.")
-    if config.analysis.layers is None or config.analysis.head_fusion is None:
-        raise ValueError("ViT attention pipeline requires attention settings.")
+    if not isinstance(config.analysis, AttentionAnalysisConfig):
+        raise ValueError(
+            f"Expected analysis.method='attention', got {config.analysis.method!r}."
+        )
 
     started_at = datetime.now(timezone.utc)
     check_artifact_overwrite(config)
@@ -1517,10 +1517,7 @@ def _extract_attention(
     inputs: Any,
     config: VisionLensConfig,
 ) -> AttentionExtractionResult:
-    from vision_lens.attention import extract_attention_maps
-
-    if config.analysis.layers is None or config.analysis.head_fusion is None:
-        raise ValueError("ViT attention pipeline requires attention settings.")
+    from vision_lens.analysis.attention import extract_attention_maps
 
     return extract_attention_maps(
         loaded_model.model,

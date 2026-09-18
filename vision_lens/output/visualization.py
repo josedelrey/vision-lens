@@ -14,7 +14,7 @@ from matplotlib.colors import to_rgb
 from matplotlib.figure import Figure
 from PIL import Image, ImageDraw
 
-from vision_lens.attention import LayerAttentionMaps
+from vision_lens.analysis.attention import LayerAttentionMaps
 from vision_lens.config import ColormapSpec
 
 GRID_TILE_SIZE = (224, 224)

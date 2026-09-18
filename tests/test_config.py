@@ -4,7 +4,6 @@ from pathlib import Path
 import pytest
 import yaml
 
-from vision_lens.artifacts import artifact_plan
 from vision_lens.config import (
     AttentionAnalysisConfig,
     GradCAMAnalysisConfig,
@@ -16,6 +15,7 @@ from vision_lens.config import (
     resolved_config_yaml,
     validate_config,
 )
+from vision_lens.output.artifacts import artifact_plan, grid_page_path
 
 
 def _minimal_config(
@@ -218,9 +218,11 @@ def test_video_rejects_invalid_time_range_and_odd_output_size(tmp_path):
     ("field", "value"),
     [
         ("start_time", float("nan")),
+        ("start_time", 10**1000),
         ("end_time", float("inf")),
         ("sampling_rate", float("nan")),
         ("sampling_rate", float("inf")),
+        ("sampling_rate", 10**1000),
     ],
 )
 def test_video_numeric_settings_must_be_finite(tmp_path, field, value):
@@ -232,6 +234,22 @@ def test_video_numeric_settings_must_be_finite(tmp_path, field, value):
 
     with pytest.raises(ValueError, match=f"video.{field}.*finite"):
         parse_config(raw)
+
+
+def test_huge_numeric_values_are_rejected_cleanly():
+    raw = _minimal_config()
+    raw["preprocessing"]["mean"] = [10**1000, 0, 0]
+
+    with pytest.raises(ValueError, match="preprocessing.mean.*finite"):
+        parse_config(raw)
+
+
+def test_parse_config_requires_mapping_arguments():
+    with pytest.raises(ValueError, match="raw_config must be a mapping"):
+        parse_config([])  # type: ignore[arg-type]
+
+    with pytest.raises(ValueError, match="overrides must be a mapping"):
+        parse_config(_minimal_config(), overrides="invalid")  # type: ignore[arg-type]
 
 
 def test_parse_config_reads_visualization_values():
@@ -1067,14 +1085,21 @@ def test_single_image_grids_only_patch_pca_is_valid():
     assert config.output.grids is True
 
 
-def test_artifact_plan_reserves_grid_pages_beyond_three_digits(tmp_path):
+def test_grid_page_paths_support_more_than_three_digits(tmp_path):
+    assert (
+        grid_page_path(tmp_path, "grid", "png", 999, 1000).name == "grid_part-1000.png"
+    )
+
+
+def test_artifact_plan_only_reserves_possible_grid_pages(tmp_path):
     raw = _minimal_config()
     raw["output"]["directory"] = str(tmp_path)
     config = parse_config(raw)
 
-    assert artifact_plan(config).matches(
-        tmp_path / "layer-0_images_heads-mean_part-1000.png"
-    )
+    plan = artifact_plan(config)
+
+    assert plan.matches(tmp_path / "layer-0_images_heads-mean.png")
+    assert not plan.matches(tmp_path / "layer-0_images_heads-mean_part-999.png")
 
 
 def test_artifact_plan_reserves_video_batches_beyond_six_digits(tmp_path):

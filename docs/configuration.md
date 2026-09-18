@@ -321,7 +321,7 @@ The first AnyUp run downloads the official multi-backbone implementation and
 checkpoint from its pinned `checkpoint_v2` release through PyTorch Hub; later
 runs use PyTorch's local cache. Vision Lens uses the original attention-based
 AnyUp implementation, so NATTEN is not required. The reusable adapter is
-available as `vision_lens.anyup`, including the model loader, ImageNet
+available as `vision_lens.analysis.anyup`, including the model loader, ImageNet
 guidance-image preparation, and generic `upsample_features` function.
 
 Set `anyup_query_chunk_size` when a full AnyUp attention operation does not fit

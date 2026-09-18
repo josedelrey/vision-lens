@@ -6,8 +6,12 @@ import numpy as np
 import torch
 from PIL import Image
 
-from vision_lens.feature_pca import project_patch_embeddings
-from vision_lens.visualization import image_grid, overlay_attention, render_heatmap
+from vision_lens.analysis.patch_pca import project_patch_embeddings
+from vision_lens.output.visualization import (
+    image_grid,
+    overlay_attention,
+    render_heatmap,
+)
 
 BASELINE_PATH = Path(__file__).parent / "baselines" / "appearance.json"
 

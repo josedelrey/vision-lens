@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from vision_lens.config import VisionLensConfig, load_config
-from vision_lens.image_pipeline import (
+from vision_lens.pipeline.image import (
     GradCamPipelineResult,
     PatchPCAPipelineResult,
     PipelineResult,
@@ -22,7 +22,7 @@ from vision_lens.image_pipeline import (
     run_vit_rollout_comparison,
     run_vit_rollout_comparison_from_config,
 )
-from vision_lens.video_pipeline import (
+from vision_lens.pipeline.video import (
     VideoBatchPipelineResult,
     VideoPipelineResult,
     run_video_from_config,
@@ -77,16 +77,17 @@ def run_pipeline_from_config(
 ):
     if config.video is not None:
         return run_video_from_config(config)
-    if config.task == "vit_attention":
+    method = config.analysis.method
+    if method == "attention":
         return run_vit_attention_from_config(config)
-    if config.task == "vit_rollout":
+    if method == "rollout":
         return run_vit_rollout_comparison_from_config(config)
-    if config.task == "gradcam":
+    if method == "gradcam":
         return run_gradcam_from_config(config)
-    if config.task == "patch_pca":
+    if method == "patch_pca":
         return run_patch_pca_from_config(config)
 
-    raise ValueError(f"Unsupported task: {config.task}")
+    raise ValueError(f"Unsupported analysis method: {method}")
 
 
 def run_video(

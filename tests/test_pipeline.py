@@ -6,19 +6,21 @@ import pytest
 import torch
 from PIL import Image
 
-from vision_lens.attention import (
+from vision_lens.analysis.attention import (
     AttentionExtractionResult,
     GradCamResult,
     LayerAttentionMaps,
 )
+from vision_lens.analysis.patch_pca import PatchPCAResult
 from vision_lens.config import (
     OutputConfig,
     VisualizationConfig,
     load_config,
     parse_config,
 )
-from vision_lens.feature_pca import PatchPCAResult
-from vision_lens.image_pipeline import (
+from vision_lens.models import LoadedModel, ModelMetadata
+from vision_lens.pipeline import run_pipeline_from_config
+from vision_lens.pipeline.image import (
     export_attention_outputs,
     export_gradcam_outputs,
     export_patch_pca_outputs,
@@ -26,13 +28,13 @@ from vision_lens.image_pipeline import (
     run_gradcam_from_config,
     run_patch_pca_from_config,
     run_vit_attention_from_config,
+    run_vit_rollout_comparison_from_config,
 )
-from vision_lens.models import LoadedModel, ModelMetadata
-from vision_lens.pipeline import run_pipeline_from_config
 
 
 def test_vit_pipeline_exports_figures_with_mocked_model(monkeypatch, tmp_path):
-    from vision_lens import image_pipeline, processing
+    from vision_lens.media import processing
+    from vision_lens.pipeline import image as image_pipeline
 
     config = parse_config(
         {
@@ -140,7 +142,7 @@ def test_vit_pipeline_exports_figures_with_mocked_model(monkeypatch, tmp_path):
 
 
 def test_rollout_grid_items_place_layer_row_above_rollout_row():
-    from vision_lens.image_pipeline import _rollout_grid_items
+    from vision_lens.pipeline.image import _rollout_grid_items
 
     layer_attention = _attention_result(layer_indices=(0, 1, 2, 3, 4))
     rollout = _attention_result(layer_indices=(0, 1, 2, 3, 4))
@@ -176,7 +178,7 @@ def test_rollout_grid_items_place_layer_row_above_rollout_row():
 
 
 def test_rollout_grid_caps_requested_columns_to_available_layer_pairs():
-    from vision_lens.image_pipeline import _rollout_grid_items
+    from vision_lens.pipeline.image import _rollout_grid_items
 
     layer_attention = _attention_result(layer_indices=(0, 1))
     rollout = _attention_result(layer_indices=(0, 1))
@@ -210,6 +212,15 @@ def test_rollout_config_dispatches_to_rollout_pipeline(monkeypatch):
     )
 
     assert run_pipeline_from_config(config) is sentinel
+
+
+def test_rollout_helper_rejects_attention_config_before_loading_model():
+    config = load_config(
+        Path(__file__).parents[1] / "configs/vit_attention.dinov2_reg4.yaml"
+    )
+
+    with pytest.raises(ValueError, match="Expected analysis.method='rollout'"):
+        run_vit_rollout_comparison_from_config(config)
 
 
 def test_gradcam_export_preserves_heatmap_overlay_and_grid_layout(tmp_path):
@@ -337,7 +348,8 @@ def test_matching_output_size_applies_to_all_image_exporters(tmp_path):
 
 
 def test_patch_pca_pipeline_exports_reference_style_images(monkeypatch, tmp_path):
-    from vision_lens import image_pipeline, processing
+    from vision_lens.media import processing
+    from vision_lens.pipeline import image as image_pipeline
 
     horse_a = tmp_path / "horse-a.jpg"
     horse_b = tmp_path / "horse-b.jpg"
@@ -422,7 +434,8 @@ def test_patch_pca_pipeline_exports_reference_style_images(monkeypatch, tmp_path
 
 
 def test_raw_only_patch_pca_skips_rendering(monkeypatch, tmp_path):
-    from vision_lens import image_pipeline, processing
+    from vision_lens.media import processing
+    from vision_lens.pipeline import image as image_pipeline
 
     source = tmp_path / "source.jpg"
     Image.new("RGB", (4, 4), "white").save(source)
@@ -502,7 +515,7 @@ def test_raw_only_patch_pca_skips_rendering(monkeypatch, tmp_path):
 
 
 def test_patch_pca_grid_uses_matplotlib_without_labels(monkeypatch, tmp_path):
-    from vision_lens import image_pipeline
+    from vision_lens.pipeline import image as image_pipeline
 
     patch_pca = PatchPCAResult(
         patch_embeddings=torch.rand(2, 4, 3),
@@ -561,7 +574,7 @@ def test_loaded_patch_pca_projection_does_not_require_fit_settings(
     monkeypatch,
     tmp_path,
 ):
-    from vision_lens import image_pipeline
+    from vision_lens.pipeline import image as image_pipeline
 
     projection_path = tmp_path / "projection.npz"
     projection_path.touch()
@@ -644,7 +657,7 @@ def test_patch_pca_single_image_grids_only_exports_comparison(tmp_path):
 def test_projection_only_image_pca_skips_projection_and_render_pass(
     monkeypatch, tmp_path
 ):
-    from vision_lens import image_pipeline
+    from vision_lens.pipeline import image as image_pipeline
 
     projection_path = tmp_path / "run-manifest.json.tmp"
     raw = {
@@ -740,7 +753,8 @@ def test_patch_pca_pipeline_combines_grid_across_bounded_batches(
     monkeypatch,
     tmp_path,
 ):
-    from vision_lens import image_pipeline, processing
+    from vision_lens.media import processing
+    from vision_lens.pipeline import image as image_pipeline
 
     input_dir = tmp_path / "inputs"
     output_dir = tmp_path / "outputs"
@@ -826,7 +840,7 @@ def test_patch_pca_pipeline_combines_grid_across_bounded_batches(
 
 
 def test_items_per_grid_splits_gradcam_comparison_files(tmp_path):
-    from vision_lens.attention import GradCamResult
+    from vision_lens.analysis.attention import GradCamResult
 
     images = [Image.new("RGB", (4, 4), "white")] * 5
     gradcam = GradCamResult(
@@ -869,7 +883,8 @@ def test_attention_pipeline_combines_cross_image_grid_across_batches(
     monkeypatch,
     tmp_path,
 ):
-    from vision_lens import image_pipeline, processing
+    from vision_lens.media import processing
+    from vision_lens.pipeline import image as image_pipeline
 
     config = parse_config(
         {
@@ -962,7 +977,8 @@ def test_attention_pipeline_combines_cross_image_grid_across_batches(
 
 
 def test_shared_normalization_is_fitted_across_all_batches(monkeypatch, tmp_path):
-    from vision_lens import image_pipeline, processing
+    from vision_lens.media import processing
+    from vision_lens.pipeline import image as image_pipeline
 
     config = parse_config(
         {
@@ -1057,7 +1073,7 @@ def test_shared_normalization_is_fitted_across_all_batches(monkeypatch, tmp_path
 
 
 def test_output_overwrite_error_and_skip_policies(tmp_path):
-    from vision_lens.attention import GradCamResult
+    from vision_lens.analysis.attention import GradCamResult
 
     existing = tmp_path / "first_gradcam_heatmap.png"
     existing.touch()
@@ -1102,7 +1118,7 @@ def test_output_overwrite_error_and_skip_policies(tmp_path):
 
 
 def test_existing_manifest_fails_before_model_loading(monkeypatch, tmp_path):
-    from vision_lens import image_pipeline
+    from vision_lens.pipeline import image as image_pipeline
 
     (tmp_path / "run-manifest.json").write_text("{}")
     config = parse_config(
@@ -1136,7 +1152,7 @@ def test_existing_manifest_fails_before_model_loading(monkeypatch, tmp_path):
 
 
 def test_existing_saved_projection_fails_before_model_loading(monkeypatch, tmp_path):
-    from vision_lens import image_pipeline
+    from vision_lens.pipeline import image as image_pipeline
 
     projection_path = tmp_path / "projection.npz"
     projection_path.touch()
@@ -1181,8 +1197,9 @@ def test_gradcam_pipeline_passes_fixed_class_workers_and_batch_size(
     monkeypatch,
     tmp_path,
 ):
-    from vision_lens import image_pipeline, processing
-    from vision_lens.attention import GradCamResult
+    from vision_lens.analysis.attention import GradCamResult
+    from vision_lens.media import processing
+    from vision_lens.pipeline import image as image_pipeline
 
     config = parse_config(
         {

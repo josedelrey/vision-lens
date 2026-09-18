@@ -3,7 +3,7 @@ import torch
 from PIL import Image
 
 from vision_lens.config import PreprocessingConfig
-from vision_lens.images import build_timm_preprocess, build_torchvision_preprocess
+from vision_lens.media.images import build_timm_preprocess, build_torchvision_preprocess
 
 
 def test_torchvision_preprocess_resizes_rectangular_images_without_cropping():
@@ -26,7 +26,7 @@ def test_torchvision_preprocess_keeps_672_square_input_dimensions():
 
 
 def test_timm_preprocess_uses_model_normalization_without_cropping(monkeypatch):
-    from vision_lens import images
+    from vision_lens.media import images
 
     monkeypatch.setattr(
         images,

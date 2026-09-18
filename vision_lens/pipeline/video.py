@@ -10,21 +10,21 @@ import numpy as np
 import torch
 from PIL import Image
 
-from vision_lens.artifacts import (
-    check_artifact_overwrite,
-    map_stream_name,
-    rendered_stream_name,
-    video_artifact_path,
-    video_raw_batch_path,
-    video_run_layouts,
-)
-from vision_lens.attention import (
+from vision_lens.analysis.attention import (
     AttentionExtractionResult,
     GradCamResult,
     extract_attention_maps,
     extract_attention_rollout,
     extract_gradcam,
     infer_patch_grid_from_image,
+)
+from vision_lens.analysis.patch_pca import (
+    PatchPCAProjection,
+    extract_patch_embeddings,
+    fit_patch_pca_projection_batches,
+    load_patch_pca_projection,
+    project_patch_embeddings,
+    save_patch_pca_projection,
 )
 from vision_lens.config import (
     AttentionAnalysisConfig,
@@ -34,25 +34,12 @@ from vision_lens.config import (
     VisionLensConfig,
     validate_config,
 )
-from vision_lens.feature_pca import (
-    PatchPCAProjection,
-    extract_patch_embeddings,
-    fit_patch_pca_projection_batches,
-    load_patch_pca_projection,
-    project_patch_embeddings,
-    save_patch_pca_projection,
-)
-from vision_lens.manifest import can_write_output as _can_write
-from vision_lens.manifest import write_run_manifest
-from vision_lens.models import LoadedModel, load_model
-from vision_lens.processing import (
+from vision_lens.media.processing import (
     InputBatch,
     build_batch_preprocessor,
     preprocess_batch,
 )
-from vision_lens.progress import status, track_video_batches
-from vision_lens.runtime import anyup_guidance, apply_seed
-from vision_lens.video import (
+from vision_lens.media.video import (
     SampledVideoFrame,
     VideoMetadata,
     VideoWriter,
@@ -65,7 +52,20 @@ from vision_lens.video import (
     resolve_sampling_rate,
     resolved_output_resolution,
 )
-from vision_lens.visualization import overlay_attention, render_heatmap
+from vision_lens.models import LoadedModel, load_model
+from vision_lens.output.artifacts import (
+    check_artifact_overwrite,
+    map_stream_name,
+    rendered_stream_name,
+    video_artifact_path,
+    video_raw_batch_path,
+    video_run_layouts,
+)
+from vision_lens.output.manifest import can_write_output as _can_write
+from vision_lens.output.manifest import write_run_manifest
+from vision_lens.output.visualization import overlay_attention, render_heatmap
+from vision_lens.pipeline.progress import status, track_video_batches
+from vision_lens.pipeline.runtime import anyup_guidance, apply_seed
 
 
 @dataclass(frozen=True)

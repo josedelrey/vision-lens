@@ -1,7 +1,7 @@
 import torch
 import torch.nn.functional as functional
 
-from vision_lens import anyup
+from vision_lens.analysis import anyup
 
 
 class _FakeAnyUp(torch.nn.Module):

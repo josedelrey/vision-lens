@@ -55,7 +55,7 @@ def test_cli_validation_does_not_import_pipeline_modules(monkeypatch, capsys):
     original_import = builtins.__import__
 
     def guarded_import(name, *args, **kwargs):
-        if name in {"vision_lens.pipeline", "vision_lens.video_pipeline"}:
+        if name.startswith("vision_lens.pipeline"):
             pytest.fail(f"validation imported {name}")
         return original_import(name, *args, **kwargs)
 

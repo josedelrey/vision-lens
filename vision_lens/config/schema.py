@@ -1,38 +1,60 @@
+"""Configuration types, choices, defaults, and structural metadata."""
+
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import MISSING, dataclass, field, fields
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
-from vision_lens.config_options import (
-    CropMode,
-    Device,
-    ForegroundSide,
-    GridFormat,
-    HeadFusion,
-    ImageFormat,
-    NormalizationMode,
-    OverwritePolicy,
-    PadMode,
-    Precision,
-    PreprocessingInterpolation,
-    ProjectionMode,
-    RawFormat,
-    ResizeMode,
-    RGBFitScope,
-    VisualizationInterpolation,
+Device = Literal["auto", "cpu", "cuda", "mps"]
+Precision = Literal["float32", "float16", "bfloat16"]
+ResizeMode = Literal["stretch", "shortest", "longest", "none"]
+CropMode = Literal["none", "center"]
+PadMode = Literal["none", "center"]
+PreprocessingInterpolation = Literal["nearest", "bilinear", "bicubic", "lanczos"]
+HeadFusion = Literal["mean", "max", "none"]
+ForegroundSide = Literal["high", "low"]
+RGBFitScope = Literal["foreground", "all"]
+ProjectionMode = Literal["fit", "load"]
+VisualizationInterpolation = Literal[
+    "nearest",
+    "bilinear",
+    "bilinear_mask",
+    "anyup",
+    "anyup_mask",
+    "anyup_soft",
+    "anyup_soft_mask",
+]
+GridFormat = Literal["pdf", "png", "svg"]
+NormalizationMode = Literal["per_map", "shared", "fixed"]
+ImageFormat = Literal["jpeg", "png", "tiff", "webp"]
+RawFormat = Literal["npy", "npz"]
+OverwritePolicy = Literal["replace", "error", "skip"]
+
+DEVICE_CHOICES = frozenset(get_args(Device))
+PRECISION_CHOICES = frozenset(get_args(Precision))
+RESIZE_CHOICES = frozenset(get_args(ResizeMode))
+CROP_CHOICES = frozenset(get_args(CropMode))
+PAD_CHOICES = frozenset(get_args(PadMode))
+PREPROCESSING_INTERPOLATION_CHOICES = frozenset(get_args(PreprocessingInterpolation))
+HEAD_FUSION_CHOICES = frozenset(get_args(HeadFusion))
+FOREGROUND_SIDE_CHOICES = frozenset(get_args(ForegroundSide))
+RGB_FIT_SCOPE_CHOICES = frozenset(get_args(RGBFitScope))
+PROJECTION_CHOICES = frozenset(get_args(ProjectionMode))
+VISUALIZATION_INTERPOLATION_CHOICES = frozenset(get_args(VisualizationInterpolation))
+GRID_FORMAT_CHOICES = frozenset(get_args(GridFormat))
+NORMALIZATION_CHOICES = frozenset(get_args(NormalizationMode))
+IMAGE_FORMAT_CHOICES = frozenset(get_args(ImageFormat))
+RAW_FORMAT_CHOICES = frozenset(get_args(RawFormat))
+OVERWRITE_CHOICES = frozenset(get_args(OverwritePolicy))
+ANYUP_INTERPOLATIONS = frozenset(
+    {"anyup", "anyup_mask", "anyup_soft", "anyup_soft_mask"}
 )
+SOFT_ANYUP_INTERPOLATIONS = frozenset({"anyup_soft", "anyup_soft_mask"})
 
 AttentionLayers = Literal["all"] | tuple[int, ...]
 AnalysisMethod = Literal["attention", "rollout", "gradcam", "patch_pca"]
 VisualizationOutputSize = Literal["match"] | tuple[int, int] | None
-
-METHOD_TASKS = {
-    "attention": "vit_attention",
-    "rollout": "vit_rollout",
-    "gradcam": "gradcam",
-    "patch_pca": "patch_pca",
-}
 
 
 @dataclass(frozen=True)
@@ -202,6 +224,92 @@ class VisionLensConfig:
     output: OutputConfig
     video: VideoConfig | None = None
 
-    @property
-    def task(self) -> str:
-        return METHOD_TASKS[self.analysis.method]
+
+DEFAULT_INPUT_PATTERNS = ("*.jpg", "*.jpeg", "*.png", "*.webp")
+DEFAULT_ANALYSIS_METHOD = "attention"
+PATCH_PCA_IMAGE_FIT_DEFAULTS = {
+    "foreground_separation": True,
+    "foreground_threshold": 0.5,
+    "foreground_side": "high",
+    "rgb_fit_scope": "foreground",
+}
+
+KNOWN_FIXED_IMAGE_SIZES = {
+    ("timm", "vit_small_patch8_224.dino"): 224,
+}
+KNOWN_VIT_DEPTHS = {
+    "vit_small_patch8_224.dino": 12,
+    "hf_hub:timm/vit_small_patch14_reg4_dinov2.lvd142m": 12,
+    "hf_hub:timm/vit_base_patch14_dinov2.lvd142m": 12,
+}
+KNOWN_VIT_HEADS = {
+    "vit_small_patch8_224.dino": 6,
+    "hf_hub:timm/vit_small_patch14_reg4_dinov2.lvd142m": 6,
+    "hf_hub:timm/vit_base_patch14_dinov2.lvd142m": 12,
+}
+
+SECTION_CONFIG_TYPES = {
+    "model": ModelConfig,
+    "preprocessing": PreprocessingConfig,
+    "runtime": RuntimeConfig,
+    "visualization": VisualizationConfig,
+    "output": OutputConfig,
+    "video": VideoConfig,
+}
+SECTION_KEYS = {
+    "input": {"files", "folders", "patterns", "recursive", "limit"},
+    **{
+        section: {field.name for field in fields(config_type)}
+        for section, config_type in SECTION_CONFIG_TYPES.items()
+    },
+}
+TOP_LEVEL_KEYS = set(SECTION_KEYS) | {"analysis"}
+VIDEO_OUTPUT_KEYS = SECTION_KEYS["output"] - {"grids", "image_format"}
+GRID_VISUALIZATION_KEYS = {
+    "tile_size",
+    "columns",
+    "items_per_grid",
+    "spacing",
+    "padding",
+    "labels",
+    "background",
+    "dpi",
+    "grid_format",
+}
+ANALYSIS_CONFIG_TYPES = {
+    "attention": AttentionAnalysisConfig,
+    "rollout": RolloutAnalysisConfig,
+    "gradcam": GradCAMAnalysisConfig,
+    "patch_pca": PatchPCAAnalysisConfig,
+}
+ANALYSIS_KEYS = {
+    method: {field.name for field in fields(config_type)}
+    for method, config_type in ANALYSIS_CONFIG_TYPES.items()
+}
+
+
+def _dataclass_defaults(config_type: type[Any]) -> dict[str, Any]:
+    defaults = {}
+    for dataclass_field in fields(config_type):
+        if dataclass_field.default is not MISSING:
+            defaults[dataclass_field.name] = dataclass_field.default
+        elif dataclass_field.default_factory is not MISSING:
+            defaults[dataclass_field.name] = dataclass_field.default_factory()
+    return defaults
+
+
+SECTION_DEFAULTS = {
+    section: _dataclass_defaults(config_type)
+    for section, config_type in SECTION_CONFIG_TYPES.items()
+}
+ANALYSIS_DEFAULTS = {
+    method: _dataclass_defaults(config_type)
+    for method, config_type in ANALYSIS_CONFIG_TYPES.items()
+}
+
+
+def config_section(config: dict[str, Any], name: str) -> dict[str, Any]:
+    section = config.get(name, {})
+    if not isinstance(section, dict):
+        raise ValueError(f"{name} must be a mapping.")
+    return section
