@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
@@ -145,7 +145,7 @@ def _run_single_video_from_config(
 ) -> VideoPipelineResult:
     assert config.video is not None
 
-    started_at = datetime.now(timezone.utc)
+    started_at = datetime.now(UTC)
     check_artifact_overwrite(config)
     if loaded_model is None:
         require_video_dependencies()

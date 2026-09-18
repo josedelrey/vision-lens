@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Set
+from collections.abc import Mapping, Set
 from dataclasses import fields, is_dataclass
 from pathlib import Path, PureWindowsPath
 from typing import Any, Literal
@@ -67,7 +67,7 @@ from vision_lens.config.validation import (
 def load_config(
     path: str | Path,
     *,
-    overrides: dict[str, Any] | None = None,
+    overrides: Mapping[str, Any] | None = None,
 ) -> VisionLensConfig:
     config_path = Path(path).resolve()
     with config_path.open("r", encoding="utf-8") as file:
@@ -75,7 +75,7 @@ def load_config(
 
     if raw_config is None:
         raw_config = {}
-    elif not isinstance(raw_config, dict):
+    elif not isinstance(raw_config, Mapping):
         raise ValueError("Config file must contain a YAML mapping at the top level.")
     return parse_config(
         raw_config,
@@ -85,14 +85,14 @@ def load_config(
 
 
 def parse_config(
-    raw_config: dict[str, Any],
+    raw_config: Mapping[str, Any],
     base_dir: Path | None = None,
     *,
-    overrides: dict[str, Any] | None = None,
+    overrides: Mapping[str, Any] | None = None,
 ) -> VisionLensConfig:
-    if not isinstance(raw_config, dict):
+    if not isinstance(raw_config, Mapping):
         raise ValueError("raw_config must be a mapping.")
-    if overrides is not None and not isinstance(overrides, dict):
+    if overrides is not None and not isinstance(overrides, Mapping):
         raise ValueError("overrides must be a mapping or None.")
     base = _project_root(Path.cwd()) if base_dir is None else Path(base_dir).resolve()
     resolved = _deep_merge(raw_config, overrides or {})
@@ -407,10 +407,6 @@ def _parse_input(section: dict[str, Any], base_dir: Path) -> InputConfig:
     recursive = _bool(section.get("recursive", False), "input.recursive")
     limit = _optional_positive_int(section.get("limit"), "input.limit")
 
-    missing_files = [path for path in files if not path.is_file()]
-    if missing_files:
-        paths = ", ".join(str(path) for path in missing_files)
-        raise ValueError(f"Input file(s) do not exist: {paths}.")
     invalid_folders = [path for path in folders if not path.is_dir()]
     if invalid_folders:
         paths = ", ".join(str(path) for path in invalid_folders)
@@ -556,11 +552,14 @@ def _reject_unknown_keys(
         )
 
 
-def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+def _deep_merge(
+    base: Mapping[str, Any],
+    override: Mapping[str, Any],
+) -> dict[str, Any]:
     merged = dict(base)
     for key, value in override.items():
         existing = merged.get(key)
-        if isinstance(existing, dict) and isinstance(value, dict):
+        if isinstance(existing, Mapping) and isinstance(value, Mapping):
             merged[key] = _deep_merge(existing, value)
         else:
             merged[key] = value
@@ -568,8 +567,8 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
 
 
 def _validate_mode_overrides(
-    raw_config: dict[str, Any],
-    overrides: dict[str, Any],
+    raw_config: Mapping[str, Any],
+    overrides: Mapping[str, Any],
 ) -> None:
     if not overrides:
         return
@@ -654,7 +653,7 @@ def _attention_layers(value: Any) -> AttentionLayers:
 def _optional_mapping(value: Any, field_name: str) -> dict[str, Any] | None:
     if value is None:
         return None
-    if not isinstance(value, dict):
+    if not isinstance(value, Mapping):
         raise ValueError(f"{field_name} must be a mapping or null.")
     if not all(isinstance(key, str) for key in value):
         raise ValueError(f"{field_name} keys must be strings.")
@@ -870,7 +869,7 @@ def _overlay_alpha_curve(value: Any) -> OverlayAlphaCurveSpec | None:
     if value is None:
         return None
     if (
-        not isinstance(value, dict)
+        not isinstance(value, Mapping)
         or "steepness" not in value
         or not set(value) <= {"steepness", "midpoint"}
     ):
@@ -893,7 +892,7 @@ def _cmap_black(value: Any) -> tuple[int, int, bool] | None:
     if value is None:
         return None
     required = {"threshold", "blend_width", "transparent"}
-    if not isinstance(value, dict) or set(value) != required:
+    if not isinstance(value, Mapping) or set(value) != required:
         raise ValueError(
             "visualization.cmap_black must be null or contain exactly "
             "threshold, blend_width, and transparent."

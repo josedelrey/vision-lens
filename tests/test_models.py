@@ -63,8 +63,6 @@ def test_timm_loader_uses_authoritative_preprocessing_size(monkeypatch):
             "std": (0.229, 0.224, 0.225),
         },
     )
-    monkeypatch.setattr(models, "_imagenet_labels", lambda: None)
-
     loaded = load_timm_vit(
         ModelConfig("vit", "timm", "mock_vit", pretrained=False),
         PreprocessingConfig(image_size=672),

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import yaml
 
-from vision_lens.config import load_config, resolved_config_yaml
+from vision_lens import VisionLensError, load_config, resolved_config_yaml
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -47,12 +47,12 @@ def main(argv: list[str] | None = None) -> int:
         print(resolved_config_yaml(config), end="")
         return 0
 
-    from vision_lens.pipeline import run_pipeline_from_config
+    from vision_lens import run_pipeline_from_config
     from vision_lens.pipeline.video import VideoBatchPipelineResult
 
     try:
         result = run_pipeline_from_config(config)
-    except (OSError, RuntimeError, ValueError) as error:
+    except VisionLensError as error:
         parser.error(str(error))
     if isinstance(result, VideoBatchPipelineResult):
         print(

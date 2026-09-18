@@ -1,5 +1,6 @@
 from dataclasses import replace
 from pathlib import Path
+from types import MappingProxyType
 
 import pytest
 import yaml
@@ -250,6 +251,25 @@ def test_parse_config_requires_mapping_arguments():
 
     with pytest.raises(ValueError, match="overrides must be a mapping"):
         parse_config(_minimal_config(), overrides="invalid")  # type: ignore[arg-type]
+
+
+def test_parse_config_accepts_generic_mappings():
+    raw = _minimal_config()
+    raw["model"]["options"] = MappingProxyType({"drop_rate": 0.1})
+    raw["visualization"].update(
+        {
+            "overlay_alpha_curve": MappingProxyType({"steepness": 10}),
+            "cmap_black": MappingProxyType(
+                {"threshold": 20, "blend_width": 35, "transparent": True}
+            ),
+        }
+    )
+    config = parse_config(MappingProxyType(raw), overrides=MappingProxyType({}))
+
+    assert config.analysis.method == "attention"
+    assert config.model.options == {"drop_rate": 0.1}
+    assert config.visualization.overlay_alpha_curve is not None
+    assert config.visualization.cmap_black == (20, 35, True)
 
 
 def test_parse_config_reads_visualization_values():
@@ -1100,6 +1120,21 @@ def test_artifact_plan_only_reserves_possible_grid_pages(tmp_path):
 
     assert plan.matches(tmp_path / "layer-0_images_heads-mean.png")
     assert not plan.matches(tmp_path / "layer-0_images_heads-mean_part-999.png")
+
+
+def test_artifact_plan_uses_known_model_dimensions_for_all_selections(tmp_path):
+    raw = _minimal_config()
+    raw["model"]["name"] = "hf_hub:timm/vit_small_patch14_reg4_dinov2.lvd142m"
+    raw["analysis"].update({"layers": "all", "head_fusion": "none"})
+    raw["visualization"]["items_per_grid"] = 6
+    raw["output"]["directory"] = str(tmp_path)
+    plan = artifact_plan(parse_config(raw))
+
+    assert plan.matches(tmp_path / "1_layer-11_head-5_heatmap.png")
+    assert not plan.matches(tmp_path / "1_layer-12_head-5_heatmap.png")
+    assert not plan.matches(tmp_path / "1_layer-11_head-6_heatmap.png")
+    assert plan.matches(tmp_path / "1_layers_head-5_part-002.png")
+    assert not plan.matches(tmp_path / "1_layers_head-5_part-999.png")
 
 
 def test_artifact_plan_reserves_video_batches_beyond_six_digits(tmp_path):

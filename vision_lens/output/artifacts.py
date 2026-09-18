@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Literal
 
 from vision_lens.config.schema import (
+    KNOWN_VIT_DEPTHS,
+    KNOWN_VIT_HEADS,
     AttentionAnalysisConfig,
     PatchPCAAnalysisConfig,
     RolloutAnalysisConfig,
@@ -371,9 +373,12 @@ def _image_artifact_patterns(
         return tuple(re.compile(pattern) for pattern in patterns)
 
     assert isinstance(config.analysis, AttentionAnalysisConfig | RolloutAnalysisConfig)
-    layers = _number_pattern(config.analysis.layers)
+    known_layer_count = KNOWN_VIT_DEPTHS.get(config.model.name)
+    layers = _number_pattern(config.analysis.layers, known_layer_count)
     layer_page = _layer_page_pattern(
-        config.analysis.layers, config.visualization.items_per_grid
+        config.analysis.layers,
+        config.visualization.items_per_grid,
+        known_layer_count,
     )
     if config.analysis.method == "rollout":
         stem = rf"(?:{labels})_rollout-(?:{layers})"
@@ -390,7 +395,10 @@ def _image_artifact_patterns(
             )
         return tuple(re.compile(pattern) for pattern in patterns)
 
-    heads = _attention_head_pattern(config.analysis)
+    heads = _attention_head_pattern(
+        config.analysis,
+        KNOWN_VIT_HEADS.get(config.model.name),
+    )
     stem = rf"(?:{labels})_layer-(?:{layers})_(?:{heads})"
     _append_map_output_patterns(
         patterns,
@@ -424,9 +432,15 @@ def _video_artifact_patterns(
         assert isinstance(
             config.analysis, AttentionAnalysisConfig | RolloutAnalysisConfig
         )
-        layers = _number_pattern(config.analysis.layers)
+        layers = _number_pattern(
+            config.analysis.layers,
+            KNOWN_VIT_DEPTHS.get(config.model.name),
+        )
         heads = (
-            _attention_head_pattern(config.analysis)
+            _attention_head_pattern(
+                config.analysis,
+                KNOWN_VIT_HEADS.get(config.model.name),
+            )
             if config.analysis.method == "attention"
             else "heads-mean"
         )
@@ -459,9 +473,14 @@ def _append_map_output_patterns(
         patterns.append(rf"{stem}\.{raw_extension}")
 
 
-def _number_pattern(values: str | tuple[int, ...]) -> str:
+def _number_pattern(
+    values: str | tuple[int, ...],
+    known_count: int | None,
+) -> str:
     if values == "all":
-        return r"\d+"
+        if known_count is None:
+            return r"\d+"
+        return "|".join(str(value) for value in range(known_count))
     return "|".join(str(value) for value in values)
 
 
@@ -477,19 +496,25 @@ def _page_pattern(item_count: int, items_per_page: int | None) -> str:
 def _layer_page_pattern(
     layers: str | tuple[int, ...],
     items_per_page: int | None,
+    known_layer_count: int | None,
 ) -> str:
     if layers == "all":
-        return r"(?:_part-\d{3,})?"
+        if known_layer_count is None:
+            return r"(?:_part-\d{3,})?"
+        return _page_pattern(known_layer_count, items_per_page)
     return _page_pattern(len(layers), items_per_page)
 
 
 def _attention_head_pattern(
     analysis: AttentionAnalysisConfig | RolloutAnalysisConfig,
+    known_head_count: int | None,
 ) -> str:
     if analysis.head_fusion != "none":
         return f"heads-{re.escape(analysis.head_fusion)}"
     if analysis.heads is None:
-        return r"head-\d+"
+        if known_head_count is None:
+            return r"head-\d+"
+        return "|".join(f"head-{head}" for head in range(known_head_count))
     return "|".join(f"head-{head}" for head in analysis.heads)
 
 

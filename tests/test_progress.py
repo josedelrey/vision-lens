@@ -66,3 +66,22 @@ def test_noninteractive_logs_do_not_include_progress_control_characters(monkeypa
     )
 
     assert output.getvalue() == "vision-lens: Loading model example\n"
+
+
+def test_progress_output_can_be_silenced_and_restored(monkeypatch):
+    terminal = _TerminalStream()
+    monkeypatch.setattr(progress.sys, "stderr", terminal)
+
+    with progress.progress_output(False):
+        progress.status("hidden")
+        list(
+            progress.track_image_batches(
+                [SimpleNamespace(count=1)],
+                total=1,
+                description="Hidden work",
+            )
+        )
+
+    progress.status("visible")
+
+    assert terminal.getvalue() == "vision-lens: visible\n"

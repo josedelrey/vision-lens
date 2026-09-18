@@ -36,7 +36,11 @@ def test_cli_requires_a_config_file(capsys):
 def test_cli_hides_individual_output_paths_by_default(monkeypatch, capsys):
     from vision_lens import pipeline
 
-    monkeypatch.setattr(pipeline, "run_pipeline_from_config", lambda _config: _result())
+    monkeypatch.setattr(
+        pipeline,
+        "run_pipeline_from_config",
+        lambda _config, **_kwargs: _result(),
+    )
 
     assert main(["--config", "configs/patch_pca.dinov2.yaml"]) == 0
 
