@@ -1,14 +1,20 @@
+"""Convert between external configuration data and the resolved schema."""
+
 from __future__ import annotations
 
 from collections.abc import Set
-from math import isfinite
+from dataclasses import fields, is_dataclass
 from pathlib import Path, PureWindowsPath
 from typing import Any, Literal
 
 import yaml
 
-from vision_lens.config_options import (
+from vision_lens.config.schema import (
+    ANALYSIS_DEFAULTS,
+    ANALYSIS_KEYS,
     CROP_CHOICES,
+    DEFAULT_ANALYSIS_METHOD,
+    DEFAULT_INPUT_PATTERNS,
     DEVICE_CHOICES,
     FOREGROUND_SIDE_CHOICES,
     GRID_FORMAT_CHOICES,
@@ -17,27 +23,18 @@ from vision_lens.config_options import (
     NORMALIZATION_CHOICES,
     OVERWRITE_CHOICES,
     PAD_CHOICES,
+    PATCH_PCA_IMAGE_FIT_DEFAULTS,
     PRECISION_CHOICES,
     PREPROCESSING_INTERPOLATION_CHOICES,
     PROJECTION_CHOICES,
     RAW_FORMAT_CHOICES,
     RESIZE_CHOICES,
     RGB_FIT_SCOPE_CHOICES,
-    VISUALIZATION_INTERPOLATION_CHOICES,
-)
-from vision_lens.config_schema import (
-    ANALYSIS_DEFAULTS,
-    ANALYSIS_KEYS,
-    DEFAULT_ANALYSIS_METHOD,
-    DEFAULT_INPUT_PATTERNS,
-    PATCH_PCA_IMAGE_FIT_DEFAULTS,
     SECTION_DEFAULTS,
     SECTION_KEYS,
     TOP_LEVEL_KEYS,
     VIDEO_OUTPUT_KEYS,
-    config_section,
-)
-from vision_lens.config_types import (
+    VISUALIZATION_INTERPOLATION_CHOICES,
     AnalysisConfig,
     AnalysisMethod,
     AttentionAnalysisConfig,
@@ -57,8 +54,11 @@ from vision_lens.config_types import (
     VisionLensConfig,
     VisualizationConfig,
     VisualizationOutputSize,
+    config_section,
 )
-from vision_lens.config_validation import (
+from vision_lens.config.validation import (
+    applicable_setting_keys,
+    finite_number,
     validate_applicable_settings,
     validate_config,
 )
@@ -90,6 +90,10 @@ def parse_config(
     *,
     overrides: dict[str, Any] | None = None,
 ) -> VisionLensConfig:
+    if not isinstance(raw_config, dict):
+        raise ValueError("raw_config must be a mapping.")
+    if overrides is not None and not isinstance(overrides, dict):
+        raise ValueError("overrides must be a mapping or None.")
     base = _project_root(Path.cwd()) if base_dir is None else Path(base_dir).resolve()
     resolved = _deep_merge(raw_config, overrides or {})
     _validate_keys(resolved)
@@ -771,11 +775,12 @@ def _optional_triplet(
         raise ValueError(f"{field_name} must be a list of three numbers or null.")
     parsed = []
     for item in value:
-        if isinstance(item, bool) or not isinstance(item, int | float):
-            raise ValueError(f"{field_name} must contain only numbers.")
-        number = float(item)
-        if not isfinite(number):
-            raise ValueError(f"{field_name} values must be finite.")
+        try:
+            number = finite_number(item, field_name)
+        except ValueError as error:
+            raise ValueError(
+                f"{field_name} must contain only finite numbers."
+            ) from error
         if positive and number <= 0:
             raise ValueError(f"{field_name} values must be greater than zero.")
         parsed.append(number)
@@ -819,9 +824,11 @@ def _optional_range(value: Any, field_name: str) -> tuple[float, float] | None:
         isinstance(item, bool) or not isinstance(item, int | float) for item in value
     ):
         raise ValueError(f"{field_name} must contain only numbers.")
-    minimum, maximum = float(value[0]), float(value[1])
-    if not isfinite(minimum) or not isfinite(maximum):
-        raise ValueError(f"{field_name} values must be finite.")
+    try:
+        minimum = finite_number(value[0], field_name)
+        maximum = finite_number(value[1], field_name)
+    except ValueError as error:
+        raise ValueError(f"{field_name} values must be finite.") from error
     if maximum <= minimum:
         raise ValueError(f"{field_name} maximum must be greater than its minimum.")
     return (minimum, maximum)
@@ -844,13 +851,13 @@ def _device(value: Any) -> Device:
 
 
 def _unit_interval(value: Any, field_name: str) -> float:
-    if (
-        isinstance(value, bool)
-        or not isinstance(value, int | float)
-        or not 0 <= value <= 1
-    ):
+    try:
+        number = finite_number(value, field_name)
+    except ValueError as error:
+        raise ValueError(f"{field_name} must be between 0 and 1.") from error
+    if not 0 <= number <= 1:
         raise ValueError(f"{field_name} must be between 0 and 1.")
-    return float(value)
+    return number
 
 
 def _foreground_threshold(value: Any) -> float | Literal["auto"]:
@@ -875,8 +882,6 @@ def _overlay_alpha_curve(value: Any) -> OverlayAlphaCurveSpec | None:
         value["steepness"],
         "visualization.overlay_alpha_curve.steepness",
     )
-    if not isfinite(steepness):
-        raise ValueError("visualization.overlay_alpha_curve.steepness must be finite.")
     midpoint = _unit_interval(
         value.get("midpoint", 0.5),
         "visualization.overlay_alpha_curve.midpoint",
@@ -917,10 +922,13 @@ def _cmap_black(value: Any) -> tuple[int, int, bool] | None:
 
 
 def _non_negative_number(value: Any, field_name: str) -> float:
-    if isinstance(value, bool) or not isinstance(value, int | float):
-        raise ValueError(f"{field_name} must be a finite non-negative number.")
-    number = float(value)
-    if not isfinite(number) or number < 0:
+    try:
+        number = finite_number(value, field_name)
+    except ValueError as error:
+        raise ValueError(
+            f"{field_name} must be a finite non-negative number."
+        ) from error
+    if number < 0:
         raise ValueError(f"{field_name} must be a finite non-negative number.")
     return number
 
@@ -932,10 +940,11 @@ def _optional_non_negative_number(value: Any, field_name: str) -> float | None:
 
 
 def _positive_number(value: Any, field_name: str) -> float:
-    if isinstance(value, bool) or not isinstance(value, int | float):
-        raise ValueError(f"{field_name} must be a finite positive number.")
-    number = float(value)
-    if not isfinite(number) or number <= 0:
+    try:
+        number = finite_number(value, field_name)
+    except ValueError as error:
+        raise ValueError(f"{field_name} must be a finite positive number.") from error
+    if number <= 0:
         raise ValueError(f"{field_name} must be a finite positive number.")
     return number
 
@@ -956,3 +965,56 @@ def _image_format(value: Any) -> str:
 
 def _raw_format(value: Any) -> str:
     return _choice(value, "output.raw_format", RAW_FORMAT_CHOICES)
+
+
+def config_to_dict(config: VisionLensConfig) -> dict[str, Any]:
+    validate_config(config)
+    resolved = {
+        "input": {"files": [str(path) for path in config.input.paths]},
+        "model": _config_dataclass_to_dict(config.model),
+        "preprocessing": _config_dataclass_to_dict(config.preprocessing),
+        "analysis": _config_dataclass_to_dict(config.analysis),
+        "runtime": _config_dataclass_to_dict(config.runtime),
+        "visualization": _config_dataclass_to_dict(config.visualization),
+        "output": _config_dataclass_to_dict(config.output),
+    }
+    if config.video is not None:
+        resolved["video"] = _config_dataclass_to_dict(config.video)
+
+    applicable = applicable_setting_keys(config)
+    return {
+        section: {
+            key: value for key, value in values.items() if key in applicable[section]
+        }
+        for section, values in resolved.items()
+    }
+
+
+def resolved_config_yaml(config: VisionLensConfig) -> str:
+    return yaml.safe_dump(config_to_dict(config), sort_keys=False)
+
+
+def _config_dataclass_to_dict(value: Any) -> dict[str, Any]:
+    resolved = {
+        field.name: _config_value(getattr(value, field.name)) for field in fields(value)
+    }
+    if isinstance(value, VisualizationConfig) and value.cmap_black is not None:
+        threshold, blend_width, transparent = value.cmap_black
+        resolved["cmap_black"] = {
+            "threshold": threshold,
+            "blend_width": blend_width,
+            "transparent": transparent,
+        }
+    return resolved
+
+
+def _config_value(value: Any) -> Any:
+    if isinstance(value, Path):
+        return str(value)
+    if is_dataclass(value):
+        return _config_dataclass_to_dict(value)
+    if isinstance(value, tuple | list):
+        return [_config_value(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _config_value(item) for key, item in value.items()}
+    return value

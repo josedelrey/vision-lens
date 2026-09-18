@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 import torch
 
-from vision_lens.feature_pca import (
+from vision_lens.analysis.patch_pca import (
     PatchPCAProjection,
     _fit_pca_projection,
     _patch_tokens_from_features,
@@ -371,7 +371,7 @@ def test_patch_pca_anyup_streams_projected_values(
         )
 
     monkeypatch.setattr(
-        "vision_lens.feature_pca.upsample_values_streaming",
+        "vision_lens.analysis.patch_pca.upsample_values_streaming",
         fake_stream,
     )
 
@@ -444,7 +444,7 @@ def test_patch_pca_anyup_dense_mask_thresholds_upsampled_pc1(
         )
 
     monkeypatch.setattr(
-        "vision_lens.feature_pca.upsample_values_streaming",
+        "vision_lens.analysis.patch_pca.upsample_values_streaming",
         fake_stream,
     )
     options = {
@@ -467,7 +467,7 @@ def test_patch_pca_anyup_dense_mask_thresholds_upsampled_pc1(
 
 
 def test_patch_pca_anyup_fits_projection_from_original_features(monkeypatch):
-    from vision_lens import feature_pca
+    from vision_lens.analysis import patch_pca as feature_pca
 
     embeddings = torch.tensor(
         [[[0.0, 1.0, 0.0], [3.0, 0.0, 0.0], [1.0, 2.0, 0.0], [2.0, 1.0, 0.0]]]

@@ -9,9 +9,9 @@ from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
-from vision_lens.artifacts import run_manifest_path
 from vision_lens.config import VisionLensConfig, config_to_dict
 from vision_lens.models import LoadedModel
+from vision_lens.output.artifacts import run_manifest_path
 
 
 def can_write_output(path: Path, policy: str) -> bool:

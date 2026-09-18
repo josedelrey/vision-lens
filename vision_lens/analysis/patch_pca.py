@@ -10,13 +10,13 @@ import torch
 import torch.nn.functional as functional
 from PIL import Image
 
-from vision_lens.anyup import (
+from vision_lens.analysis.anyup import (
     is_anyup_interpolation,
     upsample_features,
     upsample_values_streaming,
 )
-from vision_lens.attention import infer_patch_grid_from_image
-from vision_lens.config_options import (
+from vision_lens.analysis.attention import infer_patch_grid_from_image
+from vision_lens.config.schema import (
     VISUALIZATION_INTERPOLATION_CHOICES,
     VisualizationInterpolation,
 )

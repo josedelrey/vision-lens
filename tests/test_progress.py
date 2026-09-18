@@ -1,7 +1,7 @@
 from io import StringIO
 from types import SimpleNamespace
 
-from vision_lens import progress
+from vision_lens.pipeline import progress
 
 
 class _TerminalStream(StringIO):

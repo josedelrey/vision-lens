@@ -8,7 +8,7 @@ import torch
 from PIL import Image
 
 from vision_lens.config import ColormapSpec
-from vision_lens.visualization import (
+from vision_lens.output.visualization import (
     attention_map_to_array,
     image_grid,
     make_image_comparison_grid,
@@ -407,7 +407,7 @@ def test_torch_then_matplotlib_import_needs_no_global_openmp_workaround():
             "-c",
             (
                 "import os, torch; "
-                "import vision_lens.visualization; "
+                "import vision_lens.output.visualization; "
                 "assert 'KMP_DUPLICATE_LIB_OK' not in os.environ"
             ),
         ],

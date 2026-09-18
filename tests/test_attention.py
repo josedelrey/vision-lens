@@ -2,7 +2,7 @@ import pytest
 import torch
 from torch import nn
 
-from vision_lens.attention import (
+from vision_lens.analysis.attention import (
     class_token_attention_to_map,
     compute_attention_rollout,
     extract_gradcam,
@@ -215,7 +215,10 @@ def test_anyup_attention_upscaling_uses_guidance_image(
         calls.append((image, features, output_size, q_chunk_size, attention_mode))
         return torch.full((1, 1, *output_size), 0.25)
 
-    monkeypatch.setattr("vision_lens.attention.upsample_features", fake_upsample)
+    monkeypatch.setattr(
+        "vision_lens.analysis.attention.upsample_features",
+        fake_upsample,
+    )
     token_attention = torch.zeros(1, 5, 5)
     guidance_image = torch.rand(1, 3, 6, 6)
 

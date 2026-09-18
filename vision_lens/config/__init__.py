@@ -1,13 +1,16 @@
-"""Public configuration API.
+"""Stable public API for configuration loading, validation, and serialization.
 
-The implementation is split by responsibility so schema types, parsing,
-validation, and serialization can evolve independently without duplicating the
-public import surface.
+Implementation details live in three focused modules: schema definitions,
+external representation conversion, and validation.
 """
 
-from vision_lens.config_parsing import load_config, parse_config
-from vision_lens.config_serialization import config_to_dict, resolved_config_yaml
-from vision_lens.config_types import (
+from vision_lens.config.parsing import (
+    config_to_dict,
+    load_config,
+    parse_config,
+    resolved_config_yaml,
+)
+from vision_lens.config.schema import (
     AnalysisConfig,
     AnalysisMethod,
     AttentionAnalysisConfig,
@@ -32,7 +35,7 @@ from vision_lens.config_types import (
     VisualizationInterpolation,
     VisualizationOutputSize,
 )
-from vision_lens.config_validation import (
+from vision_lens.config.validation import (
     validate_config,
     validate_precision_device_pair,
 )

@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from vision_lens.config import PreprocessingConfig
-from vision_lens.images import (
+from vision_lens.media.images import (
     build_preprocess,
     load_images,
     preprocess_images,

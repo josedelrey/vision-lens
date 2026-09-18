@@ -6,7 +6,7 @@ from typing import Any
 import numpy as np
 import torch
 
-from vision_lens.anyup import (
+from vision_lens.analysis.anyup import (
     IMAGENET_MEAN,
     IMAGENET_STD,
     is_anyup_interpolation,

@@ -2,12 +2,12 @@ from pathlib import Path
 
 from PIL import Image
 
-from vision_lens.artifacts import unique_input_labels
-from vision_lens.processing import iter_input_batches
+from vision_lens.media.processing import iter_input_batches
+from vision_lens.output.artifacts import unique_input_labels
 
 
 def test_input_batches_load_only_the_configured_batch_size(monkeypatch, tmp_path):
-    from vision_lens import processing
+    from vision_lens.media import processing
 
     paths = tuple(tmp_path / f"image-{index}.jpg" for index in range(5))
     loaded_sizes = []

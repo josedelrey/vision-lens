@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from vision_lens.config_types import (
+from vision_lens.config.schema import (
     AttentionAnalysisConfig,
     PatchPCAAnalysisConfig,
     RolloutAnalysisConfig,
@@ -21,7 +21,6 @@ PATCH_PCA_GRID_STEM = "patch_pca_comparison"
 @dataclass(frozen=True)
 class VideoRunLayout:
     source_path: Path
-    label: str
     output_directory: Path
     projection_path: Path | None
 
@@ -194,7 +193,6 @@ def video_run_layouts(config: VisionLensConfig) -> tuple[VideoRunLayout, ...]:
         layouts.append(
             VideoRunLayout(
                 source_path=source_path,
-                label=label,
                 output_directory=output_directory,
                 projection_path=projection_path,
             )
@@ -283,7 +281,7 @@ def check_artifact_overwrite(config: VisionLensConfig) -> None:
 
 
 def _image_patch_pca_paths(config: VisionLensConfig) -> set[Path]:
-    paths = {run_manifest_path(config.output.directory)}
+    paths: set[Path] = set()
     labels = unique_input_labels(config.input.paths)
     if config.output.heatmaps:
         paths.update(
@@ -356,7 +354,9 @@ def _image_artifact_patterns(
     image_extension = re.escape(config.output.image_format)
     raw_extension = re.escape(config.output.raw_format)
     grid_extension = re.escape(config.visualization.grid_format)
-    page = r"(?:_part-\d{3,})?"
+    image_page = _page_pattern(
+        len(config.input.paths), config.visualization.items_per_grid
+    )
     patterns: list[str] = []
 
     if config.analysis.method == "gradcam":
@@ -367,11 +367,14 @@ def _image_artifact_patterns(
         if config.output.raw_arrays:
             patterns.append(rf"(?:{labels})_gradcam\.{raw_extension}")
         if config.output.grids:
-            patterns.append(rf"gradcam_images{page}\.{grid_extension}")
+            patterns.append(rf"gradcam_images{image_page}\.{grid_extension}")
         return tuple(re.compile(pattern) for pattern in patterns)
 
     assert isinstance(config.analysis, AttentionAnalysisConfig | RolloutAnalysisConfig)
     layers = _number_pattern(config.analysis.layers)
+    layer_page = _layer_page_pattern(
+        config.analysis.layers, config.visualization.items_per_grid
+    )
     if config.analysis.method == "rollout":
         stem = rf"(?:{labels})_rollout-(?:{layers})"
         _append_map_output_patterns(
@@ -382,7 +385,9 @@ def _image_artifact_patterns(
             raw_extension,
         )
         if config.output.grids:
-            patterns.append(rf"(?:{labels})_rollout_comparison{page}\.{grid_extension}")
+            patterns.append(
+                rf"(?:{labels})_rollout_comparison{layer_page}\.{grid_extension}"
+            )
         return tuple(re.compile(pattern) for pattern in patterns)
 
     heads = _attention_head_pattern(config.analysis)
@@ -397,8 +402,8 @@ def _image_artifact_patterns(
     if config.output.grids:
         patterns.extend(
             (
-                rf"(?:{labels})_layers_(?:{heads}){page}\.{grid_extension}",
-                rf"layer-(?:{layers})_images_(?:{heads}){page}\.{grid_extension}",
+                rf"(?:{labels})_layers_(?:{heads}){layer_page}\.{grid_extension}",
+                rf"layer-(?:{layers})_images_(?:{heads}){image_page}\.{grid_extension}",
             )
         )
     return tuple(re.compile(pattern) for pattern in patterns)
@@ -458,6 +463,24 @@ def _number_pattern(values: str | tuple[int, ...]) -> str:
     if values == "all":
         return r"\d+"
     return "|".join(str(value) for value in values)
+
+
+def _page_pattern(item_count: int, items_per_page: int | None) -> str:
+    page_size = items_per_page or item_count
+    page_count = (item_count + page_size - 1) // page_size
+    if page_count == 1:
+        return ""
+    pages = "|".join(f"{page:03d}" for page in range(1, page_count + 1))
+    return rf"_part-(?:{pages})"
+
+
+def _layer_page_pattern(
+    layers: str | tuple[int, ...],
+    items_per_page: int | None,
+) -> str:
+    if layers == "all":
+        return r"(?:_part-\d{3,})?"
+    return _page_pattern(len(layers), items_per_page)
 
 
 def _attention_head_pattern(

@@ -1,18 +1,26 @@
+"""Validate resolved configuration values and workflow applicability."""
+
 from __future__ import annotations
 
 from math import isfinite
 from pathlib import Path
 from typing import Any
 
-from vision_lens.artifacts import validate_artifact_paths
-from vision_lens.config_options import (
+from vision_lens.config.schema import (
+    ANALYSIS_CONFIG_TYPES,
+    ANALYSIS_DEFAULTS,
+    ANALYSIS_KEYS,
     ANYUP_INTERPOLATIONS,
     CROP_CHOICES,
     DEVICE_CHOICES,
     FOREGROUND_SIDE_CHOICES,
     GRID_FORMAT_CHOICES,
+    GRID_VISUALIZATION_KEYS,
     HEAD_FUSION_CHOICES,
     IMAGE_FORMAT_CHOICES,
+    KNOWN_FIXED_IMAGE_SIZES,
+    KNOWN_VIT_DEPTHS,
+    KNOWN_VIT_HEADS,
     NORMALIZATION_CHOICES,
     OVERWRITE_CHOICES,
     PAD_CHOICES,
@@ -22,22 +30,10 @@ from vision_lens.config_options import (
     RAW_FORMAT_CHOICES,
     RESIZE_CHOICES,
     RGB_FIT_SCOPE_CHOICES,
-    SOFT_ANYUP_INTERPOLATIONS,
-    VISUALIZATION_INTERPOLATION_CHOICES,
-)
-from vision_lens.config_schema import (
-    ANALYSIS_CONFIG_TYPES,
-    ANALYSIS_DEFAULTS,
-    ANALYSIS_KEYS,
-    GRID_VISUALIZATION_KEYS,
-    KNOWN_FIXED_IMAGE_SIZES,
-    KNOWN_VIT_DEPTHS,
-    KNOWN_VIT_HEADS,
     SECTION_DEFAULTS,
     SECTION_KEYS,
-    config_section,
-)
-from vision_lens.config_types import (
+    SOFT_ANYUP_INTERPOLATIONS,
+    VISUALIZATION_INTERPOLATION_CHOICES,
     AttentionAnalysisConfig,
     GradCAMAnalysisConfig,
     InputConfig,
@@ -51,7 +47,9 @@ from vision_lens.config_types import (
     VideoConfig,
     VisionLensConfig,
     VisualizationConfig,
+    config_section,
 )
+from vision_lens.output.artifacts import validate_artifact_paths
 
 
 def validate_config(config: VisionLensConfig) -> None:
@@ -498,6 +496,18 @@ def _require_int(
         raise ValueError(f"{field_name} must be at most {maximum}.")
 
 
+def finite_number(value: Any, field_name: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise ValueError(f"{field_name} must be a finite number.")
+    try:
+        number = float(value)
+    except (OverflowError, TypeError, ValueError) as error:
+        raise ValueError(f"{field_name} must be a finite number.") from error
+    if not isfinite(number):
+        raise ValueError(f"{field_name} must be a finite number.")
+    return number
+
+
 def _require_number(
     value: Any,
     field_name: str,
@@ -506,11 +516,7 @@ def _require_number(
     maximum: float | None = None,
     minimum_inclusive: bool = True,
 ) -> None:
-    if isinstance(value, bool) or not isinstance(value, int | float):
-        raise ValueError(f"{field_name} must be a finite number.")
-    number = float(value)
-    if not isfinite(number):
-        raise ValueError(f"{field_name} must be a finite number.")
+    number = finite_number(value, field_name)
     if minimum is not None and (
         number < minimum if minimum_inclusive else number <= minimum
     ):
