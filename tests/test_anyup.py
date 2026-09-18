@@ -98,7 +98,7 @@ def test_load_anyup_uses_official_multi_backbone_model_and_caches(monkeypatch):
     assert first is second
     assert loaded == [
         (
-            "wimmerth/anyup:checkpoint_v2",
+            "wimmerth/anyup:1551eaa16b61600de78093c510005ae59ece8866",
             "anyup_multi_backbone",
             {
                 "pretrained": True,

@@ -8,7 +8,7 @@ from typing import Any, Literal
 import torch
 import torch.nn.functional as functional
 
-ANYUP_REPOSITORY = "wimmerth/anyup:checkpoint_v2"
+ANYUP_REPOSITORY = "wimmerth/anyup:1551eaa16b61600de78093c510005ae59ece8866"
 ANYUP_MODEL = "anyup_multi_backbone"
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)
