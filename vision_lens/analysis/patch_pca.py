@@ -882,11 +882,6 @@ def _validate_percentile_bounds(value: tuple[float, float] | None) -> None:
         )
 
 
-def _minmax_normalize(values: Any) -> Any:
-    minimum, maximum = _value_bounds(values)
-    return _normalize_with_bounds(values, minimum, maximum)
-
-
 def _value_bounds(values: Any) -> tuple[Any, Any]:
     return values.min(dim=0).values, values.max(dim=0).values
 
