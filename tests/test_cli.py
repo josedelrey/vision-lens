@@ -3,8 +3,32 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import yaml
 
 from vision_lens.cli import _parse_overrides, main
+
+
+@pytest.fixture
+def config_path(tmp_path):
+    source = tmp_path / "input.jpg"
+    source.touch()
+    path = tmp_path / "workflow.yaml"
+    path.write_text(
+        yaml.safe_dump(
+            {
+                "input": {"files": [str(source)]},
+                "model": {
+                    "architecture": "vit",
+                    "backend": "timm",
+                    "name": "mock_vit",
+                },
+                "analysis": {"method": "patch_pca"},
+                "output": {"directory": str(tmp_path / "results")},
+            }
+        ),
+        encoding="utf-8",
+    )
+    return path
 
 
 def test_cli_parses_repeated_nested_overrides_as_yaml_values():
@@ -33,7 +57,9 @@ def test_cli_requires_a_config_file(capsys):
     assert "--config" in capsys.readouterr().err
 
 
-def test_cli_hides_individual_output_paths_by_default(monkeypatch, capsys):
+def test_cli_hides_individual_output_paths_by_default(
+    monkeypatch, capsys, config_path
+):
     from vision_lens import pipeline
 
     monkeypatch.setattr(
@@ -42,7 +68,7 @@ def test_cli_hides_individual_output_paths_by_default(monkeypatch, capsys):
         lambda _config, **_kwargs: _result(),
     )
 
-    assert main(["--config", "configs/patch_pca.dinov2.yaml"]) == 0
+    assert main(["--config", str(config_path)]) == 0
 
     output_dir = Path("outputs/example")
     assert capsys.readouterr().out.splitlines() == [
@@ -50,12 +76,14 @@ def test_cli_hides_individual_output_paths_by_default(monkeypatch, capsys):
     ]
 
 
-def test_cli_validates_without_running_a_model(capsys):
-    assert main(["validate", "--config", "configs/patch_pca.dinov2.yaml"]) == 0
+def test_cli_validates_without_running_a_model(capsys, config_path):
+    assert main(["validate", "--config", str(config_path)]) == 0
     assert capsys.readouterr().out == "configuration is valid\n"
 
 
-def test_cli_validation_does_not_import_pipeline_modules(monkeypatch, capsys):
+def test_cli_validation_does_not_import_pipeline_modules(
+    monkeypatch, capsys, config_path
+):
     original_import = builtins.__import__
 
     def guarded_import(name, *args, **kwargs):
@@ -65,17 +93,17 @@ def test_cli_validation_does_not_import_pipeline_modules(monkeypatch, capsys):
 
     monkeypatch.setattr(builtins, "__import__", guarded_import)
 
-    assert main(["validate", "--config", "configs/patch_pca.dinov2.yaml"]) == 0
+    assert main(["validate", "--config", str(config_path)]) == 0
     assert capsys.readouterr().out == "configuration is valid\n"
 
 
-def test_cli_prints_resolved_configuration(capsys):
+def test_cli_prints_resolved_configuration(capsys, config_path):
     assert (
         main(
             [
                 "resolve",
                 "--config",
-                "configs/patch_pca.dinov2.yaml",
+                str(config_path),
                 "--set",
                 "runtime.device=cpu",
             ]
@@ -89,13 +117,13 @@ def test_cli_prints_resolved_configuration(capsys):
     assert "device: cpu" in output
 
 
-def test_cli_reports_configuration_errors_without_a_traceback(capsys):
+def test_cli_reports_configuration_errors_without_a_traceback(capsys, config_path):
     with pytest.raises(SystemExit, match="2"):
         main(
             [
                 "validate",
                 "--config",
-                "configs/patch_pca.dinov2.yaml",
+                str(config_path),
                 "--set",
                 "visualization.colrmap=viridis",
             ]

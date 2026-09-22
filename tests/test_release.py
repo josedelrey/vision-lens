@@ -1,22 +1,6 @@
 from pathlib import Path
 
-from vision_lens.config import load_config
-
 REPO_ROOT = Path(__file__).parents[1]
-
-
-def test_documented_example_configs_validate_without_loading_models(tmp_path):
-    video_input = tmp_path / "sample.mp4"
-    video_input.touch()
-
-    for path in sorted((REPO_ROOT / "configs").glob("*.yaml")):
-        overrides = (
-            {"input": {"files": [str(video_input)], "folders": []}}
-            if ".video." in path.name
-            else None
-        )
-        config = load_config(path, overrides=overrides)
-        assert config.input.paths
 
 
 def test_uv_is_the_only_repository_environment_manager():

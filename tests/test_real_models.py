@@ -3,50 +3,48 @@ from pathlib import Path
 
 import pytest
 
-from vision_lens.config import load_config
+from vision_lens.config import parse_config
 from vision_lens.pipeline import run_pipeline_from_config
 
-REPO_ROOT = Path(__file__).parents[1]
 RUN_REAL_MODELS = os.environ.get("VISION_LENS_RUN_REAL_MODELS") == "1"
+IMAGE = Path(__file__).parents[1] / "examples/1.jpg"
 
 SMOKE_CASES = [
     (
-        "vit_attention.yaml",
-        {"layers": [11], "heads": None, "head_fusion": "mean"},
+        "dino_attention",
+        "vit_small_patch8_224.dino",
+        {"method": "attention", "layers": [11]},
         "_heatmap.png",
     ),
     (
-        "vit_attention.dinov2_reg4.yaml",
-        {"layers": [11], "heads": None, "head_fusion": "mean"},
+        "dinov2_attention",
+        "hf_hub:timm/vit_small_patch14_reg4_dinov2.lvd142m",
+        {"method": "attention", "layers": [11]},
         "_heatmap.png",
     ),
     (
-        "vit_rollout.dinov2_reg4.yaml",
-        {"layers": [11]},
+        "dinov2_rollout",
+        "hf_hub:timm/vit_small_patch14_reg4_dinov2.lvd142m",
+        {"method": "rollout", "layers": [11]},
         "_heatmap.png",
     ),
     (
-        "gradcam.yaml",
-        {"target_layer": "layer4", "target_class": None},
+        "resnet_gradcam",
+        "resnet50",
+        {"method": "gradcam", "target_layer": "layer4"},
         "_heatmap.png",
     ),
     (
-        "patch_pca.dinov2.yaml",
-        {
-            "foreground_separation": True,
-            "foreground_threshold": 0.5,
-            "foreground_side": "high",
-            "projection": "fit",
-            "save_projection": None,
-        },
+        "dinov2_pca",
+        "hf_hub:timm/vit_base_patch14_dinov2.lvd142m",
+        {"method": "patch_pca"},
         "_patch_pca.png",
     ),
 ]
 
 
 @pytest.mark.parametrize(
-    ("config_name", "analysis_overrides", "expected_suffix"),
-    SMOKE_CASES,
+    ("case_name", "model_name", "analysis", "expected_suffix"), SMOKE_CASES
 )
 @pytest.mark.real_model
 @pytest.mark.skipif(
@@ -54,12 +52,9 @@ SMOKE_CASES = [
     reason="set VISION_LENS_RUN_REAL_MODELS=1 to download pretrained weights",
 )
 def test_pretrained_model_pipeline_smoke(
-    config_name,
-    analysis_overrides,
-    expected_suffix,
-    tmp_path,
+    case_name, model_name, analysis, expected_suffix, tmp_path
 ):
-    config = _smoke_config(config_name, analysis_overrides, tmp_path)
+    config = _smoke_config(case_name, model_name, analysis, tmp_path)
 
     result = run_pipeline_from_config(config)
 
@@ -70,32 +65,33 @@ def test_pretrained_model_pipeline_smoke(
 
 
 @pytest.mark.parametrize(
-    ("config_name", "analysis_overrides"),
-    [(name, overrides) for name, overrides, _ in SMOKE_CASES],
+    ("case_name", "model_name", "analysis"),
+    [(name, model, analysis) for name, model, analysis, _ in SMOKE_CASES],
 )
 def test_pretrained_model_smoke_configuration_is_valid(
-    config_name,
-    analysis_overrides,
-    tmp_path,
+    case_name, model_name, analysis, tmp_path
 ):
-    _smoke_config(config_name, analysis_overrides, tmp_path)
+    _smoke_config(case_name, model_name, analysis, tmp_path)
 
 
-def _smoke_config(config_name, analysis_overrides, output_root):
-    output_overrides = {
-        "directory": str(output_root / config_name),
-        "heatmaps": True,
-        "grids": False,
-        "raw_arrays": False,
-        "overwrite": "error",
-    }
-    return load_config(
-        REPO_ROOT / "configs" / config_name,
-        overrides={
-            "input": {"files": ["examples/1.jpg"], "limit": 1},
+def _smoke_config(case_name, model_name, analysis, output_root):
+    is_gradcam = analysis["method"] == "gradcam"
+    return parse_config(
+        {
+            "input": {"files": [str(IMAGE)]},
+            "model": {
+                "architecture": "cnn" if is_gradcam else "vit",
+                "backend": "torchvision" if is_gradcam else "timm",
+                "name": model_name,
+            },
             "preprocessing": {"image_size": 224},
-            "analysis": analysis_overrides,
+            "analysis": analysis,
             "runtime": {"batch_size": 1, "device": "cpu"},
-            "output": output_overrides,
-        },
+            "output": {
+                "directory": str(output_root / case_name),
+                "heatmaps": True,
+                "grids": False,
+                "raw_arrays": False,
+            },
+        }
     )

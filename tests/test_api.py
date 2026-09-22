@@ -12,10 +12,23 @@ def test_public_api_uses_specific_configuration_errors():
         vision_lens.parse_config([])  # type: ignore[arg-type]
 
 
-def test_public_api_wraps_pipeline_failures(monkeypatch):
+def test_public_api_wraps_pipeline_failures(monkeypatch, tmp_path):
     from vision_lens import pipeline
 
-    config = vision_lens.load_config("configs/vit_attention.yaml")
+    source = tmp_path / "input.jpg"
+    source.touch()
+    config = vision_lens.parse_config(
+        {
+            "input": {"files": [str(source)]},
+            "model": {
+                "architecture": "vit",
+                "backend": "timm",
+                "name": "mock_vit",
+            },
+            "analysis": {"method": "attention", "layers": [0]},
+            "output": {"directory": str(tmp_path / "results")},
+        }
+    )
 
     def fail(_config):
         raise ValueError("model rejected the request")

@@ -15,7 +15,6 @@ from vision_lens.analysis.patch_pca import PatchPCAResult
 from vision_lens.config import (
     OutputConfig,
     VisualizationConfig,
-    load_config,
     parse_config,
 )
 from vision_lens.models import LoadedModel, ModelMetadata
@@ -198,12 +197,27 @@ def test_rollout_grid_caps_requested_columns_to_available_layer_pairs():
     assert labels == ["layer 0", "layer 1", "rollout 0", "rollout 1"]
 
 
-def test_rollout_config_dispatches_to_rollout_pipeline(monkeypatch):
+def _minimal_vit_config(method, tmp_path):
+    source = tmp_path / "input.jpg"
+    source.touch()
+    return parse_config(
+        {
+            "input": {"files": [str(source)]},
+            "model": {
+                "architecture": "vit",
+                "backend": "timm",
+                "name": "mock_vit",
+            },
+            "analysis": {"method": method, "layers": [0]},
+            "output": {"directory": str(tmp_path / "results")},
+        }
+    )
+
+
+def test_rollout_config_dispatches_to_rollout_pipeline(monkeypatch, tmp_path):
     from vision_lens.pipeline import image as image_pipeline
 
-    config = load_config(
-        Path(__file__).parents[1] / "configs/vit_rollout.dinov2_reg4.yaml"
-    )
+    config = _minimal_vit_config("rollout", tmp_path)
     sentinel = object()
     monkeypatch.setattr(
         image_pipeline,
@@ -214,10 +228,8 @@ def test_rollout_config_dispatches_to_rollout_pipeline(monkeypatch):
     assert run_pipeline_from_config(config) is sentinel
 
 
-def test_rollout_helper_rejects_attention_config_before_loading_model():
-    config = load_config(
-        Path(__file__).parents[1] / "configs/vit_attention.dinov2_reg4.yaml"
-    )
+def test_rollout_helper_rejects_attention_config_before_loading_model(tmp_path):
+    config = _minimal_vit_config("attention", tmp_path)
 
     with pytest.raises(ValueError, match="Expected analysis.method='rollout'"):
         run_vit_rollout_comparison_from_config(config)
