@@ -476,9 +476,7 @@ def test_load_config_resolves_yaml_and_overrides_from_project_root(
     config_dir = tmp_path / "nested" / "configs"
     config_dir.mkdir(parents=True)
     config_path = config_dir / "experiment.yaml"
-    raw_config = yaml.safe_load(
-        (Path(__file__).parents[1] / "configs/vit_attention.yaml").read_text()
-    )
+    raw_config = _minimal_config()
     raw_config["input"]["files"] = ["images/cat.jpg"]
     raw_config["input"]["folders"] = []
     raw_config["output"]["directory"] = "figures"
@@ -514,9 +512,7 @@ def test_paths_fall_back_to_working_directory_without_project(tmp_path, monkeypa
     config_path = config_dir / "workflow.yaml"
     image_path = tmp_path / "photo.jpg"
     image_path.touch()
-    raw_config = yaml.safe_load(
-        (Path(__file__).parents[1] / "configs/vit_attention.yaml").read_text()
-    )
+    raw_config = _minimal_config()
     raw_config["input"]["files"] = ["photo.jpg"]
     raw_config["input"]["folders"] = []
     raw_config["output"]["directory"] = "outputs"
@@ -530,9 +526,7 @@ def test_paths_fall_back_to_working_directory_without_project(tmp_path, monkeypa
 
 
 def test_yaml_uses_parser_defaults_for_omitted_settings(tmp_path):
-    raw = yaml.safe_load(
-        (Path(__file__).parents[1] / "configs/vit_attention.yaml").read_text()
-    )
+    raw = _minimal_config()
     path = tmp_path / "minimal.yaml"
     path.write_text(yaml.safe_dump(raw))
 
@@ -545,9 +539,7 @@ def test_yaml_uses_parser_defaults_for_omitted_settings(tmp_path):
 
 
 def test_yaml_rejects_removed_preset_key(tmp_path):
-    raw = yaml.safe_load(
-        (Path(__file__).parents[1] / "configs/vit_attention.yaml").read_text()
-    )
+    raw = _minimal_config()
     raw["preset"] = "dino-vits8-attention"
     path = tmp_path / "old-config.yaml"
     path.write_text(yaml.safe_dump(raw))
