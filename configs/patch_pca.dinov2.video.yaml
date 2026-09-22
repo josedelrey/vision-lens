@@ -15,7 +15,7 @@ analysis:
 
 visualization:
   output_size: match
-  interpolation: bilinear_mask
+  interpolation: nearest
 
 output:
   directory: outputs/video/dinov2_pca

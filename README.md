@@ -2,75 +2,105 @@
 
 [![CI](https://github.com/josedelrey/vision-lens/actions/workflows/ci.yml/badge.svg)](https://github.com/josedelrey/vision-lens/actions/workflows/ci.yml)
 
-Vision Lens turns pretrained vision-model internals into clear, reproducible
-attention, rollout, Grad-CAM, and patch-feature PCA visualizations for images
-and video frames.
+Vision Lens produces visualizations of pretrained vision models for images and sampled video frames. It supports transformer attention, attention rollout, Grad-CAM, and principal component analysis (PCA) of patch features. Runs are defined in YAML and record their resolved settings in a manifest.
 
-> **Results gallery placeholder**
->
-> Final attention, rollout, Grad-CAM, and PCA examples will be added here after
-> visual review.
+## Results
+
+![Four-panel figure placeholder for attention, rollout, Grad-CAM, and patch PCA](assets/readme/methods.svg)
+
+**Figure 1.** Attention, rollout, Grad-CAM, and patch PCA on a common input.
+
+![Placeholder for a grid comparing selected transformer layers](assets/readme/layers.svg)
+
+**Figure 2.** Spatial response across selected transformer layers.
+
+![Placeholder for three sampled frames with aligned visualizations](assets/readme/video.svg)
+
+**Figure 3.** Sampled frames from a video run, shown at distinct timestamps.
+
+## Methods
+
+| Method | Output | Model family |
+|---|---|---|
+| Attention | Spatial maps from selected transformer layers and heads | Vision Transformer via `timm` |
+| Rollout | Attention propagated through successive transformer layers | Vision Transformer via `timm` |
+| Grad-CAM | Class-specific activation maps | CNN via `torchvision` |
+| Patch PCA | RGB projection of patch embeddings, with optional image foreground selection | Vision Transformer via `timm` |
+
+These are diagnostic representations of model behavior. Attention and Grad-CAM maps do not establish causal explanations; PCA colors represent feature variation rather than semantic classes.
 
 ## Install
 
-Vision Lens targets Linux and uses [uv](https://docs.astral.sh/uv/) for Python,
-dependency, and virtual-environment management. Clone the repository, install
-uv, then create the complete development environment from the committed lock:
+Vision Lens supports Linux and Python 3.12 or newer. With [uv](https://docs.astral.sh/uv/) installed, create the locked environment from the repository root:
 
 ```bash
-uv sync --locked --all-extras
+uv sync --locked
 ```
 
-`uv` creates `.venv` automatically. Run project commands through `uv run`, so
-shell activation is not required. For a smaller runtime-only environment:
+For video decoding and export, include the optional dependency:
 
 ```bash
-uv sync --locked --no-dev
+uv sync --locked --extra video
 ```
 
-Add `--extra video` to include video support. The development command above
-uses `--all-extras`, so it already includes video support.
+Pretrained weights are downloaded on first use. AnyUp interpolation also downloads its model and checkpoint on first use.
 
-Dependency declarations and development tools live in `pyproject.toml`; exact
-versions are recorded in `uv.lock`. After intentionally changing dependency
-constraints, refresh the lock with `uv lock` (or `uv lock --upgrade` to upgrade
-all dependencies), then commit both files.
+## Run
 
-## Quick starts
-
-Run one image through the DINO attention configuration:
+Run an image workflow:
 
 ```bash
-uv run vision-lens --config configs/vit_attention.yaml --set input.limit=1
+uv run vision-lens run --config configs/vit_attention.yaml --set input.limit=1
 ```
 
-Reproduce the DINOv2 PCA example:
+Run a video workflow after setting `input.files` to an existing video path in its configuration:
 
 ```bash
-uv run vision-lens --config configs/patch_pca.dinov2.yaml
+uv run vision-lens run --config configs/vit_attention.video.yaml
 ```
 
-Runs print model-loading status and show `tqdm` progress by image or sampled
-video frame in an interactive terminal. Multi-pass work has separate bars for
-fitting and rendering; non-interactive logs keep only the status lines.
+Validate settings without loading a model, or inspect all resolved values before a run:
 
-The DINOv2 PCA configuration fits one shared projection across the two horse images,
-so foreground selection and colors remain comparable:
+```bash
+uv run vision-lens validate --config configs/vit_attention.yaml
+uv run vision-lens resolve --config configs/vit_attention.yaml
+```
 
-> **PCA result placeholder**
->
-> The final shared-projection comparison will be added here.
+`--set section.key=value` overrides a setting using YAML value syntax and can be repeated. For example, `--set runtime.batch_size=2` changes the inference batch size. See the [configuration reference](docs/configuration.md) for available settings and workflow constraints.
 
-> **Video demo placeholder**
->
-> A reviewed frame-based video example and command will be added here.
+### Configuration
 
-Outputs are written below `outputs/`. Each run also creates a manifest with the
-resolved configuration, model identity, versions, inputs, and generated files.
+A minimal image workflow selects inputs, a model, an analysis, and an output directory:
+
+```yaml
+input:
+  files: [examples/1.jpg]
+
+model:
+  architecture: vit
+  backend: timm
+  name: vit_small_patch8_224.dino
+
+preprocessing:
+  image_size: 224
+
+analysis:
+  method: attention
+  layers: [11]
+
+output:
+  directory: outputs/attention
+```
+
+The configurations in [`configs/`](configs/) cover all four methods and their video variants. Image inputs can be listed explicitly or selected from folders. A `video` section enables timestamp-based frame sampling. Relative paths in a configuration resolve from the nearest project root containing `pyproject.toml`, or from the working directory when no project root is found.
+
+### Outputs
+
+Depending on the workflow, Vision Lens writes heatmaps or PCA color maps, overlays, comparison grids, MP4 streams, and optional raw arrays. Each completed image or single-video run writes `run-manifest.json` with resolved settings, model and runtime details, input metadata, and output paths. Multiple videos produce separate subdirectories and manifests.
+
+Grid layout, output resolution, interpolation, colormap, normalization, and overwrite behavior are configurable. The [configuration reference](docs/configuration.md) documents their defaults and compatibility rules.
 
 ## Python API
-
-The supported Python API mirrors the configuration-driven CLI:
 
 ```python
 from vision_lens import load_config, run_pipeline_from_config
@@ -82,62 +112,8 @@ for path in result.output_paths:
     print(path)
 ```
 
-Every run result exposes its resolved `config` and generated `output_paths`.
-Method-specific result objects may also retain analysis tensors when the run
-fits in one inference batch. Catch `ConfigurationError` for invalid workflows
-and `PipelineError` for failures after execution starts; both inherit from
-`VisionLensError`. Lower-level analysis, rendering, and export modules remain
-available for advanced use but are not part of this small stable façade.
+The public API also provides `run_pipeline(path)`, `parse_config`, `validate_config`, and `resolved_config_yaml`. Results expose the resolved `config` and generated `output_paths`. Configuration failures raise `ConfigurationError`; execution failures raise `PipelineError`. Both inherit from `VisionLensError`.
 
-## Configure a workflow
+## License and attribution
 
-Copy an example from `configs/` and edit it for your run. Settings with parser
-defaults may be omitted; settings that do not apply to the selected workflow
-are rejected. For image patch PCA, put only the images that should share one
-fit in a configuration file. Images needing different thresholds or
-`foreground_side` values need separate configurations. Video PCA is always
-full-frame and does not use foreground settings.
-
-Validate or inspect the resolved configuration before loading a model:
-
-```bash
-uv run vision-lens validate --config workflow.yaml
-uv run vision-lens resolve --config workflow.yaml
-uv run vision-lens run --config workflow.yaml
-```
-
-CLI `--set` values override leaf settings within the configuration's existing
-workflow mode; conditional modes require a separate configuration. Relative
-paths in YAML files and CLI overrides are resolved from the project
-root (the nearest ancestor containing `pyproject.toml`), not the config file's
-directory. If no project root is found, they use the current working directory.
-
-## Included workflows
-
-| Example configuration | Analysis | Model | Input size |
-|---|---|---|---:|
-| `vit_attention.yaml` | attention | DINO ViT-S/8 | 224 |
-| `vit_attention.dinov2_reg4.yaml` | attention | DINOv2 ViT-S/14 + registers | 672 |
-| `vit_rollout.dinov2_reg4.yaml` | rollout | DINOv2 ViT-S/14 + registers | 672 |
-| `gradcam.yaml` | Grad-CAM | ResNet-50 | 672 |
-| `patch_pca.dinov2.yaml` | patch PCA | DINOv2 ViT-B/14 | 672 |
-
-The [configuration reference](https://github.com/josedelrey/vision-lens/blob/main/docs/configuration.md)
-documents every setting, validation rule, and CLI override.
-
-Attention and Grad-CAM visualizations are diagnostic views, not causal
-explanations. Video processing analyzes sampled frames independently; source
-audio is not included in exports. Pretrained weights require network access on
-first use, and an optional `HF_TOKEN` only improves Hugging Face download rate
-limits. The AnyUp visualization modes additionally download
-the official multi-backbone AnyUp model and checkpoint through PyTorch Hub on
-first use. The included video examples use `bilinear_mask`; configurations that
-select AnyUp can set query chunking to reduce peak VRAM use while retaining the
-requested output size. Custom timm and torchvision models are not guaranteed to
-expose the internals required by each analysis.
-
-## License
-
-Vision Lens is released under the [MIT License](https://github.com/josedelrey/vision-lens/blob/main/LICENSE).
-Bundled example-image provenance is recorded in the
-[attribution file](https://github.com/josedelrey/vision-lens/blob/main/examples/ATTRIBUTION.md).
+Vision Lens is available under the [MIT License](LICENSE). Sources for bundled [images](examples/ATTRIBUTION.md) and [video assets](assets/video-attribution.md) are documented separately.

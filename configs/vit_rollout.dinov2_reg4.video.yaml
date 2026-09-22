@@ -16,7 +16,7 @@ analysis:
 
 visualization:
   output_size: match
-  interpolation: bilinear_mask
+  interpolation: nearest
   overlay_alpha: 1.0
   overlay_alpha_curve: {steepness: 15, midpoint: 0.25}
   cmap_black: {threshold: 20, blend_width: 35, transparent: true}

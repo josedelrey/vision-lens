@@ -17,7 +17,7 @@ analysis:
 
 visualization:
   output_size: match
-  interpolation: bilinear_mask
+  interpolation: nearest
 
 output:
   directory: outputs/image/dinov2_patch_pca

@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 680" role="img" aria-labelledby="title description">
+  <title id="title">Method comparison figure placeholder</title>
+  <desc id="description">Four empty panels reserved for attention, rollout, Grad-CAM, and patch PCA results.</desc>
+  <defs>
+    <linearGradient id="background" x2="1" y2="1">
+      <stop stop-color="#111b28"/>
+      <stop offset="1" stop-color="#202b3c"/>
+    </linearGradient>
+    <pattern id="dots" width="18" height="18" patternUnits="userSpaceOnUse">
+      <circle cx="1.5" cy="1.5" r="1" fill="#536579" opacity=".35"/>
+    </pattern>
+  </defs>
+  <rect width="1200" height="680" rx="24" fill="url(#background)"/>
+  <text x="44" y="57" fill="#f0f4f7" font-family="Arial, sans-serif" font-size="24" font-weight="700" letter-spacing="2">VISION LENS</text>
+  <text x="1156" y="56" fill="#94a9ba" text-anchor="end" font-family="Arial, sans-serif" font-size="14" letter-spacing="2">FIGURE 01 / METHODS</text>
+  <path d="M44 77H1156" stroke="#46576a"/>
+  <g fill="#172435" stroke="#52667a">
+    <rect x="44" y="105" width="545" height="246" rx="11"/>
+    <rect x="611" y="105" width="545" height="246" rx="11"/>
+    <rect x="44" y="372" width="545" height="246" rx="11"/>
+    <rect x="611" y="372" width="545" height="246" rx="11"/>
+  </g>
+  <g fill="url(#dots)">
+    <rect x="60" y="160" width="513" height="174" rx="5"/>
+    <rect x="627" y="160" width="513" height="174" rx="5"/>
+    <rect x="60" y="427" width="513" height="174" rx="5"/>
+    <rect x="627" y="427" width="513" height="174" rx="5"/>
+  </g>
+  <g fill="none" stroke-width="2" stroke-dasharray="8 8" opacity=".6">
+    <rect x="61" y="161" width="511" height="172" rx="5" stroke="#7cacc6"/>
+    <rect x="628" y="161" width="511" height="172" rx="5" stroke="#b3a1d0"/>
+    <rect x="61" y="428" width="511" height="172" rx="5" stroke="#d99f83"/>
+    <rect x="628" y="428" width="511" height="172" rx="5" stroke="#a9c3a4"/>
+  </g>
+  <g font-family="Arial, sans-serif" font-size="17" font-weight="700" letter-spacing="1.5">
+    <text x="64" y="139" fill="#9ec7dc">01 / ATTENTION</text>
+    <text x="631" y="139" fill="#c8b7e3">02 / ROLLOUT</text>
+    <text x="64" y="406" fill="#e8b49b">03 / GRAD-CAM</text>
+    <text x="631" y="406" fill="#c1ddbc">04 / PATCH PCA</text>
+  </g>
+  <g fill="#b8c6d1" text-anchor="middle" font-family="Arial, sans-serif" font-size="17" letter-spacing="2">
+    <text x="317" y="254">RESULT IMAGE</text>
+    <text x="884" y="254">RESULT IMAGE</text>
+    <text x="317" y="521">RESULT IMAGE</text>
+    <text x="884" y="521">RESULT IMAGE</text>
+  </g>
+  <text x="44" y="652" fill="#94a9ba" font-family="Arial, sans-serif" font-size="14" letter-spacing="1">COMPARABLE INPUT · DISTINCT ANALYSES</text>
+  <text x="1156" y="652" fill="#94a9ba" text-anchor="end" font-family="Arial, sans-serif" font-size="14">FIGURE PLACEHOLDER</text>
+</svg>
