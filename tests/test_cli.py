@@ -57,9 +57,7 @@ def test_cli_requires_a_config_file(capsys):
     assert "--config" in capsys.readouterr().err
 
 
-def test_cli_hides_individual_output_paths_by_default(
-    monkeypatch, capsys, config_path
-):
+def test_cli_hides_individual_output_paths_by_default(monkeypatch, capsys, config_path):
     from vision_lens import pipeline
 
     monkeypatch.setattr(
