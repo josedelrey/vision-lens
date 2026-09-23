@@ -81,6 +81,13 @@ from vision_lens.pipeline.runtime import anyup_guidance, apply_seed
 
 ROLLOUT_GRID_MAX_COLUMNS = 4
 
+type _PCAFitSettings = tuple[
+    bool,
+    ForegroundThreshold,
+    Literal["high", "low"],
+    RGBFitScope,
+]
+
 
 def _load_model_with_status(config: VisionLensConfig) -> LoadedModel:
     image_count = len(config.input.paths)
@@ -134,6 +141,38 @@ class PatchPCAPipelineResult:
     patch_pca: PatchPCAResult | None
     output_paths: tuple[Path, ...]
     processed_inputs: int = 0
+
+
+@dataclass(frozen=True)
+class _MapExportContext:
+    output_dir: Path
+    output: OutputConfig
+    visualization: VisualizationConfig
+    alpha: float
+    cmap: str | ColormapSpec
+    normalization_range: tuple[float, float] | None
+
+
+@dataclass(frozen=True)
+class _PatchPCARunContext:
+    config: VisionLensConfig
+    labels: tuple[str, ...]
+    loaded_model: LoadedModel
+    transform: Any
+    patch_grid: tuple[int, int]
+    fit_settings: _PCAFitSettings
+    render_images: bool
+    grid_collector: _PatchPCAGridCollector
+
+
+@dataclass(frozen=True)
+class _StagedPCABatch:
+    index: int
+    paths: tuple[Path, ...]
+    labels: tuple[str, ...]
+    sizes: tuple[tuple[int, int], ...]
+    embeddings_path: Path
+    guidance_path: Path | None
 
 
 @dataclass
@@ -318,42 +357,15 @@ def run_patch_pca_from_config(
     loaded_model = _load_model_with_status(config)
     transform = build_batch_preprocessor(loaded_model, config.preprocessing)
     patch_grid = _patch_grid(loaded_model)
-    projection_only = (
-        config.analysis.projection == "fit"
-        and config.analysis.save_projection is not None
-        and not config.output.heatmaps
-        and not config.output.grids
-        and not config.output.raw_arrays
-    )
-    if projection_only:
-        projection = _fit_image_pca_projection(
+    if _is_projection_only(config):
+        return _run_projection_only_pca(
             config,
             labels,
             loaded_model,
             transform,
             patch_grid,
             fit_settings,
-        )
-        assert config.analysis.save_projection is not None
-        projection_path = _write_projection(
-            projection,
-            config.analysis.save_projection,
-            config.output.overwrite,
-        )
-        output_paths = () if projection_path is None else (projection_path,)
-        write_run_manifest(
-            config,
-            loaded_model,
-            labels,
-            output_paths,
-            started_at=started_at,
-        )
-        return PatchPCAPipelineResult(
-            config=config,
-            loaded_model=loaded_model,
-            patch_pca=None,
-            output_paths=output_paths,
-            processed_inputs=len(config.input.paths),
+            started_at,
         )
     grid_collector = _PatchPCAGridCollector(
         total_items=len(config.input.paths),
@@ -361,207 +373,292 @@ def run_patch_pca_from_config(
         output=config.output,
         visualization=config.visualization,
     )
+    context = _PatchPCARunContext(
+        config,
+        labels,
+        loaded_model,
+        transform,
+        patch_grid,
+        fit_settings,
+        config.output.heatmaps or config.output.grids,
+        grid_collector,
+    )
+    if projection is not None:
+        output_paths, retained_patch_pca = _project_with_loaded_pca(context, projection)
+    elif len(config.input.paths) <= config.runtime.batch_size:
+        output_paths, retained_patch_pca, projection = _fit_single_batch_pca(context)
+    else:
+        output_paths, projection = _fit_staged_pca(context)
+        retained_patch_pca = None
+    return _complete_patch_pca_run(
+        context,
+        output_paths,
+        retained_patch_pca,
+        projection,
+        started_at,
+    )
+
+
+def _is_projection_only(config: VisionLensConfig) -> bool:
+    return (
+        config.analysis.projection == "fit"
+        and config.analysis.save_projection is not None
+        and not config.output.heatmaps
+        and not config.output.grids
+        and not config.output.raw_arrays
+    )
+
+
+def _run_projection_only_pca(
+    config: VisionLensConfig,
+    labels: tuple[str, ...],
+    loaded_model: LoadedModel,
+    transform: Any,
+    patch_grid: tuple[int, int],
+    fit_settings: _PCAFitSettings,
+    started_at: datetime,
+) -> PatchPCAPipelineResult:
+    projection = _fit_image_pca_projection(
+        config,
+        labels,
+        loaded_model,
+        transform,
+        patch_grid,
+        fit_settings,
+    )
+    assert config.analysis.save_projection is not None
+    projection_path = _write_projection(
+        projection,
+        config.analysis.save_projection,
+        config.output.overwrite,
+    )
+    output_paths = () if projection_path is None else (projection_path,)
+    write_run_manifest(
+        config,
+        loaded_model,
+        labels,
+        output_paths,
+        started_at=started_at,
+    )
+    return PatchPCAPipelineResult(
+        config=config,
+        loaded_model=loaded_model,
+        patch_pca=None,
+        output_paths=output_paths,
+        processed_inputs=len(config.input.paths),
+    )
+
+
+def _project_with_loaded_pca(
+    context: _PatchPCARunContext,
+    projection: PatchPCAProjection,
+) -> tuple[list[Path], PatchPCAResult | None]:
+    config = context.config
     output_paths: list[Path] = []
     retained_patch_pca = None
-    render_pca_images = config.output.heatmaps or config.output.grids
-
-    if projection is not None:
-        for input_batch in _tracked_input_batches(config, labels, "Project images"):
-            batch = preprocess_batch(
-                input_batch,
-                transform,
-                loaded_model,
-                include_display_images=False,
-            )
-            patch_pca = extract_patch_pca(
-                loaded_model.model,
-                batch.inputs,
-                loaded_model.metadata,
-                projection=projection,
-                interpolation=config.visualization.interpolation,
-                guidance_image=(
-                    anyup_guidance(config, loaded_model, batch.inputs)
-                    if render_pca_images
-                    else None
-                ),
-                output_size=_analysis_output_size(config, loaded_model),
-                anyup_query_chunk_size=(config.visualization.anyup_query_chunk_size),
-                render_images=render_pca_images,
-            )
-            if len(config.input.paths) <= config.runtime.batch_size:
-                retained_patch_pca = patch_pca
-            output_paths.extend(
-                export_patch_pca_outputs(
-                    patch_pca,
-                    image_paths=input_batch.paths,
-                    output_dir=config.output.directory,
-                    output_config=config.output,
-                    visualization_config=config.visualization,
-                    input_sizes=tuple(image.size for image in input_batch.images),
-                    input_labels=input_batch.labels,
-                    grid_collector=grid_collector,
-                )
-            )
-    elif len(config.input.paths) <= config.runtime.batch_size:
-        for input_batch in _tracked_input_batches(config, labels, "Analyze images"):
-            batch = preprocess_batch(
-                input_batch,
-                transform,
-                loaded_model,
-                include_display_images=False,
-            )
-            patch_pca = extract_patch_pca(
-                loaded_model.model,
-                batch.inputs,
-                loaded_model.metadata,
-                foreground_separation=fit_settings[0],
-                foreground_threshold=fit_settings[1],
-                foreground_side=fit_settings[2],
-                rgb_fit_scope=fit_settings[3],
-                interpolation=config.visualization.interpolation,
-                guidance_image=(
-                    anyup_guidance(config, loaded_model, batch.inputs)
-                    if render_pca_images
-                    else None
-                ),
-                output_size=_analysis_output_size(config, loaded_model),
-                anyup_query_chunk_size=(config.visualization.anyup_query_chunk_size),
-                render_images=render_pca_images,
-            )
-            projection = patch_pca.projection
+    for input_batch in _tracked_input_batches(config, context.labels, "Project images"):
+        batch = preprocess_batch(
+            input_batch,
+            context.transform,
+            context.loaded_model,
+            include_display_images=False,
+        )
+        patch_pca = extract_patch_pca(
+            context.loaded_model.model,
+            batch.inputs,
+            context.loaded_model.metadata,
+            projection=projection,
+            interpolation=config.visualization.interpolation,
+            guidance_image=_pca_guidance(context, batch.inputs),
+            output_size=_analysis_output_size(config, context.loaded_model),
+            anyup_query_chunk_size=config.visualization.anyup_query_chunk_size,
+            render_images=context.render_images,
+        )
+        if len(config.input.paths) <= config.runtime.batch_size:
             retained_patch_pca = patch_pca
-            output_paths.extend(
-                export_patch_pca_outputs(
-                    patch_pca,
-                    image_paths=input_batch.paths,
-                    output_dir=config.output.directory,
-                    output_config=config.output,
-                    visualization_config=config.visualization,
-                    input_sizes=tuple(image.size for image in input_batch.images),
-                    input_labels=input_batch.labels,
-                    grid_collector=grid_collector,
-                )
-            )
-    else:
-        with TemporaryDirectory(prefix="vision-lens-pca-") as temporary_directory:
-            staged_batches: list[
-                tuple[
-                    int,
-                    tuple[Path, ...],
-                    tuple[str, ...],
-                    tuple[tuple[int, int], ...],
-                    Path,
-                    Path | None,
-                ]
-            ] = []
-            for input_batch in _tracked_input_batches(
-                config, labels, "Extract embeddings"
-            ):
-                batch = preprocess_batch(
-                    input_batch,
-                    transform,
-                    loaded_model,
-                    include_display_images=False,
-                )
-                embeddings = extract_patch_embeddings(
-                    loaded_model.model,
-                    batch.inputs,
-                    patch_grid,
-                )
-                staged_path = (
-                    Path(temporary_directory) / f"batch-{input_batch.index}.npy"
-                )
-                _save_array(embeddings, staged_path)
-                guidance = (
-                    anyup_guidance(config, loaded_model, batch.inputs)
-                    if render_pca_images
-                    else None
-                )
-                guidance_path = None
-                if guidance is not None:
-                    guidance_path = (
-                        Path(temporary_directory) / f"guidance-{input_batch.index}.npy"
-                    )
-                    _save_array(guidance, guidance_path)
-                staged_batches.append(
-                    (
-                        input_batch.index,
-                        input_batch.paths,
-                        input_batch.labels,
-                        tuple(image.size for image in input_batch.images),
-                        staged_path,
-                        guidance_path,
-                    )
-                )
+        output_paths.extend(_export_patch_pca_batch(context, input_batch, patch_pca))
+    return output_paths, retained_patch_pca
 
-            def embedding_batches() -> Any:
-                for (
-                    _index,
-                    _paths,
-                    _labels,
-                    _sizes,
-                    staged_path,
-                    _guidance_path,
-                ) in staged_batches:
-                    yield np.load(staged_path, allow_pickle=False)
 
-            status("Fitting PCA projection")
-            projection = fit_patch_pca_projection_batches(
-                embedding_batches,
-                foreground_separation=fit_settings[0],
-                foreground_threshold=fit_settings[1],
-                foreground_side=fit_settings[2],
-                rgb_fit_scope=fit_settings[3],
-            )
-            for (
-                _batch_index,
-                batch_paths,
-                batch_labels,
-                batch_sizes,
-                staged_path,
+def _fit_single_batch_pca(
+    context: _PatchPCARunContext,
+) -> tuple[list[Path], PatchPCAResult, PatchPCAProjection | None]:
+    config = context.config
+    output_paths: list[Path] = []
+    retained_patch_pca = None
+    projection = None
+    for input_batch in _tracked_input_batches(config, context.labels, "Analyze images"):
+        batch = preprocess_batch(
+            input_batch,
+            context.transform,
+            context.loaded_model,
+            include_display_images=False,
+        )
+        patch_pca = extract_patch_pca(
+            context.loaded_model.model,
+            batch.inputs,
+            context.loaded_model.metadata,
+            foreground_separation=context.fit_settings[0],
+            foreground_threshold=context.fit_settings[1],
+            foreground_side=context.fit_settings[2],
+            rgb_fit_scope=context.fit_settings[3],
+            interpolation=config.visualization.interpolation,
+            guidance_image=_pca_guidance(context, batch.inputs),
+            output_size=_analysis_output_size(config, context.loaded_model),
+            anyup_query_chunk_size=config.visualization.anyup_query_chunk_size,
+            render_images=context.render_images,
+        )
+        projection = patch_pca.projection
+        retained_patch_pca = patch_pca
+        output_paths.extend(_export_patch_pca_batch(context, input_batch, patch_pca))
+    assert retained_patch_pca is not None
+    return output_paths, retained_patch_pca, projection
+
+
+def _pca_guidance(context: _PatchPCARunContext, inputs: Any) -> Any | None:
+    if not context.render_images:
+        return None
+    return anyup_guidance(context.config, context.loaded_model, inputs)
+
+
+def _export_patch_pca_batch(
+    context: _PatchPCARunContext,
+    input_batch: InputBatch,
+    patch_pca: PatchPCAResult,
+) -> tuple[Path, ...]:
+    config = context.config
+    return export_patch_pca_outputs(
+        patch_pca,
+        image_paths=input_batch.paths,
+        output_dir=config.output.directory,
+        output_config=config.output,
+        visualization_config=config.visualization,
+        input_sizes=tuple(image.size for image in input_batch.images),
+        input_labels=input_batch.labels,
+        grid_collector=context.grid_collector,
+    )
+
+
+def _fit_staged_pca(
+    context: _PatchPCARunContext,
+) -> tuple[list[Path], PatchPCAProjection]:
+    with TemporaryDirectory(prefix="vision-lens-pca-") as temporary_directory:
+        staged_batches = _stage_pca_batches(context, Path(temporary_directory))
+
+        def embedding_batches() -> Any:
+            for staged in staged_batches:
+                yield np.load(staged.embeddings_path, allow_pickle=False)
+
+        status("Fitting PCA projection")
+        projection = fit_patch_pca_projection_batches(
+            embedding_batches,
+            foreground_separation=context.fit_settings[0],
+            foreground_threshold=context.fit_settings[1],
+            foreground_side=context.fit_settings[2],
+            rgb_fit_scope=context.fit_settings[3],
+        )
+        output_paths = _project_staged_pca(context, staged_batches, projection)
+    return output_paths, projection
+
+
+def _stage_pca_batches(
+    context: _PatchPCARunContext,
+    temporary_directory: Path,
+) -> list[_StagedPCABatch]:
+    config = context.config
+    staged_batches: list[_StagedPCABatch] = []
+    for input_batch in _tracked_input_batches(
+        config, context.labels, "Extract embeddings"
+    ):
+        batch = preprocess_batch(
+            input_batch,
+            context.transform,
+            context.loaded_model,
+            include_display_images=False,
+        )
+        embeddings = extract_patch_embeddings(
+            context.loaded_model.model,
+            batch.inputs,
+            context.patch_grid,
+        )
+        embeddings_path = temporary_directory / f"batch-{input_batch.index}.npy"
+        _save_array(embeddings, embeddings_path)
+        guidance = _pca_guidance(context, batch.inputs)
+        guidance_path = None
+        if guidance is not None:
+            guidance_path = temporary_directory / f"guidance-{input_batch.index}.npy"
+            _save_array(guidance, guidance_path)
+        staged_batches.append(
+            _StagedPCABatch(
+                input_batch.index,
+                input_batch.paths,
+                input_batch.labels,
+                tuple(image.size for image in input_batch.images),
+                embeddings_path,
                 guidance_path,
-            ) in track_units(
-                staged_batches,
-                total=len(config.input.paths),
-                description="Project PCA",
-                unit="image",
-                size=lambda item: len(item[1]),
-            ):
-                embeddings = np.load(staged_path, allow_pickle=False)
-                patch_pca = project_patch_embeddings(
-                    embeddings,
-                    patch_grid=patch_grid,
-                    image_size=_analysis_output_size(config, loaded_model),
-                    foreground_separation=fit_settings[0],
-                    projection=projection,
-                    interpolation=config.visualization.interpolation,
-                    anyup_query_chunk_size=(
-                        config.visualization.anyup_query_chunk_size
-                    ),
-                    guidance_image=(
-                        None
-                        if guidance_path is None
-                        else torch.as_tensor(
-                            np.load(guidance_path, allow_pickle=False)
-                        ).to(loaded_model.metadata.device)
-                    ),
-                    render_images=render_pca_images,
-                )
-                output_paths.extend(
-                    export_patch_pca_outputs(
-                        patch_pca,
-                        image_paths=batch_paths,
-                        output_dir=config.output.directory,
-                        output_config=config.output,
-                        visualization_config=config.visualization,
-                        input_sizes=batch_sizes,
-                        input_labels=batch_labels,
-                        grid_collector=grid_collector,
-                    )
-                )
+            )
+        )
+    return staged_batches
 
+
+def _project_staged_pca(
+    context: _PatchPCARunContext,
+    staged_batches: list[_StagedPCABatch],
+    projection: PatchPCAProjection,
+) -> list[Path]:
+    config = context.config
+    output_paths: list[Path] = []
+    for staged in track_units(
+        staged_batches,
+        total=len(config.input.paths),
+        description="Project PCA",
+        unit="image",
+        size=lambda item: len(item.paths),
+    ):
+        embeddings = np.load(staged.embeddings_path, allow_pickle=False)
+        guidance_image = (
+            None
+            if staged.guidance_path is None
+            else torch.as_tensor(np.load(staged.guidance_path, allow_pickle=False)).to(
+                context.loaded_model.metadata.device
+            )
+        )
+        patch_pca = project_patch_embeddings(
+            embeddings,
+            patch_grid=context.patch_grid,
+            image_size=_analysis_output_size(config, context.loaded_model),
+            foreground_separation=context.fit_settings[0],
+            projection=projection,
+            interpolation=config.visualization.interpolation,
+            anyup_query_chunk_size=config.visualization.anyup_query_chunk_size,
+            guidance_image=guidance_image,
+            render_images=context.render_images,
+        )
+        output_paths.extend(
+            export_patch_pca_outputs(
+                patch_pca,
+                image_paths=staged.paths,
+                output_dir=config.output.directory,
+                output_config=config.output,
+                visualization_config=config.visualization,
+                input_sizes=staged.sizes,
+                input_labels=staged.labels,
+                grid_collector=context.grid_collector,
+            )
+        )
+    return output_paths
+
+
+def _complete_patch_pca_run(
+    context: _PatchPCARunContext,
+    output_paths: list[Path],
+    retained_patch_pca: PatchPCAResult | None,
+    projection: PatchPCAProjection | None,
+    started_at: datetime,
+) -> PatchPCAPipelineResult:
+    config = context.config
     if config.output.grids:
-        output_paths.extend(grid_collector.finish())
+        output_paths.extend(context.grid_collector.finish())
     if config.analysis.save_projection is not None:
         assert projection is not None
         projection_path = _write_projection(
@@ -574,14 +671,14 @@ def run_patch_pca_from_config(
     output_paths_tuple = tuple(output_paths)
     write_run_manifest(
         config,
-        loaded_model,
-        labels,
+        context.loaded_model,
+        context.labels,
         output_paths_tuple,
         started_at=started_at,
     )
     return PatchPCAPipelineResult(
         config=config,
-        loaded_model=loaded_model,
+        loaded_model=context.loaded_model,
         patch_pca=retained_patch_pca,
         output_paths=output_paths_tuple,
         processed_inputs=len(config.input.paths),
@@ -913,6 +1010,74 @@ def run_vit_attention_from_config(config: VisionLensConfig) -> PipelineResult:
     )
 
 
+def _export_map_artifacts(
+    context: _MapExportContext,
+    image: Any,
+    maps: Any,
+    stem: str,
+    *,
+    head_index: int = 0,
+) -> tuple[Path, ...]:
+    output = context.output
+    visualization = context.visualization
+    output_paths: list[Path] = []
+    if output.heatmaps:
+        path = image_artifact_path(
+            context.output_dir, stem, "heatmap", output.image_format
+        )
+        if _can_write(path, output.overwrite):
+            heatmap = render_heatmap(
+                maps,
+                cmap=context.cmap,
+                head_index=head_index,
+                normalization=visualization.normalization,
+                normalization_range=context.normalization_range,
+            )
+            heatmap = _resize_visualization(heatmap, image.size, visualization)
+            output_paths.append(save_image(heatmap, path))
+    if output.overlays:
+        path = image_artifact_path(
+            context.output_dir, stem, "overlay", output.image_format
+        )
+        if _can_write(path, output.overwrite):
+            overlay = overlay_attention(
+                image,
+                maps,
+                alpha=context.alpha,
+                alpha_curve_steepness=visualization.overlay_alpha_curve_steepness,
+                alpha_curve_midpoint=visualization.overlay_alpha_curve_midpoint,
+                cmap=context.cmap,
+                head_index=head_index,
+                normalization=visualization.normalization,
+                normalization_range=context.normalization_range,
+            )
+            output_paths.append(save_image(overlay, path))
+    if output.transparent_overlays:
+        path = image_artifact_path(
+            context.output_dir, stem, "transparent_overlay", "png"
+        )
+        if _can_write(path, output.overwrite):
+            transparent_overlay = render_transparent_overlay(
+                maps,
+                image.size,
+                alpha=context.alpha,
+                alpha_curve_steepness=visualization.overlay_alpha_curve_steepness,
+                alpha_curve_midpoint=visualization.overlay_alpha_curve_midpoint,
+                cmap=context.cmap,
+                head_index=head_index,
+                normalization=visualization.normalization,
+                normalization_range=context.normalization_range,
+            )
+            output_paths.append(
+                save_image(transparent_overlay, path, preserve_alpha=True)
+            )
+    if output.raw_arrays:
+        path = named_artifact_path(context.output_dir, stem, output.raw_format)
+        if _can_write(path, output.overwrite):
+            output_paths.append(_save_array(maps[0, head_index], path))
+    return tuple(output_paths)
+
+
 def export_attention_outputs(
     images: list[Any],
     image_paths: tuple[Path, ...],
@@ -947,7 +1112,44 @@ def export_attention_outputs(
         visualization,
         [layer.maps for layer in attention.layers],
     )
+    context = _MapExportContext(
+        output_dir,
+        output,
+        visualization,
+        alpha,
+        cmap,
+        normalization_range,
+    )
 
+    output_paths.extend(_export_attention_artifacts(context, images, labels, attention))
+
+    if not output.grids:
+        return tuple(output_paths)
+    output_paths.extend(
+        _export_attention_layer_grids(context, images, labels, attention, grid_format)
+    )
+    output_paths.extend(
+        _export_attention_image_grids(
+            context,
+            images,
+            labels,
+            attention,
+            grid_format,
+            grid_page_offset,
+            total_grid_pages,
+            grid_collector,
+        )
+    )
+    return tuple(output_paths)
+
+
+def _export_attention_artifacts(
+    context: _MapExportContext,
+    images: list[Any],
+    labels: list[str],
+    attention: AttentionExtractionResult,
+) -> tuple[Path, ...]:
+    output_paths: list[Path] = []
     for image_index, image in enumerate(images):
         for layer in attention.layers:
             image_layer = _layer_for_image(layer, image_index)
@@ -956,83 +1158,27 @@ def export_attention_outputs(
                 stem = attention_image_stem(
                     labels[image_index], layer.layer_index, suffix
                 )
-
-                if output.heatmaps:
-                    path = image_artifact_path(
-                        output_dir, stem, "heatmap", output.image_format
+                output_paths.extend(
+                    _export_map_artifacts(
+                        context,
+                        image,
+                        image_layer.maps,
+                        stem,
+                        head_index=head_index,
                     )
-                    if _can_write(path, output.overwrite):
-                        heatmap = render_heatmap(
-                            image_layer.maps,
-                            cmap=cmap,
-                            head_index=head_index,
-                            normalization=visualization.normalization,
-                            normalization_range=normalization_range,
-                        )
-                        heatmap = _resize_visualization(
-                            heatmap,
-                            image.size,
-                            visualization,
-                        )
-                        output_paths.append(save_image(heatmap, path))
-                if output.overlays:
-                    path = image_artifact_path(
-                        output_dir, stem, "overlay", output.image_format
-                    )
-                    if _can_write(path, output.overwrite):
-                        overlay = overlay_attention(
-                            image,
-                            image_layer.maps,
-                            alpha=alpha,
-                            alpha_curve_steepness=(
-                                visualization.overlay_alpha_curve_steepness
-                            ),
-                            alpha_curve_midpoint=(
-                                visualization.overlay_alpha_curve_midpoint
-                            ),
-                            cmap=cmap,
-                            head_index=head_index,
-                            normalization=visualization.normalization,
-                            normalization_range=normalization_range,
-                        )
-                        output_paths.append(save_image(overlay, path))
-                if output.transparent_overlays:
-                    path = image_artifact_path(
-                        output_dir, stem, "transparent_overlay", "png"
-                    )
-                    if _can_write(path, output.overwrite):
-                        transparent_overlay = render_transparent_overlay(
-                            image_layer.maps,
-                            image.size,
-                            alpha=alpha,
-                            alpha_curve_steepness=(
-                                visualization.overlay_alpha_curve_steepness
-                            ),
-                            alpha_curve_midpoint=(
-                                visualization.overlay_alpha_curve_midpoint
-                            ),
-                            cmap=cmap,
-                            head_index=head_index,
-                            normalization=visualization.normalization,
-                            normalization_range=normalization_range,
-                        )
-                        output_paths.append(
-                            save_image(
-                                transparent_overlay,
-                                path,
-                                preserve_alpha=True,
-                            )
-                        )
-                if output.raw_arrays:
-                    path = named_artifact_path(output_dir, stem, output.raw_format)
-                    if _can_write(path, output.overwrite):
-                        output_paths.append(
-                            _save_array(image_layer.maps[0, head_index], path)
-                        )
+                )
+    return tuple(output_paths)
 
-    if not output.grids:
-        return tuple(output_paths)
 
+def _export_attention_layer_grids(
+    context: _MapExportContext,
+    images: list[Any],
+    labels: list[str],
+    attention: AttentionExtractionResult,
+    grid_format: str,
+) -> tuple[Path, ...]:
+    visualization = context.visualization
+    output_paths: list[Path] = []
     for image_index, image in enumerate(images):
         image_layers = tuple(
             _layer_for_image(layer, image_index) for layer in attention.layers
@@ -1043,22 +1189,22 @@ def export_attention_outputs(
             for page_index, layer_page in enumerate(pages):
                 stem = attention_layers_grid_stem(labels[image_index], suffix)
                 output_path = grid_page_path(
-                    output_dir,
+                    context.output_dir,
                     stem,
                     grid_format,
                     page_index,
                     len(pages),
                 )
-                if not _can_write(output_path, output.overwrite):
+                if not _can_write(output_path, context.output.overwrite):
                     continue
                 make_layer_comparison_grid(
                     image,
                     layer_page,
                     output_path=output_path,
-                    alpha=alpha,
+                    alpha=context.alpha,
                     alpha_curve_steepness=(visualization.overlay_alpha_curve_steepness),
                     alpha_curve_midpoint=visualization.overlay_alpha_curve_midpoint,
-                    cmap=cmap,
+                    cmap=context.cmap,
                     head_index=head_index,
                     columns=visualization.columns,
                     tile_size=visualization.tile_size,
@@ -1068,10 +1214,24 @@ def export_attention_outputs(
                     background=visualization.background,
                     dpi=visualization.dpi,
                     normalization=visualization.normalization,
-                    normalization_range=normalization_range,
+                    normalization_range=context.normalization_range,
                 )
                 output_paths.append(output_path)
+    return tuple(output_paths)
 
+
+def _export_attention_image_grids(
+    context: _MapExportContext,
+    images: list[Any],
+    labels: list[str],
+    attention: AttentionExtractionResult,
+    grid_format: str,
+    grid_page_offset: int,
+    total_grid_pages: int | None,
+    grid_collector: _FigureGridCollector | None,
+) -> tuple[Path, ...]:
+    visualization = context.visualization
+    output_paths: list[Path] = []
     for layer in attention.layers:
         image_maps = [_slice_batch(layer.maps, index) for index in range(len(images))]
         for head_index in range(_head_count(layer)):
@@ -1082,17 +1242,17 @@ def export_attention_outputs(
                     overlay_attention(
                         image,
                         image_map,
-                        alpha=alpha,
+                        alpha=context.alpha,
                         alpha_curve_steepness=(
                             visualization.overlay_alpha_curve_steepness
                         ),
                         alpha_curve_midpoint=(
                             visualization.overlay_alpha_curve_midpoint
                         ),
-                        cmap=cmap,
+                        cmap=context.cmap,
                         head_index=head_index,
                         normalization=visualization.normalization,
-                        normalization_range=normalization_range,
+                        normalization_range=context.normalization_range,
                     )
                     for image, image_map in zip(images, image_maps, strict=True)
                 ]
@@ -1103,23 +1263,23 @@ def export_attention_outputs(
             )
             for page_index, indices in enumerate(image_pages):
                 output_path = grid_page_path(
-                    output_dir,
+                    context.output_dir,
                     stem,
                     grid_format,
                     grid_page_offset + page_index,
                     total_grid_pages or len(image_pages),
                 )
-                if not _can_write(output_path, output.overwrite):
+                if not _can_write(output_path, context.output.overwrite):
                     continue
                 make_image_comparison_grid(
                     [images[index] for index in indices],
                     [image_maps[index] for index in indices],
                     labels=[labels[index] for index in indices],
                     output_path=output_path,
-                    alpha=alpha,
+                    alpha=context.alpha,
                     alpha_curve_steepness=(visualization.overlay_alpha_curve_steepness),
                     alpha_curve_midpoint=visualization.overlay_alpha_curve_midpoint,
-                    cmap=cmap,
+                    cmap=context.cmap,
                     head_index=head_index,
                     columns=visualization.columns,
                     tile_size=visualization.tile_size,
@@ -1129,10 +1289,9 @@ def export_attention_outputs(
                     background=visualization.background,
                     dpi=visualization.dpi,
                     normalization=visualization.normalization,
-                    normalization_range=normalization_range,
+                    normalization_range=context.normalization_range,
                 )
                 output_paths.append(output_path)
-
     return tuple(output_paths)
 
 
@@ -1151,6 +1310,55 @@ def export_patch_pca_outputs(
     output = output_config or OutputConfig(output_dir)
     visualization = visualization_config or VisualizationConfig()
     labels = input_labels or tuple(path.stem for path in image_paths)
+    _validate_patch_pca_export(
+        patch_pca,
+        image_paths,
+        labels,
+        input_sizes,
+        output,
+        visualization,
+    )
+    rendered_images = _render_patch_pca_outputs(
+        patch_pca,
+        input_sizes,
+        output,
+        visualization,
+    )
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_paths = list(
+        _export_patch_pca_images(
+            rendered_images,
+            labels,
+            output_dir,
+            output,
+        )
+    )
+    output_paths.extend(_export_patch_pca_arrays(patch_pca, labels, output_dir, output))
+    if output.grids:
+        output_paths.extend(
+            _export_patch_pca_grids(
+                patch_pca,
+                rendered_images,
+                labels,
+                output_dir,
+                output,
+                visualization,
+                grid_page_offset,
+                total_grid_pages,
+                grid_collector,
+            )
+        )
+    return tuple(output_paths)
+
+
+def _validate_patch_pca_export(
+    patch_pca: PatchPCAResult,
+    image_paths: tuple[Path, ...],
+    labels: tuple[str, ...],
+    input_sizes: tuple[tuple[int, int], ...] | None,
+    output: OutputConfig,
+    visualization: VisualizationConfig,
+) -> None:
     if len(labels) != len(image_paths):
         raise ValueError("input_labels and image_paths must have the same length.")
     renders_images = output.heatmaps or output.grids
@@ -1162,59 +1370,95 @@ def export_patch_pca_outputs(
         raise ValueError("input_sizes and image_paths must have the same length.")
     if renders_images and visualization.output_size == "match" and input_sizes is None:
         raise ValueError("input_sizes are required when output_size is 'match'.")
-    rendered_images = (
-        tuple(
-            _render_pca_at_output_size(
-                patch_pca,
-                index,
-                _resolved_image_output_size(
-                    visualization,
-                    input_sizes[index] if input_sizes is not None else None,
-                    image.size,
-                ),
-                visualization,
-            )
-            for index, image in enumerate(patch_pca.images)
-        )
-        if renders_images
-        else ()
-    )
-    output_dir.mkdir(parents=True, exist_ok=True)
-    output_paths = []
-    if output.heatmaps:
-        for label, image in zip(labels, rendered_images, strict=True):
-            output_path = image_artifact_path(
-                output_dir, label, "patch_pca", output.image_format
-            )
-            if _can_write(output_path, output.overwrite):
-                output_paths.append(save_image(image, output_path))
-    if output.raw_arrays:
-        for index, label in enumerate(labels):
-            embedding_path = image_artifact_path(
-                output_dir, label, "patch_embeddings", output.raw_format
-            )
-            mask_path = image_artifact_path(
-                output_dir, label, "foreground_mask", output.raw_format
-            )
-            if _can_write(embedding_path, output.overwrite):
-                output_paths.append(
-                    _save_array(patch_pca.patch_embeddings[index], embedding_path)
-                )
-            if _can_write(mask_path, output.overwrite):
-                output_paths.append(
-                    _save_array(patch_pca.foreground_mask[index], mask_path)
-                )
-    if not output.grids:
-        return tuple(output_paths)
 
+
+def _render_patch_pca_outputs(
+    patch_pca: PatchPCAResult,
+    input_sizes: tuple[tuple[int, int], ...] | None,
+    output: OutputConfig,
+    visualization: VisualizationConfig,
+) -> tuple[Image.Image, ...]:
+    if not (output.heatmaps or output.grids):
+        return ()
+    return tuple(
+        _render_pca_at_output_size(
+            patch_pca,
+            index,
+            _resolved_image_output_size(
+                visualization,
+                input_sizes[index] if input_sizes is not None else None,
+                image.size,
+            ),
+            visualization,
+        )
+        for index, image in enumerate(patch_pca.images)
+    )
+
+
+def _export_patch_pca_images(
+    rendered_images: tuple[Image.Image, ...],
+    labels: tuple[str, ...],
+    output_dir: Path,
+    output: OutputConfig,
+) -> tuple[Path, ...]:
+    if not output.heatmaps:
+        return ()
+    output_paths: list[Path] = []
+    for label, image in zip(labels, rendered_images, strict=True):
+        output_path = image_artifact_path(
+            output_dir, label, "patch_pca", output.image_format
+        )
+        if _can_write(output_path, output.overwrite):
+            output_paths.append(save_image(image, output_path))
+    return tuple(output_paths)
+
+
+def _export_patch_pca_arrays(
+    patch_pca: PatchPCAResult,
+    labels: tuple[str, ...],
+    output_dir: Path,
+    output: OutputConfig,
+) -> tuple[Path, ...]:
+    if not output.raw_arrays:
+        return ()
+    output_paths: list[Path] = []
+    for index, label in enumerate(labels):
+        embedding_path = image_artifact_path(
+            output_dir, label, "patch_embeddings", output.raw_format
+        )
+        mask_path = image_artifact_path(
+            output_dir, label, "foreground_mask", output.raw_format
+        )
+        if _can_write(embedding_path, output.overwrite):
+            output_paths.append(
+                _save_array(patch_pca.patch_embeddings[index], embedding_path)
+            )
+        if _can_write(mask_path, output.overwrite):
+            output_paths.append(
+                _save_array(patch_pca.foreground_mask[index], mask_path)
+            )
+    return tuple(output_paths)
+
+
+def _export_patch_pca_grids(
+    patch_pca: PatchPCAResult,
+    rendered_images: tuple[Image.Image, ...],
+    labels: tuple[str, ...],
+    output_dir: Path,
+    output: OutputConfig,
+    visualization: VisualizationConfig,
+    grid_page_offset: int,
+    total_grid_pages: int | None,
+    grid_collector: _PatchPCAGridCollector | None,
+) -> tuple[Path, ...]:
     if grid_collector is not None:
         grid_collector.add(list(rendered_images), list(labels))
-        return tuple(output_paths)
-
+        return ()
     indices_pages = _chunks(
         tuple(range(len(patch_pca.images))),
         visualization.items_per_grid,
     )
+    output_paths: list[Path] = []
     for page_index, indices in enumerate(indices_pages):
         page_images = [rendered_images[index] for index in indices]
         page_labels = [labels[index] for index in indices]
@@ -1274,84 +1518,27 @@ def export_rollout_comparison_outputs(
     if layer_attention is not None:
         normalization_maps[:0] = [layer.maps for layer in layer_attention.layers]
     normalization_range = _rendering_range(visualization, normalization_maps)
+    context = _MapExportContext(
+        output_dir,
+        output,
+        visualization,
+        alpha,
+        cmap,
+        normalization_range,
+    )
 
     for image_index, image in enumerate(images):
         for rollout_layer in rollout.layers:
             rollout_for_image = _layer_for_image(rollout_layer, image_index)
             stem = rollout_image_stem(labels[image_index], rollout_layer.layer_index)
-            if output.heatmaps:
-                path = image_artifact_path(
-                    output_dir, stem, "heatmap", output.image_format
+            output_paths.extend(
+                _export_map_artifacts(
+                    context,
+                    image,
+                    rollout_for_image.maps,
+                    stem,
                 )
-                if _can_write(path, output.overwrite):
-                    output_paths.append(
-                        save_image(
-                            _resize_visualization(
-                                render_heatmap(
-                                    rollout_for_image.maps,
-                                    cmap=cmap,
-                                    normalization=visualization.normalization,
-                                    normalization_range=normalization_range,
-                                ),
-                                image.size,
-                                visualization,
-                            ),
-                            path,
-                        )
-                    )
-            if output.overlays:
-                path = image_artifact_path(
-                    output_dir, stem, "overlay", output.image_format
-                )
-                if _can_write(path, output.overwrite):
-                    output_paths.append(
-                        save_image(
-                            overlay_attention(
-                                image,
-                                rollout_for_image.maps,
-                                alpha=alpha,
-                                alpha_curve_steepness=(
-                                    visualization.overlay_alpha_curve_steepness
-                                ),
-                                alpha_curve_midpoint=(
-                                    visualization.overlay_alpha_curve_midpoint
-                                ),
-                                cmap=cmap,
-                                normalization=visualization.normalization,
-                                normalization_range=normalization_range,
-                            ),
-                            path,
-                        )
-                    )
-            if output.transparent_overlays:
-                path = image_artifact_path(
-                    output_dir, stem, "transparent_overlay", "png"
-                )
-                if _can_write(path, output.overwrite):
-                    output_paths.append(
-                        save_image(
-                            render_transparent_overlay(
-                                rollout_for_image.maps,
-                                image.size,
-                                alpha=alpha,
-                                alpha_curve_steepness=(
-                                    visualization.overlay_alpha_curve_steepness
-                                ),
-                                alpha_curve_midpoint=(
-                                    visualization.overlay_alpha_curve_midpoint
-                                ),
-                                cmap=cmap,
-                                normalization=visualization.normalization,
-                                normalization_range=normalization_range,
-                            ),
-                            path,
-                            preserve_alpha=True,
-                        )
-                    )
-            if output.raw_arrays:
-                path = named_artifact_path(output_dir, stem, output.raw_format)
-                if _can_write(path, output.overwrite):
-                    output_paths.append(_save_array(rollout_for_image.maps[0, 0], path))
+            )
 
         if output.grids:
             if layer_attention is None:
@@ -1435,77 +1622,19 @@ def export_gradcam_outputs(
     output_paths: list[Path] = []
     labels = list(input_labels or tuple(path.stem for path in image_paths))
     normalization_range = _rendering_range(visualization, [gradcam.maps])
+    context = _MapExportContext(
+        output_dir,
+        output,
+        visualization,
+        alpha,
+        cmap,
+        normalization_range,
+    )
 
     for image_index, image in enumerate(images):
         maps = _slice_batch(gradcam.maps, image_index)
         stem = gradcam_image_stem(labels[image_index])
-        if output.heatmaps:
-            path = image_artifact_path(output_dir, stem, "heatmap", output.image_format)
-            if _can_write(path, output.overwrite):
-                output_paths.append(
-                    save_image(
-                        _resize_visualization(
-                            render_heatmap(
-                                maps,
-                                cmap=cmap,
-                                normalization=visualization.normalization,
-                                normalization_range=normalization_range,
-                            ),
-                            image.size,
-                            visualization,
-                        ),
-                        path,
-                    )
-                )
-        if output.overlays:
-            path = image_artifact_path(output_dir, stem, "overlay", output.image_format)
-            if _can_write(path, output.overwrite):
-                output_paths.append(
-                    save_image(
-                        overlay_attention(
-                            image,
-                            maps,
-                            alpha=alpha,
-                            alpha_curve_steepness=(
-                                visualization.overlay_alpha_curve_steepness
-                            ),
-                            alpha_curve_midpoint=(
-                                visualization.overlay_alpha_curve_midpoint
-                            ),
-                            cmap=cmap,
-                            normalization=visualization.normalization,
-                            normalization_range=normalization_range,
-                        ),
-                        path,
-                    )
-                )
-        if output.transparent_overlays:
-            path = image_artifact_path(output_dir, stem, "transparent_overlay", "png")
-            if _can_write(path, output.overwrite):
-                output_paths.append(
-                    save_image(
-                        render_transparent_overlay(
-                            maps,
-                            image.size,
-                            alpha=alpha,
-                            alpha_curve_steepness=(
-                                visualization.overlay_alpha_curve_steepness
-                            ),
-                            alpha_curve_midpoint=(
-                                visualization.overlay_alpha_curve_midpoint
-                            ),
-                            cmap=cmap,
-                            normalization=visualization.normalization,
-                            normalization_range=normalization_range,
-                        ),
-                        path,
-                        preserve_alpha=True,
-                    )
-                )
-        if output.raw_arrays:
-            path = named_artifact_path(output_dir, stem, output.raw_format)
-            if _can_write(path, output.overwrite):
-                output_paths.append(_save_array(maps[0, 0], path))
+        output_paths.extend(_export_map_artifacts(context, image, maps, stem))
 
     if output.grids:
         image_maps = [_slice_batch(gradcam.maps, index) for index in range(len(images))]

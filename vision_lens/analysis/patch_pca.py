@@ -128,6 +128,82 @@ def project_patch_embeddings(
     render_images: bool = True,
 ) -> PatchPCAResult:
     """Project a batch of patch embeddings into one shared RGB PCA space."""
+    _validate_projection_request(
+        foreground_separation=foreground_separation,
+        foreground_threshold=foreground_threshold,
+        foreground_side=foreground_side,
+        rgb_fit_scope=rgb_fit_scope,
+        interpolation=interpolation,
+        guidance_image=guidance_image,
+        anyup_query_chunk_size=anyup_query_chunk_size,
+        render_images=render_images,
+    )
+    embeddings, flattened = _prepare_patch_embeddings(patch_embeddings, patch_grid)
+    batch_size, patch_count, feature_count = embeddings.shape
+    projection, resolved_foreground_separation, first_component = (
+        _resolve_patch_projection(
+            flattened,
+            feature_count,
+            foreground_separation,
+            foreground_threshold,
+            foreground_side,
+            rgb_fit_scope,
+            projection,
+        )
+    )
+    foreground_mask = _projection_foreground_mask(
+        first_component,
+        projection,
+        resolved_foreground_separation,
+        batch_size * patch_count,
+    )
+    batched_rgb_patches = _project_rgb_patches(
+        flattened,
+        foreground_mask,
+        projection,
+        resolved_foreground_separation,
+        interpolation,
+        batch_size,
+        patch_count,
+    )
+    batched_foreground_mask = foreground_mask.reshape(batch_size, patch_count)
+    images, output_foreground_mask = _render_projected_patches(
+        embeddings,
+        batched_rgb_patches,
+        batched_foreground_mask,
+        patch_grid,
+        image_size,
+        projection,
+        resolved_foreground_separation,
+        interpolation,
+        guidance_image,
+        anyup_query_chunk_size,
+        render_images,
+    )
+
+    return PatchPCAResult(
+        patch_embeddings=embeddings,
+        foreground_mask=output_foreground_mask,
+        images=images,
+        patch_grid=patch_grid,
+        image_size=image_size,
+        projection=projection,
+        rgb_patches=batched_rgb_patches,
+        interpolation=interpolation,
+    )
+
+
+def _validate_projection_request(
+    *,
+    foreground_separation: bool | None,
+    foreground_threshold: ForegroundThreshold,
+    foreground_side: str,
+    rgb_fit_scope: str,
+    interpolation: Interpolation,
+    guidance_image: Any | None,
+    anyup_query_chunk_size: int | None,
+    render_images: bool,
+) -> None:
     if foreground_separation is not None and not isinstance(
         foreground_separation, bool
     ):
@@ -157,6 +233,11 @@ def project_patch_embeddings(
     ):
         raise ValueError("soft AnyUp interpolation requires anyup_query_chunk_size.")
 
+
+def _prepare_patch_embeddings(
+    patch_embeddings: Any,
+    patch_grid: tuple[int, int],
+) -> tuple[Any, Any]:
     embeddings = torch.as_tensor(patch_embeddings).detach().float().cpu()
     if embeddings.ndim != 3:
         raise ValueError("patch_embeddings must have shape (batch, patches, features).")
@@ -170,8 +251,18 @@ def project_patch_embeddings(
         )
     if batch_size == 0 or feature_count == 0:
         raise ValueError("patch_embeddings must not be empty.")
+    return embeddings, embeddings.reshape(batch_size * patch_count, feature_count)
 
-    flattened = embeddings.reshape(batch_size * patch_count, feature_count)
+
+def _resolve_patch_projection(
+    flattened: Any,
+    feature_count: int,
+    foreground_separation: bool | None,
+    foreground_threshold: ForegroundThreshold,
+    foreground_side: Literal["high", "low"],
+    rgb_fit_scope: RGBFitScope,
+    projection: PatchPCAProjection | None,
+) -> tuple[PatchPCAProjection, bool, Any | None]:
     if projection is None:
         resolved_foreground_separation = (
             True if foreground_separation is None else foreground_separation
@@ -200,27 +291,40 @@ def project_patch_embeddings(
             if resolved_foreground_separation
             else None
         )
+    return projection, resolved_foreground_separation, first_component
 
-    if resolved_foreground_separation:
+
+def _projection_foreground_mask(
+    first_component: Any | None,
+    projection: PatchPCAProjection,
+    foreground_separation: bool,
+    patch_count: int,
+) -> Any:
+    if foreground_separation:
         assert first_component is not None
         if projection.foreground_side == "high":
-            foreground_mask = first_component[:, 0] > projection.foreground_threshold
-        else:
-            foreground_mask = first_component[:, 0] < projection.foreground_threshold
-    else:
-        foreground_mask = torch.ones(
-            batch_size * patch_count,
-            dtype=torch.bool,
-        )
+            return first_component[:, 0] > projection.foreground_threshold
+        return first_component[:, 0] < projection.foreground_threshold
+    return torch.ones(patch_count, dtype=torch.bool)
 
+
+def _project_rgb_patches(
+    flattened: Any,
+    foreground_mask: Any,
+    projection: PatchPCAProjection,
+    foreground_separation: bool,
+    interpolation: Interpolation,
+    batch_size: int,
+    patch_count: int,
+) -> Any:
     rgb_patches = torch.zeros(
-        (batch_size * patch_count, 3),
+        (flattened.shape[0], 3),
         dtype=flattened.dtype,
     )
     projected_mask = (
         torch.ones_like(foreground_mask)
         if (
-            not resolved_foreground_separation
+            not foreground_separation
             or interpolation == "bilinear_mask"
             or is_anyup_interpolation(interpolation)
         )
@@ -235,43 +339,41 @@ def project_patch_embeddings(
             projection.rgb_maximum,
         )
         rgb_patches[projected_mask] = projected_rgb[:, :3]
+    return rgb_patches.reshape(batch_size, patch_count, 3)
 
-    batched_rgb_patches = rgb_patches.reshape(batch_size, patch_count, 3)
-    batched_foreground_mask = foreground_mask.reshape(batch_size, patch_count)
+
+def _render_projected_patches(
+    embeddings: Any,
+    rgb_patches: Any,
+    foreground_mask: Any,
+    patch_grid: tuple[int, int],
+    image_size: tuple[int, int],
+    projection: PatchPCAProjection,
+    foreground_separation: bool,
+    interpolation: Interpolation,
+    guidance_image: Any | None,
+    anyup_query_chunk_size: int | None,
+    render_images: bool,
+) -> tuple[tuple[Image.Image, ...], Any]:
     if not render_images:
-        images = ()
-        output_foreground_mask = batched_foreground_mask
-    elif is_anyup_interpolation(interpolation):
-        images, output_foreground_mask = _render_anyup_pca_images(
+        return (), foreground_mask
+    if is_anyup_interpolation(interpolation):
+        return _render_anyup_pca_images(
             embeddings,
-            batched_foreground_mask,
+            foreground_mask,
             patch_grid,
             image_size,
             projection,
-            resolved_foreground_separation,
+            foreground_separation,
             interpolation,
             guidance_image,
             anyup_query_chunk_size,
         )
-    else:
-        images = render_patch_pca_images(
-            batched_rgb_patches,
-            batched_foreground_mask,
-            patch_grid,
-            image_size,
-            interpolation,
-        )
-        output_foreground_mask = batched_foreground_mask
-
-    return PatchPCAResult(
-        patch_embeddings=embeddings,
-        foreground_mask=output_foreground_mask,
-        images=images,
-        patch_grid=patch_grid,
-        image_size=image_size,
-        projection=projection,
-        rgb_patches=batched_rgb_patches,
-        interpolation=interpolation,
+    return (
+        render_patch_pca_images(
+            rgb_patches, foreground_mask, patch_grid, image_size, interpolation
+        ),
+        foreground_mask,
     )
 
 
@@ -441,6 +543,65 @@ def fit_patch_pca_projection_batches(
     rgb_percentile_bounds: tuple[float, float] | None = None,
 ) -> PatchPCAProjection:
     """Fit one approximate PCA projection from all embedding batches."""
+    _validate_batched_projection_request(
+        foreground_separation,
+        foreground_threshold,
+        foreground_side,
+        rgb_fit_scope,
+        rgb_percentile_bounds,
+    )
+    (
+        foreground_components,
+        foreground_minimum,
+        foreground_maximum,
+        resolved_foreground_threshold,
+    ) = _fit_foreground_projection_batches(
+        batch_factory,
+        foreground_separation,
+        foreground_threshold,
+    )
+    resolved_rgb_fit_scope: RGBFitScope = (
+        "all" if not foreground_separation else rgb_fit_scope
+    )
+    rgb_batches = (
+        batch_factory
+        if resolved_rgb_fit_scope == "all"
+        else _foreground_batch_factory(
+            batch_factory,
+            foreground_components,
+            foreground_minimum,
+            foreground_maximum,
+            resolved_foreground_threshold,
+            foreground_side,
+        )
+    )
+    rgb_components, rgb_minimum, rgb_maximum = _fit_rgb_projection_batches(
+        rgb_batches,
+        feature_count=int(foreground_components.shape[0]),
+        percentile_bounds=rgb_percentile_bounds,
+    )
+
+    return PatchPCAProjection(
+        foreground_components=foreground_components,
+        foreground_minimum=foreground_minimum,
+        foreground_maximum=foreground_maximum,
+        rgb_components=rgb_components,
+        rgb_minimum=rgb_minimum,
+        rgb_maximum=rgb_maximum,
+        foreground_threshold=resolved_foreground_threshold,
+        foreground_side=foreground_side,
+        rgb_fit_scope=resolved_rgb_fit_scope,
+        foreground_separation=foreground_separation,
+    )
+
+
+def _validate_batched_projection_request(
+    foreground_separation: bool,
+    foreground_threshold: ForegroundThreshold,
+    foreground_side: str,
+    rgb_fit_scope: str,
+    rgb_percentile_bounds: tuple[float, float] | None,
+) -> None:
     if not isinstance(foreground_separation, bool):
         raise ValueError("foreground_separation must be a boolean.")
     _validate_foreground_threshold(foreground_threshold)
@@ -450,6 +611,12 @@ def fit_patch_pca_projection_batches(
         raise ValueError("rgb_fit_scope must be one of: foreground, all.")
     _validate_percentile_bounds(rgb_percentile_bounds)
 
+
+def _fit_foreground_projection_batches(
+    batch_factory: Callable[[], Iterable[Any]],
+    foreground_separation: bool,
+    foreground_threshold: ForegroundThreshold,
+) -> tuple[Any, Any, Any, float]:
     if foreground_separation:
         foreground_components = _fit_batched_components(batch_factory, components=1)
         foreground_minimum, foreground_maximum = _streaming_projected_bounds(
@@ -474,7 +641,22 @@ def fit_patch_pca_projection_batches(
         foreground_minimum = torch.zeros(1, dtype=torch.float32)
         foreground_maximum = torch.zeros(1, dtype=torch.float32)
         foreground_threshold = 0.5
+    return (
+        foreground_components,
+        foreground_minimum,
+        foreground_maximum,
+        foreground_threshold,
+    )
 
+
+def _foreground_batch_factory(
+    batch_factory: Callable[[], Iterable[Any]],
+    foreground_components: Any,
+    foreground_minimum: Any,
+    foreground_maximum: Any,
+    foreground_threshold: float,
+    foreground_side: Literal["high", "low"],
+) -> Callable[[], Iterable[Any]]:
     def foreground_batches() -> Iterable[Any]:
         for embeddings in batch_factory():
             flattened = _flatten_embedding_batch(embeddings)
@@ -491,17 +673,20 @@ def fit_patch_pca_projection_batches(
             if mask.any():
                 yield flattened[mask]
 
-    resolved_rgb_fit_scope: RGBFitScope = (
-        "all" if not foreground_separation else rgb_fit_scope
-    )
-    rgb_batches = (
-        batch_factory if resolved_rgb_fit_scope == "all" else foreground_batches
-    )
+    return foreground_batches
+
+
+def _fit_rgb_projection_batches(
+    rgb_batches: Callable[[], Iterable[Any]],
+    *,
+    feature_count: int,
+    percentile_bounds: tuple[float, float] | None,
+) -> tuple[Any, Any, Any]:
     rgb_components = _fit_batched_components(
         rgb_batches,
         components=3,
         allow_empty=True,
-        feature_count=int(foreground_components.shape[0]),
+        feature_count=feature_count,
     )
     if rgb_components.shape[1] < 3:
         rgb_components = functional.pad(
@@ -509,7 +694,7 @@ def fit_patch_pca_projection_batches(
             (0, 3 - rgb_components.shape[1]),
         )
     if rgb_components.numel():
-        if rgb_percentile_bounds is None:
+        if percentile_bounds is None:
             rgb_minimum, rgb_maximum = _streaming_projected_bounds(
                 rgb_batches,
                 rgb_components,
@@ -519,25 +704,13 @@ def fit_patch_pca_projection_batches(
             rgb_minimum, rgb_maximum = _projected_percentile_bounds(
                 rgb_batches,
                 rgb_components,
-                rgb_percentile_bounds,
+                percentile_bounds,
                 allow_empty=True,
             )
     else:
         rgb_minimum = torch.zeros(3)
         rgb_maximum = torch.zeros(3)
-
-    return PatchPCAProjection(
-        foreground_components=foreground_components,
-        foreground_minimum=foreground_minimum,
-        foreground_maximum=foreground_maximum,
-        rgb_components=rgb_components,
-        rgb_minimum=rgb_minimum,
-        rgb_maximum=rgb_maximum,
-        foreground_threshold=foreground_threshold,
-        foreground_side=foreground_side,
-        rgb_fit_scope=resolved_rgb_fit_scope,
-        foreground_separation=foreground_separation,
-    )
+    return rgb_components, rgb_minimum, rgb_maximum
 
 
 def save_patch_pca_projection(
@@ -597,24 +770,7 @@ def load_patch_pca_projection(path: str | Path) -> PatchPCAProjection:
 
 
 def _patch_tokens_from_features(features: Any, patch_count: int) -> Any:
-    tokens = features
-    contains_only_patches = False
-    if isinstance(features, dict):
-        if "x_norm_patchtokens" in features:
-            tokens = features["x_norm_patchtokens"]
-            contains_only_patches = True
-        else:
-            for key in ("x_prenorm", "last_hidden_state", "x"):
-                if key in features:
-                    tokens = features[key]
-                    break
-            else:
-                available = ", ".join(sorted(str(key) for key in features))
-                raise ValueError(
-                    "Could not find patch tokens in model features. "
-                    f"Available keys: {available}."
-                )
-
+    tokens, contains_only_patches = _feature_tokens(features)
     if not hasattr(tokens, "ndim"):
         raise ValueError("Model forward_features did not return a tensor.")
     if tokens.ndim == 4:
@@ -640,6 +796,21 @@ def _patch_tokens_from_features(features: Any, patch_count: int) -> Any:
             f"Model returned {token_count} tokens; expected at least {patch_count}."
         )
     return tokens[:, prefix_token_count:]
+
+
+def _feature_tokens(features: Any) -> tuple[Any, bool]:
+    if isinstance(features, dict):
+        if "x_norm_patchtokens" in features:
+            return features["x_norm_patchtokens"], True
+        for key in ("x_prenorm", "last_hidden_state", "x"):
+            if key in features:
+                return features[key], False
+        available = ", ".join(sorted(str(key) for key in features))
+        raise ValueError(
+            "Could not find patch tokens in model features. "
+            f"Available keys: {available}."
+        )
+    return features, False
 
 
 def _fit_projection(
