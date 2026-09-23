@@ -6,6 +6,7 @@ from math import isfinite
 from pathlib import Path
 from typing import Any
 
+from vision_lens.config.media import partition_media_paths, split_media_configs
 from vision_lens.config.schema import (
     ALPHA_FORMAT_CHOICES,
     ANALYSIS_CONFIG_TYPES,
@@ -56,8 +57,22 @@ from vision_lens.output.artifacts import validate_artifact_paths
 
 def validate_config(config: VisionLensConfig) -> None:
     _validate_resolved_values(config)
+    image_paths, video_paths = partition_media_paths(config.input.paths)
+    if video_paths and config.video is None:
+        raise ValueError("Video inputs require resolved video settings.")
+    if not video_paths and config.video is not None:
+        raise ValueError("Video settings require at least one video input.")
+
     applicable = applicable_setting_keys(config)
     validate_canonical_settings(config, applicable)
+    if image_paths and video_paths:
+        validate_precision_device_pair(config.runtime.precision, config.runtime.device)
+        image_config, video_config = split_media_configs(config)
+        assert image_config is not None and video_config is not None
+        validate_config(image_config)
+        validate_config(video_config)
+        return
+
     validate_artifact_paths(config)
     validate_precision_device_pair(config.runtime.precision, config.runtime.device)
     _validate_video_workflow(config)
@@ -275,6 +290,9 @@ def _validate_input_values(input_config: InputConfig) -> None:
         _require_path(path, "input.paths")
         if not path.is_file():
             raise ValueError(f"Input file does not exist: {path}.")
+    image_paths, video_paths = partition_media_paths(input_config.paths)
+    if len(image_paths) + len(video_paths) != len(input_config.paths):
+        raise ValueError("input.paths contains an unsupported media type.")
 
 
 def _validate_model_values(model: ModelConfig) -> None:
@@ -317,7 +335,11 @@ def _validate_analysis_values(config: VisionLensConfig) -> None:
         _validate_gradcam_analysis_values(analysis)
     else:
         assert isinstance(analysis, PatchPCAAnalysisConfig)
-        _validate_patch_pca_analysis_values(analysis, is_video=config.video is not None)
+        image_paths, video_paths = partition_media_paths(config.input.paths)
+        _validate_patch_pca_analysis_values(
+            analysis,
+            is_video=bool(video_paths and not image_paths),
+        )
 
 
 def _validate_attention_analysis_values(
@@ -694,7 +716,18 @@ def validate_precision_device_pair(precision: str, device: str) -> None:
 
 
 def applicable_setting_keys(config: VisionLensConfig) -> dict[str, set[str]]:
-    is_video = config.video is not None
+    image_paths, video_paths = partition_media_paths(config.input.paths)
+    if image_paths and video_paths:
+        image_config, video_config = split_media_configs(config)
+        assert image_config is not None and video_config is not None
+        image_applicable = applicable_setting_keys(image_config)
+        video_applicable = applicable_setting_keys(video_config)
+        return {
+            section: image_applicable[section] | video_applicable[section]
+            for section in image_applicable
+        }
+
+    is_video = bool(video_paths)
     runtime = {"batch_size", "device", "precision", "seed"}
     if not is_video:
         runtime.add("workers")

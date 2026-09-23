@@ -9,6 +9,12 @@ from typing import Any, Literal
 
 import yaml
 
+from vision_lens.config.media import (
+    SUPPORTED_INPUT_EXTENSIONS,
+    media_count_summary,
+    media_kind,
+    partition_media_paths,
+)
 from vision_lens.config.schema import (
     ALPHA_FORMAT_CHOICES,
     ANALYSIS_DEFAULTS,
@@ -98,9 +104,13 @@ def parse_config(
         raise ValueError("overrides must be a mapping or None.")
     base = _project_root(Path.cwd()) if base_dir is None else Path(base_dir).resolve()
     resolved = _deep_merge(raw_config, overrides or {})
-    _validate_keys(resolved)
+    _validate_keys(resolved, is_video_only=False)
 
     input_section = config_section(resolved, "input")
+    input_config = _parse_input(input_section, base)
+    image_paths, video_paths = partition_media_paths(input_config.paths)
+    video_only = bool(video_paths and not image_paths)
+    _validate_keys(resolved, is_video_only=video_only)
     model_section = config_section(resolved, "model")
     preprocessing_section = config_section(resolved, "preprocessing")
     analysis_section = config_section(resolved, "analysis")
@@ -112,7 +122,7 @@ def parse_config(
     _reject_unknown_keys("analysis", analysis_section, ANALYSIS_KEYS[method])
 
     config = VisionLensConfig(
-        input=_parse_input(input_section, base),
+        input=input_config,
         model=ModelConfig(
             architecture=_required_str(model_section, "architecture", "model"),
             backend=_required_str(model_section, "backend", "model"),
@@ -181,7 +191,7 @@ def parse_config(
             analysis_section,
             method,
             base,
-            is_video="video" in resolved,
+            is_video=video_only,
         ),
         runtime=RuntimeConfig(
             device=_device(
@@ -325,7 +335,7 @@ def parse_config(
             ),
             grids=(
                 False
-                if "video" in resolved
+                if video_only
                 else _bool(
                     output_section.get("grids", SECTION_DEFAULTS["output"]["grids"]),
                     "output.grids",
@@ -357,7 +367,7 @@ def parse_config(
         ),
         video=(
             None
-            if "video" not in resolved
+            if not video_paths
             else VideoConfig(
                 start_time=_non_negative_number(
                     video_section.get(
@@ -435,13 +445,25 @@ def _parse_input(section: dict[str, Any], base_dir: Path) -> InputConfig:
         paths = ", ".join(str(path) for path in invalid_folders)
         raise ValueError(f"Input folder(s) do not exist: {paths}.")
 
+    unsupported_files = [path for path in files if media_kind(path) is None]
+    if unsupported_files:
+        paths = ", ".join(str(path) for path in unsupported_files)
+        extensions = ", ".join(sorted(SUPPORTED_INPUT_EXTENSIONS))
+        raise ValueError(
+            f"Unsupported input file type: {paths}. Supported extensions: {extensions}."
+        )
+
     selected = list(files)
     for folder in folders:
+        folder_matches: set[Path] = set()
         for pattern in patterns:
             matches = folder.rglob(pattern) if recursive else folder.glob(pattern)
-            selected.extend(
-                sorted(path.resolve() for path in matches if path.is_file())
+            folder_matches.update(
+                path.resolve()
+                for path in matches
+                if path.is_file() and media_kind(path) is not None
             )
+        selected.extend(sorted(folder_matches))
 
     unique = tuple(dict.fromkeys(selected))
     if limit is not None:
@@ -547,10 +569,10 @@ def _parse_analysis(
     )
 
 
-def _validate_keys(config: dict[str, Any]) -> None:
+def _validate_keys(config: dict[str, Any], *, is_video_only: bool) -> None:
     _reject_unknown_keys("top level", config, TOP_LEVEL_KEYS)
     for section_name, allowed in SECTION_KEYS.items():
-        if section_name == "output" and "video" in config:
+        if section_name == "output" and is_video_only:
             allowed = VIDEO_OUTPUT_KEYS
         _reject_unknown_keys(
             section_name,
@@ -979,7 +1001,9 @@ def config_to_dict(config: VisionLensConfig) -> dict[str, Any]:
 
 
 def resolved_config_yaml(config: VisionLensConfig) -> str:
-    return yaml.safe_dump(config_to_dict(config), sort_keys=False)
+    summary = media_count_summary(config.input.paths)
+    rendered = yaml.safe_dump(config_to_dict(config), sort_keys=False)
+    return f"# detected media: {summary}\n{rendered}"
 
 
 def _config_dataclass_to_dict(value: Any) -> dict[str, Any]:

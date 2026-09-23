@@ -1,6 +1,7 @@
 import json
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -60,6 +61,56 @@ def test_gradcam_rejects_target_class_outside_torchvision_output_range(tmp_path)
         match=r"target_class=2.*class range 0 through 1",
     ):
         run_pipeline_from_config(config, show_progress=False)
+
+
+def test_mixed_pipeline_dispatches_images_and_videos_separately(
+    monkeypatch,
+    tmp_path,
+):
+    from vision_lens import pipeline
+
+    image = tmp_path / "image.jpg"
+    video = tmp_path / "video.mp4"
+    image.touch()
+    video.touch()
+    config = parse_config(
+        {
+            "input": {"files": [str(image), str(video)]},
+            "model": {
+                "architecture": "vit",
+                "backend": "timm",
+                "name": "mock_vit",
+            },
+            "analysis": {"method": "attention", "layers": [0]},
+            "output": {"directory": str(tmp_path / "results")},
+        }
+    )
+    calls = []
+
+    def run_images(branch_config):
+        calls.append(("images", branch_config))
+        return SimpleNamespace(output_paths=(tmp_path / "image-output.png",))
+
+    def run_videos(branch_config):
+        calls.append(("videos", branch_config))
+        return SimpleNamespace(output_paths=(tmp_path / "video-output.mp4",))
+
+    monkeypatch.setattr(pipeline, "_dispatch_image_pipeline", run_images)
+    monkeypatch.setattr(pipeline._video_pipeline, "run_video_from_config", run_videos)
+
+    result = pipeline._dispatch_pipeline(config)
+
+    assert isinstance(result, pipeline.MixedPipelineResult)
+    assert result.output_paths == (
+        tmp_path / "image-output.png",
+        tmp_path / "video-output.mp4",
+    )
+    assert calls[0][0] == "images"
+    assert calls[0][1].input.paths == (image,)
+    assert calls[0][1].output.directory == tmp_path / "results" / "images"
+    assert calls[1][0] == "videos"
+    assert calls[1][1].input.paths == (video,)
+    assert calls[1][1].output.directory == (tmp_path / "results" / "videos" / "video")
 
 
 def test_vit_pipeline_exports_figures_with_mocked_model(monkeypatch, tmp_path):

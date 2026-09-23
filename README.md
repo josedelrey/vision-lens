@@ -181,14 +181,28 @@ uv run vision-lens run --config configs/attention.dino_vits8.yaml --input-limit 
 
 The repeatable `--set section.key=value` form is also supported. The CLI provides `validate` to check the merged configuration without loading a model and `resolve` to print all resolved settings. See the [configuration reference](docs/configuration.md) for every setting, precedence, and compatibility rule.
 
-To process a video, point `input.files` to it and add a `video` section:
+Image and video inputs are detected automatically. To process a video, point
+`input.files` to it:
 
 ```yaml
 input:
   files: [/path/to/your/video.mp4]
+```
 
+The optional `video` section only overrides video-processing defaults:
+
+```yaml
 video:
   sampling_rate: auto
+```
+
+Folders can contain images, videos, or both. Supported media files are selected
+automatically and unrelated files are ignored:
+
+```yaml
+input:
+  folders: [/path/to/your/media]
+  recursive: true
 ```
 
 Standard video outputs are silent MP4 files. Transparent overlays can also be exported as ProRes 4444 MOV or VP9 WebM files; the [video reference](docs/configuration.md#video) covers sampling and encoding.
@@ -217,11 +231,11 @@ output:
   directory: outputs/attention
 ```
 
-The examples in [`configs/`](configs/) cover all four methods. Inputs may be explicit files or files selected from folders. A `video` section enables timestamp-based frame sampling. Relative paths resolve from the nearest project root containing `pyproject.toml`, falling back to the working directory.
+The examples in [`configs/`](configs/) cover all four methods. Inputs may be explicit files or files selected from folders. Media types are detected automatically; a `video` section is needed only to customize timestamp sampling or encoding. Relative paths resolve from the nearest project root containing `pyproject.toml`, falling back to the working directory.
 
 ### Outputs
 
-Depending on the workflow, Vision Lens writes heatmaps or PCA color maps, flattened or transparent overlays, comparison grids, video streams, and optional raw arrays. Each completed image or single-video run writes `run-manifest.json` with its configuration, model and runtime details, inputs, and output paths. Multiple videos receive separate directories and manifests.
+Depending on the workflow, Vision Lens writes heatmaps or PCA color maps, flattened or transparent overlays, comparison grids, video streams, and optional raw arrays. Each completed image or single-video run writes `run-manifest.json` with its configuration, model and runtime details, inputs, and output paths. Multiple videos receive separate directories and manifests. Mixed runs write the grouped image run under `images/` and each video under `videos/<name>/`.
 
 Grid layout, output size, interpolation, colormap, normalization, and overwrite behavior are configurable.
 

@@ -16,6 +16,7 @@ from vision_lens.config import (
     resolved_config_yaml,
     validate_config,
 )
+from vision_lens.config.media import split_media_configs
 from vision_lens.output.artifacts import artifact_plan, grid_page_path
 
 
@@ -145,6 +146,120 @@ def test_video_settings_apply_documented_defaults(tmp_path):
     assert config.video.temporal_smoothing == 0
     assert config.video.codec == "libx264"
     assert config.video.alpha_format == "prores_4444"
+
+
+def test_video_input_is_detected_without_video_section(tmp_path):
+    source = tmp_path / "clip.MP4"
+    source.touch()
+    raw = _minimal_config()
+    raw["input"] = {"files": [str(source)]}
+
+    config = parse_config(raw)
+
+    assert config.video is not None
+    assert config.video.sampling_rate == 5
+    assert config.output.grids is False
+    assert "video" in config_to_dict(config)
+
+
+def test_default_folder_discovery_selects_images_and_videos(tmp_path):
+    media = tmp_path / "media"
+    media.mkdir()
+    image = media / "image.JPG"
+    video = media / "video.WebM"
+    image.touch()
+    video.touch()
+    (media / "notes.txt").touch()
+    raw = _minimal_config()
+    raw["input"] = {"folders": [str(media)]}
+    raw["output"]["directory"] = str(tmp_path / "results")
+
+    config = parse_config(raw)
+    image_config, video_config = split_media_configs(config)
+
+    assert config.input.paths == (image, video)
+    assert image_config is not None
+    assert image_config.input.paths == (image,)
+    assert image_config.output.directory == tmp_path / "results" / "images"
+    assert video_config is not None
+    assert video_config.input.paths == (video,)
+    assert video_config.output.directory == (tmp_path / "results" / "videos" / "video")
+    plan = artifact_plan(config)
+    assert plan.output_directories == frozenset(
+        {
+            tmp_path / "results" / "images",
+            tmp_path / "results" / "videos" / "video",
+        }
+    )
+
+
+def test_mixed_inputs_keep_image_and_video_specific_settings(tmp_path):
+    image = tmp_path / "image.jpg"
+    video = tmp_path / "video.mov"
+    image.touch()
+    video.touch()
+    raw = _minimal_config()
+    raw["input"] = {"files": [str(image), str(video)]}
+    raw["preprocessing"] = {"resize": "longest", "pad": "center"}
+    raw["runtime"] = {"workers": 2}
+    raw["video"] = {"sampling_rate": "auto"}
+    raw["output"].update(
+        {"directory": str(tmp_path / "results"), "image_format": "webp"}
+    )
+
+    config = parse_config(raw)
+    image_config, video_config = split_media_configs(config)
+
+    assert image_config is not None
+    assert image_config.preprocessing.resize == "longest"
+    assert image_config.preprocessing.pad == "center"
+    assert image_config.runtime.workers == 2
+    assert image_config.output.image_format == "webp"
+    assert video_config is not None
+    assert video_config.preprocessing.resize == "stretch"
+    assert video_config.preprocessing.pad == "none"
+    assert video_config.runtime.workers == 0
+    assert video_config.output.image_format == "png"
+    assert video_config.video is not None
+    assert video_config.video.sampling_rate == "auto"
+
+
+def test_explicit_unsupported_input_type_is_rejected(tmp_path):
+    source = tmp_path / "notes.txt"
+    source.touch()
+    raw = _minimal_config()
+    raw["input"] = {"files": [str(source)]}
+
+    with pytest.raises(ValueError, match="Unsupported input file type"):
+        parse_config(raw)
+
+
+def test_mixed_patch_pca_derives_media_specific_analysis(tmp_path):
+    image = tmp_path / "image.png"
+    video = tmp_path / "video.mkv"
+    image.touch()
+    video.touch()
+    projection = tmp_path / "projection.npz"
+    raw = _minimal_config(method="patch_pca")
+    raw["input"] = {"files": [str(image), str(video)]}
+    raw["analysis"]["save_projection"] = str(projection)
+    raw["output"] = {
+        "directory": str(tmp_path / "results"),
+        "heatmaps": False,
+        "grids": False,
+    }
+
+    config = parse_config(raw)
+    image_config, video_config = split_media_configs(config)
+
+    assert image_config is not None
+    assert isinstance(image_config.analysis, PatchPCAAnalysisConfig)
+    assert image_config.analysis.foreground_separation is True
+    assert image_config.analysis.save_projection == tmp_path / "projection_images.npz"
+    assert video_config is not None
+    assert isinstance(video_config.analysis, PatchPCAAnalysisConfig)
+    assert video_config.analysis.foreground_separation is None
+    assert video_config.analysis.save_projection == projection
 
 
 @pytest.mark.parametrize(

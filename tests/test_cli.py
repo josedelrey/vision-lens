@@ -89,7 +89,7 @@ def test_cli_supports_set_only_configuration(capsys, tmp_path):
         == 0
     )
 
-    assert capsys.readouterr().out == "configuration is valid\n"
+    assert capsys.readouterr().out == ("configuration is valid (1 image, 0 videos)\n")
 
 
 def test_cli_supports_named_flags_without_config(capsys, tmp_path):
@@ -188,6 +188,40 @@ def test_video_flag_adds_default_video_section(capsys, tmp_path):
     )
 
     output = capsys.readouterr().out
+    assert output.startswith("# detected media: 0 images, 1 video\n")
+    assert "video:" in output
+    assert "sampling_rate: 5.0" in output
+
+
+def test_video_input_adds_default_video_settings_automatically(capsys, tmp_path):
+    source = tmp_path / "input.mp4"
+    source.touch()
+
+    assert (
+        main(
+            [
+                "resolve",
+                "--input-files",
+                f"[{source}]",
+                "--model-architecture",
+                "vit",
+                "--model-backend",
+                "timm",
+                "--model-name",
+                "mock_vit",
+                "--analysis-method",
+                "attention",
+                "--analysis-layers",
+                "[0]",
+                "--output-directory",
+                str(tmp_path / "results"),
+            ]
+        )
+        == 0
+    )
+
+    output = capsys.readouterr().out
+    assert output.startswith("# detected media: 0 images, 1 video\n")
     assert "video:" in output
     assert "sampling_rate: 5.0" in output
 
@@ -276,7 +310,7 @@ def test_cli_hides_individual_output_paths_by_default(monkeypatch, capsys, confi
 
 def test_cli_validates_without_running_a_model(capsys, config_path):
     assert main(["validate", "--config", str(config_path)]) == 0
-    assert capsys.readouterr().out == "configuration is valid\n"
+    assert capsys.readouterr().out == ("configuration is valid (1 image, 0 videos)\n")
 
 
 def test_cli_validation_does_not_import_pipeline_modules(
@@ -292,7 +326,7 @@ def test_cli_validation_does_not_import_pipeline_modules(
     monkeypatch.setattr(builtins, "__import__", guarded_import)
 
     assert main(["validate", "--config", str(config_path)]) == 0
-    assert capsys.readouterr().out == "configuration is valid\n"
+    assert capsys.readouterr().out == ("configuration is valid (1 image, 0 videos)\n")
 
 
 def test_cli_prints_resolved_configuration(capsys, config_path):

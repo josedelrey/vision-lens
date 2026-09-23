@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from vision_lens.config.media import partition_media_paths, split_media_configs
 from vision_lens.config.schema import (
     ALPHA_FORMAT_EXTENSIONS,
     KNOWN_VIT_DEPTHS,
@@ -211,6 +212,24 @@ def video_run_layouts(config: VisionLensConfig) -> tuple[VideoRunLayout, ...]:
 
 
 def artifact_plan(config: VisionLensConfig) -> ArtifactPlan:
+    image_paths, video_paths = partition_media_paths(config.input.paths)
+    if image_paths and video_paths:
+        image_config, video_config = split_media_configs(config)
+        assert image_config is not None and video_config is not None
+        plans = (artifact_plan(image_config), artifact_plan(video_config))
+        return ArtifactPlan(
+            output_directories=frozenset(
+                directory for plan in plans for directory in plan.output_directories
+            ),
+            exact_paths=frozenset(path for plan in plans for path in plan.exact_paths),
+            reserved_patterns=tuple(
+                pattern for plan in plans for pattern in plan.reserved_patterns
+            ),
+            non_projection_paths=frozenset(
+                path for plan in plans for path in plan.non_projection_paths
+            ),
+        )
+
     exact_paths: set[Path] = set()
     projection_paths: set[Path] = set()
     patterns: list[ArtifactPattern] = []
@@ -248,6 +267,14 @@ def artifact_plan(config: VisionLensConfig) -> ArtifactPlan:
 
 
 def validate_artifact_paths(config: VisionLensConfig) -> None:
+    image_paths, video_paths = partition_media_paths(config.input.paths)
+    if image_paths and video_paths:
+        image_config, video_config = split_media_configs(config)
+        assert image_config is not None and video_config is not None
+        validate_artifact_paths(image_config)
+        validate_artifact_paths(video_config)
+        return
+
     plan = artifact_plan(config)
     for directory in plan.output_directories:
         _validate_output_directory(directory)
