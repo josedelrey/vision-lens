@@ -40,6 +40,17 @@ Vision Lens visualizes pretrained vision models on images and sampled video fram
 
 **Figure 1.** Patch PCA of two horse images across the selected interpolation modes.
 
+## Methods
+
+| Method | Output | Model family |
+|---|---|---|
+| Attention | Spatial maps from selected transformer layers and heads | Vision Transformer via `timm` |
+| Rollout | Attention propagated through successive transformer layers | Vision Transformer via `timm` |
+| Grad-CAM | Class-specific activation maps | CNN via `torchvision` |
+| Patch PCA | RGB projection of patch embeddings, with optional image foreground selection | Vision Transformer via `timm` |
+
+These outputs are diagnostic views of model behavior, not causal explanations. PCA colors show feature variation rather than semantic classes.
+
 <table border="0" cellspacing="0" style="border: 0; border-collapse: collapse;">
   <thead>
     <tr style="background: transparent; border: 0;">
@@ -121,38 +132,6 @@ Vision Lens visualizes pretrained vision models on images and sampled video fram
 
 **Figure 2.** Mean-head attention heatmaps from layers 2, 5, 8, and 11 of DINOv2 ViT-S/14 with registers, rendered with AnyUp.
 
-<table border="0" cellspacing="0" style="border: 0; border-collapse: collapse;">
-  <thead>
-    <tr style="background: transparent; border: 0;">
-      <th style="border: 0;"><div align="center">Layer 2</div></th>
-      <th style="border: 0;"><div align="center">Layer 5</div></th>
-      <th style="border: 0;"><div align="center">Layer 8</div></th>
-      <th style="border: 0;"><div align="center">Layer 11</div></th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr style="background: transparent; border: 0;">
-      <td align="center" style="border: 0;"><img src="assets/attention/example-6-layer-2-overlay.png" alt="Example 6 attention overlay at layer 2" width="240"></td>
-      <td align="center" style="border: 0;"><img src="assets/attention/example-6-layer-5-overlay.png" alt="Example 6 attention overlay at layer 5" width="240"></td>
-      <td align="center" style="border: 0;"><img src="assets/attention/example-6-layer-8-overlay.png" alt="Example 6 attention overlay at layer 8" width="240"></td>
-      <td align="center" style="border: 0;"><img src="assets/attention/example-6-layer-11-overlay.png" alt="Example 6 attention overlay at layer 11" width="240"></td>
-    </tr>
-  </tbody>
-</table>
-
-**Figure 3.** Mean-head attention overlays for example 6 at layers 2, 5, 8, and 11 of DINOv2 ViT-S/14 with registers, rendered with bilinear interpolation.
-
-## Methods
-
-| Method | Output | Model family |
-|---|---|---|
-| Attention | Spatial maps from selected transformer layers and heads | Vision Transformer via `timm` |
-| Rollout | Attention propagated through successive transformer layers | Vision Transformer via `timm` |
-| Grad-CAM | Class-specific activation maps | CNN via `torchvision` |
-| Patch PCA | RGB projection of patch embeddings, with optional image foreground selection | Vision Transformer via `timm` |
-
-These outputs are diagnostic views of model behavior, not causal explanations. PCA colors show feature variation rather than semantic classes.
-
 ## Install
 
 Vision Lens is distributed from this repository and supports Linux with Python
@@ -170,13 +149,34 @@ Use `uv sync --locked --extra video` instead when video decoding or export is ne
 
 ## Run
 
-Run an image workflow from the repository root:
+Run an image workflow entirely from command-line options:
 
 ```bash
-uv run vision-lens run --config configs/attention.dino_vits8.yaml --set input.limit=1
+uv run vision-lens run \
+  --input-folders '[examples]' \
+  --model-architecture vit \
+  --model-backend timm \
+  --model-name vit_small_patch8_224.dino \
+  --preprocessing-image-size 224 \
+  --preprocessing-interpolation bilinear \
+  --analysis-method attention \
+  --analysis-layers '[2, 5, 8, 11]' \
+  --visualization-output-size match \
+  --visualization-interpolation nearest \
+  --visualization-overlay-alpha 1.0 \
+  --visualization-cmap-black '{threshold: 20, blend_width: 35, transparent: true}' \
+  --output-directory outputs/image/dino_vits8/attention \
+  --output-transparent-overlays true \
+  --output-overwrite replace
 ```
 
-Runs use a YAML configuration plus optional `--set section.key=value` overrides. The CLI also provides `validate` to check a configuration without loading a model and `resolve` to print all resolved settings. See the [configuration reference](docs/configuration.md) for every setting and compatibility rule.
+Every configuration setting has a `--section-key` flag. YAML files remain optional reusable bases, and command-line values override them:
+
+```bash
+uv run vision-lens run --config configs/attention.dino_vits8.yaml --input-limit 1
+```
+
+The repeatable `--set section.key=value` form is also supported. The CLI provides `validate` to check the merged configuration without loading a model and `resolve` to print all resolved settings. See the [configuration reference](docs/configuration.md) for every setting, precedence, and compatibility rule.
 
 To process a video, point `input.files` to it and add a `video` section:
 
@@ -221,6 +221,27 @@ The examples in [`configs/`](configs/) cover all four methods. Inputs may be exp
 Depending on the workflow, Vision Lens writes heatmaps or PCA color maps, flattened or transparent overlays, comparison grids, video streams, and optional raw arrays. Each completed image or single-video run writes `run-manifest.json` with its configuration, model and runtime details, inputs, and output paths. Multiple videos receive separate directories and manifests.
 
 Grid layout, output size, interpolation, colormap, normalization, and overwrite behavior are configurable.
+
+<table border="0" cellspacing="0" style="border: 0; border-collapse: collapse;">
+  <thead>
+    <tr style="background: transparent; border: 0;">
+      <th style="border: 0;"><div align="center">Layer 2</div></th>
+      <th style="border: 0;"><div align="center">Layer 5</div></th>
+      <th style="border: 0;"><div align="center">Layer 8</div></th>
+      <th style="border: 0;"><div align="center">Layer 11</div></th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr style="background: transparent; border: 0;">
+      <td align="center" style="border: 0;"><img src="assets/attention/example-6-layer-2-overlay.png" alt="Example 6 attention overlay at layer 2" width="240"></td>
+      <td align="center" style="border: 0;"><img src="assets/attention/example-6-layer-5-overlay.png" alt="Example 6 attention overlay at layer 5" width="240"></td>
+      <td align="center" style="border: 0;"><img src="assets/attention/example-6-layer-8-overlay.png" alt="Example 6 attention overlay at layer 8" width="240"></td>
+      <td align="center" style="border: 0;"><img src="assets/attention/example-6-layer-11-overlay.png" alt="Example 6 attention overlay at layer 11" width="240"></td>
+    </tr>
+  </tbody>
+</table>
+
+**Figure 3.** Mean-head attention overlays for example 6 at layers 2, 5, 8, and 11 of DINOv2 ViT-S/14 with registers, rendered with bilinear interpolation.
 
 ## Python API
 

@@ -1317,11 +1317,15 @@ def test_runtime_seed_must_fit_numpy_seed_range():
         parse_config(raw)
 
 
-def test_overrides_cannot_switch_conditional_modes():
+def test_overrides_are_merged_before_conditional_validation():
     raw = _minimal_config(method="patch_pca")
 
-    with pytest.raises(ValueError, match="cannot switch conditional mode.*projection"):
-        parse_config(raw, overrides={"analysis": {"projection": "load"}})
+    config = parse_config(
+        raw,
+        overrides={"analysis": {"foreground_separation": False}},
+    )
+
+    assert config.analysis.foreground_separation is False
 
 
 def test_video_rejects_managed_dynamic_image_size_option(tmp_path):
