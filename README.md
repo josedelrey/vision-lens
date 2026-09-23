@@ -121,6 +121,27 @@ Vision Lens visualizes pretrained vision models on images and sampled video fram
 
 **Figure 2.** Mean-head attention heatmaps from layers 2, 5, 8, and 11 of DINOv2 ViT-S/14 with registers, rendered with AnyUp.
 
+<table border="0" cellspacing="0" style="border: 0; border-collapse: collapse;">
+  <thead>
+    <tr style="background: transparent; border: 0;">
+      <th style="border: 0;"><div align="center">Layer 2</div></th>
+      <th style="border: 0;"><div align="center">Layer 5</div></th>
+      <th style="border: 0;"><div align="center">Layer 8</div></th>
+      <th style="border: 0;"><div align="center">Layer 11</div></th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr style="background: transparent; border: 0;">
+      <td align="center" style="border: 0;"><img src="assets/attention/example-6-layer-2-overlay.png" alt="Example 6 attention overlay at layer 2" width="240"></td>
+      <td align="center" style="border: 0;"><img src="assets/attention/example-6-layer-5-overlay.png" alt="Example 6 attention overlay at layer 5" width="240"></td>
+      <td align="center" style="border: 0;"><img src="assets/attention/example-6-layer-8-overlay.png" alt="Example 6 attention overlay at layer 8" width="240"></td>
+      <td align="center" style="border: 0;"><img src="assets/attention/example-6-layer-11-overlay.png" alt="Example 6 attention overlay at layer 11" width="240"></td>
+    </tr>
+  </tbody>
+</table>
+
+**Figure 3.** Mean-head attention overlays for example 6 at layers 2, 5, 8, and 11 of DINOv2 ViT-S/14 with registers, rendered with bilinear interpolation.
+
 ## Methods
 
 | Method | Output | Model family |

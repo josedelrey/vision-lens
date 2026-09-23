@@ -31,6 +31,7 @@ from vision_lens.config.schema import (
     RAW_FORMAT_CHOICES,
     RESIZE_CHOICES,
     RGB_FIT_SCOPE_CHOICES,
+    ROLLOUT_GRID_CHOICES,
     SECTION_DEFAULTS,
     SECTION_KEYS,
     TOP_LEVEL_KEYS,
@@ -278,6 +279,14 @@ def parse_config(
                 visualization_section.get(
                     "grid_format", SECTION_DEFAULTS["visualization"]["grid_format"]
                 )
+            ),
+            rollout_grid=_choice(
+                visualization_section.get(
+                    "rollout_grid",
+                    SECTION_DEFAULTS["visualization"]["rollout_grid"],
+                ),
+                "visualization.rollout_grid",
+                ROLLOUT_GRID_CHOICES,
             ),
             normalization=_choice(
                 visualization_section.get(

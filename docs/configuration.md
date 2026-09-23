@@ -72,6 +72,18 @@ analysis:
 | `analysis.heads` | all heads | Nonempty list of head indices. For rollout, affects image comparison grids only. |
 | `analysis.head_fusion` | `mean` | `mean`, `max`, or `none`. For rollout, affects image comparison grids only. |
 
+For rollout image grids, choose whether to show rollout maps alone or compare them
+with direct layer attention:
+
+```yaml
+visualization:
+  rollout_grid: rollout
+```
+
+`visualization.rollout_grid` accepts `comparison` (the default) or `rollout`.
+The `analysis.heads` and `analysis.head_fusion` settings are applicable to rollout
+only when `rollout_grid: comparison`, because they control the direct-attention row.
+
 ### Grad-CAM
 
 ```yaml
@@ -138,6 +150,7 @@ The grid settings below apply only to image runs with `output.grids: true`. Patc
 | `visualization.background` | workflow default | Grid background color. |
 | `visualization.dpi` | workflow default | Grid DPI. |
 | `visualization.grid_format` | `png` | `png`, `pdf`, or `svg`. |
+| `visualization.rollout_grid` | `comparison` | For rollout image grids, `comparison` includes direct attention or `rollout` shows rollout maps only. |
 | `visualization.output_size` | model-processed size | `match` for source dimensions, a positive square size, or `[width, height]`. |
 
 Video output dimensions must be even. `output_size: match` renders at model resolution, then resizes the completed visualization to source dimensions. Set an explicit size to perform AnyUp interpolation at that resolution.

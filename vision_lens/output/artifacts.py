@@ -14,6 +14,7 @@ from vision_lens.config.schema import (
     AttentionAnalysisConfig,
     PatchPCAAnalysisConfig,
     RolloutAnalysisConfig,
+    RolloutGrid,
     VisionLensConfig,
 )
 
@@ -120,8 +121,9 @@ def rollout_image_stem(label: str, layer_index: int) -> str:
     return f"{label}_rollout-{layer_index}"
 
 
-def rollout_grid_stem(label: str) -> str:
-    return f"{label}_rollout_comparison"
+def rollout_grid_stem(label: str, mode: RolloutGrid = "comparison") -> str:
+    suffix = "rollout_comparison" if mode == "comparison" else "rollout_layers"
+    return f"{label}_{suffix}"
 
 
 def gradcam_image_stem(label: str) -> str:
@@ -398,9 +400,12 @@ def _image_artifact_patterns(
             raw_extension,
         )
         if config.output.grids:
-            patterns.append(
-                rf"(?:{labels})_rollout_comparison{layer_page}\.{grid_extension}"
+            grid_stem = (
+                "rollout_comparison"
+                if config.visualization.rollout_grid == "comparison"
+                else "rollout_layers"
             )
+            patterns.append(rf"(?:{labels})_{grid_stem}{layer_page}\.{grid_extension}")
         return tuple(re.compile(pattern) for pattern in patterns)
 
     heads = _attention_head_pattern(

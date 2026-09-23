@@ -31,6 +31,7 @@ from vision_lens.config.schema import (
     RAW_FORMAT_CHOICES,
     RESIZE_CHOICES,
     RGB_FIT_SCOPE_CHOICES,
+    ROLLOUT_GRID_CHOICES,
     SECTION_DEFAULTS,
     SECTION_KEYS,
     SOFT_ANYUP_INTERPOLATIONS,
@@ -467,6 +468,11 @@ def _validate_visualization_rendering_values(
         GRID_FORMAT_CHOICES,
     )
     _require_choice(
+        visualization.rollout_grid,
+        "visualization.rollout_grid",
+        ROLLOUT_GRID_CHOICES,
+    )
+    _require_choice(
         visualization.normalization,
         "visualization.normalization",
         NORMALIZATION_CHOICES,
@@ -724,7 +730,11 @@ def _applicable_analysis_keys(
 ) -> set[str]:
     method = config.analysis.method
     analysis = set(ANALYSIS_KEYS[method])
-    if method == "rollout" and (is_video or not config.output.grids):
+    if method == "rollout" and (
+        is_video
+        or not config.output.grids
+        or config.visualization.rollout_grid != "comparison"
+    ):
         analysis.difference_update({"heads", "head_fusion"})
     elif isinstance(config.analysis, PatchPCAAnalysisConfig):
         if config.analysis.projection == "load":
@@ -772,6 +782,8 @@ def _applicable_visualization_keys(
             visualization.update({"overlay_alpha", "overlay_alpha_curve"})
     if not is_video and config.output.grids:
         visualization.update(GRID_VISUALIZATION_KEYS)
+        if method == "rollout":
+            visualization.add("rollout_grid")
         if method == "patch_pca":
             visualization.discard("labels")
     return visualization
