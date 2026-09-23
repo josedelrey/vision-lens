@@ -27,6 +27,7 @@ VisualizationInterpolation = Literal[
     "anyup_soft_mask",
 ]
 GridFormat = Literal["pdf", "png", "svg"]
+RolloutGrid = Literal["comparison", "rollout"]
 NormalizationMode = Literal["per_map", "shared", "fixed"]
 ImageFormat = Literal["jpeg", "png", "tiff", "webp"]
 AlphaFormat = Literal["prores_4444", "vp9"]
@@ -45,6 +46,7 @@ RGB_FIT_SCOPE_CHOICES = frozenset(get_args(RGBFitScope))
 PROJECTION_CHOICES = frozenset(get_args(ProjectionMode))
 VISUALIZATION_INTERPOLATION_CHOICES = frozenset(get_args(VisualizationInterpolation))
 GRID_FORMAT_CHOICES = frozenset(get_args(GridFormat))
+ROLLOUT_GRID_CHOICES = frozenset(get_args(RolloutGrid))
 NORMALIZATION_CHOICES = frozenset(get_args(NormalizationMode))
 IMAGE_FORMAT_CHOICES = frozenset(get_args(ImageFormat))
 ALPHA_FORMAT_CHOICES = frozenset(get_args(AlphaFormat))
@@ -186,6 +188,7 @@ class VisualizationConfig:
     cmap: str = "viridis"
     cmap_black: tuple[int, int, bool] | None = None
     grid_format: GridFormat = "png"
+    rollout_grid: RolloutGrid = "comparison"
     normalization: NormalizationMode = "per_map"
     normalization_range: tuple[float, float] | None = None
     overlay_alpha_curve: OverlayAlphaCurveSpec | None = None

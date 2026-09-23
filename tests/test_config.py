@@ -70,6 +70,7 @@ def test_parse_config_applies_documented_defaults():
     assert config.visualization.anyup_query_chunk_size is None
     assert config.visualization.cmap == "viridis"
     assert config.visualization.grid_format == "png"
+    assert config.visualization.rollout_grid == "comparison"
     assert config.visualization.columns is None
     assert config.visualization.items_per_grid is None
     assert config.visualization.normalization == "per_map"
@@ -1199,6 +1200,17 @@ def test_artifact_plan_only_reserves_possible_grid_pages(tmp_path):
     assert not plan.matches(tmp_path / "layer-0_images_heads-mean_part-999.png")
 
 
+def test_artifact_plan_uses_rollout_only_grid_name(tmp_path):
+    raw = _minimal_config(method="rollout")
+    raw["output"]["directory"] = str(tmp_path)
+    raw["visualization"]["rollout_grid"] = "rollout"
+
+    plan = artifact_plan(parse_config(raw))
+
+    assert plan.matches(tmp_path / "1_rollout_layers.png")
+    assert not plan.matches(tmp_path / "1_rollout_comparison.png")
+
+
 def test_artifact_plan_uses_known_model_dimensions_for_all_selections(tmp_path):
     raw = _minimal_config()
     raw["model"]["name"] = "hf_hub:timm/vit_small_patch14_reg4_dinov2.lvd142m"
@@ -1421,6 +1433,43 @@ def test_workflow_specific_no_op_settings_are_rejected(tmp_path):
     gridless_rollout["output"]["grids"] = False
     with pytest.raises(ValueError, match="analysis.head_fusion.*not applicable"):
         parse_config(gridless_rollout)
+
+    rollout_only = _minimal_config(method="rollout")
+    rollout_only["visualization"]["rollout_grid"] = "rollout"
+    rollout_only["analysis"]["heads"] = [0]
+    with pytest.raises(ValueError, match="analysis.heads.*not applicable"):
+        parse_config(rollout_only)
+
+    attention = _minimal_config()
+    attention["visualization"]["rollout_grid"] = "rollout"
+    with pytest.raises(ValueError, match="visualization.rollout_grid.*not applicable"):
+        parse_config(attention)
+
+    gridless_rollout = _minimal_config(method="rollout")
+    gridless_rollout["visualization"]["rollout_grid"] = "rollout"
+    gridless_rollout["output"]["grids"] = False
+    with pytest.raises(ValueError, match="visualization.rollout_grid.*not applicable"):
+        parse_config(gridless_rollout)
+
+
+def test_rollout_only_grid_mode_is_parsed_and_serialized():
+    raw = _minimal_config(method="rollout")
+    raw["visualization"]["rollout_grid"] = "rollout"
+
+    config = parse_config(raw)
+
+    assert config.visualization.rollout_grid == "rollout"
+    assert config_to_dict(config)["visualization"]["rollout_grid"] == "rollout"
+    assert "heads" not in config_to_dict(config)["analysis"]
+    assert "head_fusion" not in config_to_dict(config)["analysis"]
+
+
+def test_rollout_grid_mode_rejects_unknown_value():
+    raw = _minimal_config(method="rollout")
+    raw["visualization"]["rollout_grid"] = "both"
+
+    with pytest.raises(ValueError, match="visualization.rollout_grid must be one of"):
+        parse_config(raw)
 
 
 def test_patch_pca_rejects_unsupported_overlay_output():

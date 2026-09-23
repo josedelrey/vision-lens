@@ -228,6 +228,157 @@ def test_rollout_grid_caps_requested_columns_to_available_layer_pairs():
     assert labels == ["layer 0", "layer 1", "rollout 0", "rollout 1"]
 
 
+def test_rollout_only_grid_items_exclude_layer_attention():
+    from vision_lens.pipeline.image import _rollout_grid_items
+
+    images, labels, columns = _rollout_grid_items(
+        image=Image.new("RGB", (4, 4), "white"),
+        layer_attention=None,
+        rollout=_attention_result(layer_indices=(0, 1, 2, 3, 4)),
+        image_index=0,
+        alpha=0.35,
+        cmap="viridis",
+    )
+
+    assert len(images) == 5
+    assert labels == [
+        "rollout 0",
+        "rollout 1",
+        "rollout 2",
+        "rollout 3",
+        "rollout 4",
+    ]
+    assert columns == 4
+
+
+def test_rollout_only_export_accepts_no_layer_attention(tmp_path):
+    rollout = _attention_result(layer_indices=(0, 1))
+
+    paths = export_rollout_comparison_outputs(
+        images=[Image.new("RGB", (4, 4), "white")],
+        image_paths=(Path("example.jpg"),),
+        layer_attention=None,
+        rollout=rollout,
+        output_dir=tmp_path,
+        alpha=0.35,
+        cmap="viridis",
+        grid_format="png",
+        output_config=OutputConfig(
+            tmp_path,
+            heatmaps=False,
+            overlays=False,
+            grids=True,
+        ),
+        visualization_config=VisualizationConfig(rollout_grid="rollout"),
+    )
+
+    assert [path.name for path in paths] == ["example_rollout_layers.png"]
+    assert paths[0].is_file()
+
+
+def test_rollout_only_pipeline_skips_direct_attention_extraction(
+    monkeypatch,
+    tmp_path,
+):
+    from vision_lens.analysis import attention as attention_analysis
+    from vision_lens.media.processing import InputBatch, PreprocessedBatch
+    from vision_lens.pipeline import image as image_pipeline
+
+    source = tmp_path / "input.jpg"
+    source.touch()
+    config = parse_config(
+        {
+            "input": {"files": [str(source)]},
+            "model": {
+                "architecture": "vit",
+                "backend": "timm",
+                "name": "mock_vit",
+                "pretrained": False,
+            },
+            "analysis": {"method": "rollout", "layers": [0]},
+            "visualization": {"rollout_grid": "rollout"},
+            "output": {
+                "directory": str(tmp_path / "results"),
+                "heatmaps": False,
+                "overlays": False,
+                "grids": True,
+            },
+        }
+    )
+    loaded_model = LoadedModel(
+        model=object(),
+        metadata=ModelMetadata(
+            architecture="vit",
+            backend="timm",
+            name="mock_vit",
+            pretrained=False,
+            device="cpu",
+            input_size=(3, 4, 4),
+            image_size=(4, 4),
+            patch_size=(2, 2),
+            num_classes=2,
+            data_config={"mean": (0.0, 0.0, 0.0), "std": (1.0, 1.0, 1.0)},
+        ),
+    )
+    image = Image.new("RGB", (4, 4), "white")
+    input_batch = InputBatch(
+        index=0,
+        count=1,
+        paths=(source,),
+        labels=("input",),
+        images=(image,),
+    )
+    preprocessed = PreprocessedBatch(
+        source=input_batch,
+        inputs=torch.ones(1, 3, 4, 4),
+        display_images=(image,),
+    )
+    rollout = _attention_result(layer_indices=(0,))
+    exported_layer_attention = []
+
+    monkeypatch.setattr(
+        image_pipeline,
+        "_load_model_with_status",
+        lambda _config: loaded_model,
+    )
+    monkeypatch.setattr(
+        image_pipeline,
+        "build_batch_preprocessor",
+        lambda *_args: object(),
+    )
+    monkeypatch.setattr(
+        image_pipeline,
+        "_tracked_input_batches",
+        lambda *_args: iter((input_batch,)),
+    )
+    monkeypatch.setattr(image_pipeline, "preprocess_batch", lambda *_args: preprocessed)
+    monkeypatch.setattr(
+        attention_analysis,
+        "extract_attention_rollout",
+        lambda *_args, **_kwargs: rollout,
+    )
+    monkeypatch.setattr(
+        image_pipeline,
+        "_extract_attention",
+        lambda **_kwargs: pytest.fail("rollout-only mode extracted direct attention"),
+    )
+
+    def fake_export(**kwargs):
+        exported_layer_attention.append(kwargs["layer_attention"])
+        return ()
+
+    monkeypatch.setattr(
+        image_pipeline,
+        "export_rollout_comparison_outputs",
+        fake_export,
+    )
+
+    result = run_vit_rollout_comparison_from_config(config)
+
+    assert exported_layer_attention == [None]
+    assert result.attention is rollout
+
+
 def _minimal_vit_config(method, tmp_path):
     source = tmp_path / "input.jpg"
     source.touch()

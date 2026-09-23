@@ -728,7 +728,7 @@ def run_vit_rollout_comparison_from_config(
                     inputs=batch.inputs,
                     config=config,
                 )
-                if config.output.grids
+                if _rollout_comparison_enabled(config)
                 else None
             )
             fitted_maps = [layer.maps for layer in fitted_rollout.layers]
@@ -764,7 +764,7 @@ def run_vit_rollout_comparison_from_config(
                 inputs=batch.inputs,
                 config=config,
             )
-            if config.output.grids
+            if _rollout_comparison_enabled(config)
             else None
         )
         if len(config.input.paths) <= config.runtime.batch_size:
@@ -1514,8 +1514,9 @@ def export_rollout_comparison_outputs(
     output_dir.mkdir(parents=True, exist_ok=True)
     output_paths: list[Path] = []
     labels = list(input_labels or tuple(path.stem for path in image_paths))
+    comparison = visualization.rollout_grid == "comparison"
     normalization_maps = [layer.maps for layer in rollout.layers]
-    if layer_attention is not None:
+    if comparison and layer_attention is not None:
         normalization_maps[:0] = [layer.maps for layer in layer_attention.layers]
     normalization_range = _rendering_range(visualization, normalization_maps)
     context = _MapExportContext(
@@ -1541,27 +1542,33 @@ def export_rollout_comparison_outputs(
             )
 
         if output.grids:
-            if layer_attention is None:
-                raise ValueError("Rollout grids require layer-attention maps.")
+            if comparison and layer_attention is None:
+                raise ValueError(
+                    "Rollout comparison grids require layer-attention maps."
+                )
             layer_pages = _chunks(
                 tuple(range(len(rollout.layers))),
                 visualization.items_per_grid,
             )
             for page_index, indices in enumerate(layer_pages):
-                layer_page = _attention_subset(layer_attention, indices)
+                layer_page = (
+                    _attention_subset(layer_attention, indices)
+                    if comparison and layer_attention is not None
+                    else None
+                )
                 rollout_page = _attention_subset(rollout, indices)
                 grid_path = grid_page_path(
                     output_dir,
-                    rollout_grid_stem(labels[image_index]),
+                    rollout_grid_stem(labels[image_index], visualization.rollout_grid),
                     grid_format,
                     page_index,
                     len(layer_pages),
                 )
                 if not _can_write(grid_path, output.overwrite):
                     continue
-                comparison_images, comparison_labels, columns = _rollout_grid_items(
+                grid_images, grid_labels, columns = _rollout_grid_items(
                     image=image,
-                    layer_attention=layer_page,
+                    layer_attention=layer_page if comparison else None,
                     rollout=rollout_page,
                     image_index=image_index,
                     alpha=alpha,
@@ -1573,8 +1580,8 @@ def export_rollout_comparison_outputs(
                     normalization_range=normalization_range,
                 )
                 save_grid(
-                    comparison_images,
-                    labels=comparison_labels,
+                    grid_images,
+                    labels=grid_labels,
                     output_path=grid_path,
                     columns=columns,
                     tile_size=visualization.tile_size,
@@ -1738,7 +1745,7 @@ def _head_suffix(layer: LayerAttentionMaps, head_index: int) -> str:
 
 def _rollout_grid_items(
     image: Any,
-    layer_attention: AttentionExtractionResult,
+    layer_attention: AttentionExtractionResult | None,
     rollout: AttentionExtractionResult,
     image_index: int,
     alpha: float,
@@ -1749,6 +1756,31 @@ def _rollout_grid_items(
     alpha_curve_steepness: float | None = None,
     alpha_curve_midpoint: float = 0.5,
 ) -> tuple[list[Any], list[str], int]:
+    if layer_attention is None:
+        columns = (
+            min(columns, len(rollout.layers))
+            if columns
+            else min(len(rollout.layers), ROLLOUT_GRID_MAX_COLUMNS)
+        )
+        rollout_images = []
+        rollout_labels = []
+        for rollout_layer in rollout.layers:
+            rollout_for_image = _layer_for_image(rollout_layer, image_index)
+            rollout_images.append(
+                overlay_attention(
+                    image,
+                    rollout_for_image.maps,
+                    alpha=alpha,
+                    alpha_curve_steepness=alpha_curve_steepness,
+                    alpha_curve_midpoint=alpha_curve_midpoint,
+                    cmap=cmap,
+                    normalization=normalization,
+                    normalization_range=normalization_range,
+                )
+            )
+            rollout_labels.append(f"rollout {rollout_layer.layer_index}")
+        return rollout_images, rollout_labels, columns
+
     pairs = tuple(zip(layer_attention.layers, rollout.layers, strict=True))
     if not pairs:
         raise ValueError("Rollout comparison requires at least one layer.")
@@ -1815,6 +1847,10 @@ def _rollout_grid_items(
         comparison_labels.extend(rollout_labels)
 
     return comparison_images, comparison_labels, columns
+
+
+def _rollout_comparison_enabled(config: VisionLensConfig) -> bool:
+    return config.output.grids and config.visualization.rollout_grid == "comparison"
 
 
 def _blank_like(image: Any) -> Any:

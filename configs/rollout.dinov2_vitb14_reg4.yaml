@@ -18,6 +18,7 @@ runtime:
   batch_size: 1
 
 visualization:
+  rollout_grid: rollout
   output_size: match
   interpolation: nearest
   overlay_alpha: 1.0
