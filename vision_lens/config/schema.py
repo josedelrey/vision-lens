@@ -29,6 +29,7 @@ VisualizationInterpolation = Literal[
 GridFormat = Literal["pdf", "png", "svg"]
 NormalizationMode = Literal["per_map", "shared", "fixed"]
 ImageFormat = Literal["jpeg", "png", "tiff", "webp"]
+AlphaFormat = Literal["prores_4444", "vp9"]
 RawFormat = Literal["npy", "npz"]
 OverwritePolicy = Literal["replace", "error", "skip"]
 
@@ -46,6 +47,11 @@ VISUALIZATION_INTERPOLATION_CHOICES = frozenset(get_args(VisualizationInterpolat
 GRID_FORMAT_CHOICES = frozenset(get_args(GridFormat))
 NORMALIZATION_CHOICES = frozenset(get_args(NormalizationMode))
 IMAGE_FORMAT_CHOICES = frozenset(get_args(ImageFormat))
+ALPHA_FORMAT_CHOICES = frozenset(get_args(AlphaFormat))
+ALPHA_FORMAT_EXTENSIONS: dict[AlphaFormat, str] = {
+    "prores_4444": "mov",
+    "vp9": "webm",
+}
 RAW_FORMAT_CHOICES = frozenset(get_args(RawFormat))
 OVERWRITE_CHOICES = frozenset(get_args(OverwritePolicy))
 ANYUP_INTERPOLATIONS = frozenset(
@@ -82,6 +88,7 @@ class OutputConfig:
     image_format: ImageFormat = "png"
     raw_format: RawFormat = "npy"
     overwrite: OverwritePolicy = "error"
+    transparent_overlays: bool = False
 
 
 @dataclass(frozen=True)
@@ -212,6 +219,7 @@ class VideoConfig:
     pca_fit_frames: int = 32
     temporal_smoothing: float = 0.0
     codec: str = "libx264"
+    alpha_format: AlphaFormat = "prores_4444"
 
 
 @dataclass(frozen=True)
@@ -241,11 +249,13 @@ KNOWN_FIXED_IMAGE_SIZES = {
 KNOWN_VIT_DEPTHS = {
     "vit_small_patch8_224.dino": 12,
     "hf_hub:timm/vit_small_patch14_reg4_dinov2.lvd142m": 12,
+    "hf_hub:timm/vit_base_patch14_reg4_dinov2.lvd142m": 12,
     "hf_hub:timm/vit_base_patch14_dinov2.lvd142m": 12,
 }
 KNOWN_VIT_HEADS = {
     "vit_small_patch8_224.dino": 6,
     "hf_hub:timm/vit_small_patch14_reg4_dinov2.lvd142m": 6,
+    "hf_hub:timm/vit_base_patch14_reg4_dinov2.lvd142m": 12,
     "hf_hub:timm/vit_base_patch14_dinov2.lvd142m": 12,
 }
 

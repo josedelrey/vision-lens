@@ -168,17 +168,18 @@ Normalization affects rendered maps, overlays, and grids. Raw arrays retain anal
 | `output.directory` | required | Output directory. |
 | `output.heatmaps` | `true` | Save heatmaps or PCA color maps. |
 | `output.overlays` | `true` except PCA | Save attention, rollout, or Grad-CAM overlays. |
+| `output.transparent_overlays` | `false` | Save standalone attention, rollout, or Grad-CAM layers with transparency. Images are RGBA PNGs; videos use `video.alpha_format`. |
 | `output.grids` | `true` for images | Save image comparison grids; invalid for video. |
 | `output.raw_arrays` | `false` | Save analysis arrays. |
 | `output.image_format` | `png` | Standalone image format: `png`, `jpeg`, `tiff`, or `webp`. |
 | `output.raw_format` | `npy` | `npy` or compressed `npz`; requires raw arrays. |
 | `output.overwrite` | `error` | `error`, `replace`, or `skip` existing outputs. |
 
-At least one output type must be enabled. `output.overlays` is invalid for PCA; `output.grids` and `output.image_format` are image-only settings. `output.overwrite` also applies to the run manifest. The manifest records the resolved configuration, model identity, package versions, input metadata, output paths, and UTC run times. A loaded or saved PCA projection cannot collide with inputs or other planned outputs.
+At least one output type must be enabled. `output.overlays` retains the existing flattened source-plus-map output, while `output.transparent_overlays` writes a separate map layer without source-image pixels. Both overlay modes are invalid for PCA. Transparent image overlays are always PNG regardless of `output.image_format`; `output.grids` and `output.image_format` are image-only settings. `output.overwrite` also applies to the run manifest. The manifest records the resolved configuration, model identity, package versions, input metadata, output paths, and UTC run times. A loaded or saved PCA projection cannot collide with inputs or other planned outputs.
 
 ## Video
 
-Install video support with `uv sync --locked --extra video`. A `video` section processes timestamp-sampled frames and exports silent MP4 streams. Source audio is not copied.
+Install video support with `uv sync --locked --extra video`. A `video` section processes timestamp-sampled frames and exports silent MP4 streams, plus optional alpha-capable MOV or WebM streams. Source audio is not copied.
 
 | Setting | Default | Meaning |
 |---|---|---|
@@ -189,5 +190,8 @@ Install video support with `uv sync --locked --extra video`. A `video` section p
 | `video.pca_fit_frames` | `32` | Representative frames used to fit video PCA. |
 | `video.temporal_smoothing` | `0.0` | Previous-frame blend strength from 0 to 1 for rendered PCA video. |
 | `video.codec` | `libx264` | PyAV/FFmpeg encoder for MP4 outputs. |
+| `video.alpha_format` | `prores_4444` | Transparent-overlay encoding: `prores_4444` produces a `.mov`; `vp9` produces a `.webm`. Only applicable when `output.transparent_overlays: true`. |
 
 Each selected video runs independently. With multiple inputs, outputs and `run-manifest.json` are written in separate source-named subdirectories. `sampling_rate: auto` requires a valid reported source FPS; use a number otherwise. Output frames have constant playback FPS even for variable-rate sources. Raw arrays are exported in bounded batches; NPZ batches include sample timestamps.
+
+ProRes 4444 is the default transparent-video format and is intended for editing workflows. VP9 alpha produces smaller WebM files for browser-oriented workflows, but alpha playback support varies between applications. `video.codec` continues to control only ordinary heatmap and flattened-overlay MP4 files.

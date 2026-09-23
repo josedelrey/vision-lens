@@ -71,6 +71,7 @@ from vision_lens.output.visualization import (
     make_layer_comparison_grid,
     overlay_attention,
     render_heatmap,
+    render_transparent_overlay,
     save_grid,
     save_image,
     shared_value_range,
@@ -995,6 +996,33 @@ def export_attention_outputs(
                             normalization_range=normalization_range,
                         )
                         output_paths.append(save_image(overlay, path))
+                if output.transparent_overlays:
+                    path = image_artifact_path(
+                        output_dir, stem, "transparent_overlay", "png"
+                    )
+                    if _can_write(path, output.overwrite):
+                        transparent_overlay = render_transparent_overlay(
+                            image_layer.maps,
+                            image.size,
+                            alpha=alpha,
+                            alpha_curve_steepness=(
+                                visualization.overlay_alpha_curve_steepness
+                            ),
+                            alpha_curve_midpoint=(
+                                visualization.overlay_alpha_curve_midpoint
+                            ),
+                            cmap=cmap,
+                            head_index=head_index,
+                            normalization=visualization.normalization,
+                            normalization_range=normalization_range,
+                        )
+                        output_paths.append(
+                            save_image(
+                                transparent_overlay,
+                                path,
+                                preserve_alpha=True,
+                            )
+                        )
                 if output.raw_arrays:
                     path = named_artifact_path(output_dir, stem, output.raw_format)
                     if _can_write(path, output.overwrite):
@@ -1295,6 +1323,31 @@ def export_rollout_comparison_outputs(
                             path,
                         )
                     )
+            if output.transparent_overlays:
+                path = image_artifact_path(
+                    output_dir, stem, "transparent_overlay", "png"
+                )
+                if _can_write(path, output.overwrite):
+                    output_paths.append(
+                        save_image(
+                            render_transparent_overlay(
+                                rollout_for_image.maps,
+                                image.size,
+                                alpha=alpha,
+                                alpha_curve_steepness=(
+                                    visualization.overlay_alpha_curve_steepness
+                                ),
+                                alpha_curve_midpoint=(
+                                    visualization.overlay_alpha_curve_midpoint
+                                ),
+                                cmap=cmap,
+                                normalization=visualization.normalization,
+                                normalization_range=normalization_range,
+                            ),
+                            path,
+                            preserve_alpha=True,
+                        )
+                    )
             if output.raw_arrays:
                 path = named_artifact_path(output_dir, stem, output.raw_format)
                 if _can_write(path, output.overwrite):
@@ -1424,6 +1477,29 @@ def export_gradcam_outputs(
                             normalization_range=normalization_range,
                         ),
                         path,
+                    )
+                )
+        if output.transparent_overlays:
+            path = image_artifact_path(output_dir, stem, "transparent_overlay", "png")
+            if _can_write(path, output.overwrite):
+                output_paths.append(
+                    save_image(
+                        render_transparent_overlay(
+                            maps,
+                            image.size,
+                            alpha=alpha,
+                            alpha_curve_steepness=(
+                                visualization.overlay_alpha_curve_steepness
+                            ),
+                            alpha_curve_midpoint=(
+                                visualization.overlay_alpha_curve_midpoint
+                            ),
+                            cmap=cmap,
+                            normalization=visualization.normalization,
+                            normalization_range=normalization_range,
+                        ),
+                        path,
+                        preserve_alpha=True,
                     )
                 )
         if output.raw_arrays:
@@ -1814,7 +1890,12 @@ def _rendering_range(
 
 
 def _renders_maps(config: VisionLensConfig) -> bool:
-    return config.output.heatmaps or config.output.overlays or config.output.grids
+    return (
+        config.output.heatmaps
+        or config.output.overlays
+        or config.output.transparent_overlays
+        or config.output.grids
+    )
 
 
 def _extend_value_range(

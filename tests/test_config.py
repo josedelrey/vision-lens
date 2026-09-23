@@ -75,6 +75,7 @@ def test_parse_config_applies_documented_defaults():
     assert config.visualization.normalization == "per_map"
     assert config.output.heatmaps is True
     assert config.output.overlays is True
+    assert config.output.transparent_overlays is False
     assert config.output.grids is True
     assert config.output.raw_arrays is False
     assert config.output.overwrite == "error"
@@ -142,6 +143,90 @@ def test_video_settings_apply_documented_defaults(tmp_path):
     assert config.video.pca_fit_frames == 32
     assert config.video.temporal_smoothing == 0
     assert config.video.codec == "libx264"
+    assert config.video.alpha_format == "prores_4444"
+
+
+@pytest.mark.parametrize(
+    ("alpha_format", "extension"),
+    [("prores_4444", "mov"), ("vp9", "webm")],
+)
+def test_transparent_video_overlay_formats_are_strict_and_conditional(
+    tmp_path, alpha_format, extension
+):
+    source = tmp_path / "clip.mp4"
+    source.touch()
+    raw = _minimal_config()
+    raw["input"] = {"files": [str(source)]}
+    raw["output"].update(
+        {
+            "heatmaps": False,
+            "overlays": False,
+            "transparent_overlays": True,
+        }
+    )
+    raw["video"] = {"alpha_format": alpha_format}
+
+    config = parse_config(raw)
+
+    assert config.output.transparent_overlays is True
+    assert config.video is not None
+    assert config.video.alpha_format == alpha_format
+    assert artifact_plan(config).matches(
+        config.output.directory
+        / f"clip_attention_layer-0_heads-mean_transparent_overlay.{extension}"
+    )
+
+    raw["output"]["transparent_overlays"] = False
+    with pytest.raises(ValueError, match="video.alpha_format.*not applicable"):
+        parse_config(raw)
+
+    raw["output"]["transparent_overlays"] = True
+    raw["video"] = {"alpha_format": alpha_format, "codec": "libx264"}
+    with pytest.raises(ValueError, match="video.codec.*not applicable"):
+        parse_config(raw)
+
+
+def test_transparent_video_overlay_rejects_unknown_format(tmp_path):
+    source = tmp_path / "clip.mp4"
+    source.touch()
+    raw = _minimal_config()
+    raw["input"] = {"files": [str(source)]}
+    raw["output"]["transparent_overlays"] = True
+    raw["video"] = {"alpha_format": "mp4"}
+
+    with pytest.raises(ValueError, match="video.alpha_format"):
+        parse_config(raw)
+
+
+def test_transparent_overlay_is_a_complete_independent_output():
+    raw = _minimal_config()
+    raw["output"].update(
+        {
+            "heatmaps": False,
+            "overlays": False,
+            "transparent_overlays": True,
+            "grids": False,
+        }
+    )
+
+    config = parse_config(raw)
+
+    assert config.output.transparent_overlays is True
+    assert artifact_plan(config).matches(
+        config.output.directory / "1_layer-0_heads-mean_transparent_overlay.png"
+    )
+
+    raw["output"]["image_format"] = "jpeg"
+    with pytest.raises(ValueError, match="output.image_format.*not applicable"):
+        parse_config(raw)
+
+
+def test_patch_pca_rejects_transparent_overlay_output():
+    raw = _minimal_config(method="patch_pca")
+    raw["output"]["transparent_overlays"] = True
+
+    with pytest.raises(ValueError, match="output.transparent_overlays.*not applicable"):
+        parse_config(raw)
 
 
 def test_video_patch_pca_has_no_image_foreground_settings(tmp_path):

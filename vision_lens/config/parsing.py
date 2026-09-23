@@ -10,6 +10,7 @@ from typing import Any, Literal
 import yaml
 
 from vision_lens.config.schema import (
+    ALPHA_FORMAT_CHOICES,
     ANALYSIS_DEFAULTS,
     ANALYSIS_KEYS,
     CROP_CHOICES,
@@ -307,6 +308,13 @@ def parse_config(
                 ),
                 "output.overlays",
             ),
+            transparent_overlays=_bool(
+                output_section.get(
+                    "transparent_overlays",
+                    SECTION_DEFAULTS["output"]["transparent_overlays"],
+                ),
+                "output.transparent_overlays",
+            ),
             grids=(
                 False
                 if "video" in resolved
@@ -378,6 +386,13 @@ def parse_config(
                 codec=_non_empty_string(
                     video_section.get("codec", SECTION_DEFAULTS["video"]["codec"]),
                     "video.codec",
+                ),
+                alpha_format=_choice(
+                    video_section.get(
+                        "alpha_format", SECTION_DEFAULTS["video"]["alpha_format"]
+                    ),
+                    "video.alpha_format",
+                    ALPHA_FORMAT_CHOICES,
                 ),
             )
         ),

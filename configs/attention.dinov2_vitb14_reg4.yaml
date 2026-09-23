@@ -5,7 +5,7 @@ input:
 model:
   architecture: vit
   backend: timm
-  name: hf_hub:timm/vit_small_patch14_reg4_dinov2.lvd142m
+  name: hf_hub:timm/vit_base_patch14_reg4_dinov2.lvd142m
 
 preprocessing:
   interpolation: bilinear
@@ -14,13 +14,16 @@ analysis:
   method: attention
   layers: [2, 5, 8, 11]
 
+runtime:
+  batch_size: 1
+
 visualization:
   output_size: match
   interpolation: nearest
-  overlay_alpha: 1.0
-  overlay_alpha_curve: {steepness: 15, midpoint: 0.25}
+  overlay_alpha: 0.8
   cmap_black: {threshold: 20, blend_width: 35, transparent: true}
 
 output:
-  directory: outputs/image/dinov2_vits14_reg4_attention
+  directory: outputs/image/dinov2_vitb14_reg4/attention
+  transparent_overlays: true
   overwrite: replace

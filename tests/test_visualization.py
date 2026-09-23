@@ -14,6 +14,7 @@ from vision_lens.output.visualization import (
     make_image_comparison_grid,
     overlay_attention,
     render_heatmap,
+    render_transparent_overlay,
     save_grid_figure,
     save_image,
     shared_value_range,
@@ -100,6 +101,34 @@ def test_overlay_reveals_original_beneath_transparent_black():
 
     assert np.array_equal(np.asarray(overlay)[0, 0], [200, 100, 50])
     assert not np.array_equal(np.asarray(overlay)[0, 1], [200, 100, 50])
+
+
+def test_transparent_overlay_exports_rgba_without_source_pixels(tmp_path):
+    values = torch.tensor([[0.0, 1.0]])
+    cmap = ColormapSpec(
+        "gray",
+        black_threshold=20,
+        black_blend_width=20,
+        black_transparent=True,
+    )
+
+    overlay = render_transparent_overlay(
+        values,
+        (2, 1),
+        alpha=0.5,
+        cmap=cmap,
+        normalization="fixed",
+        normalization_range=(0, 1),
+    )
+    path = tmp_path / "overlay.png"
+    save_image(overlay, path, preserve_alpha=True)
+
+    with Image.open(path) as saved:
+        pixels = np.asarray(saved)
+        assert saved.mode == "RGBA"
+        assert pixels[0, 0, 3] == 0
+        assert pixels[0, 1, 3] == 128
+        assert np.array_equal(pixels[0, 1, :3], [255, 255, 255])
 
 
 @pytest.mark.parametrize(

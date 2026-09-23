@@ -40,6 +40,8 @@ from vision_lens.media.processing import (
     preprocess_batch,
 )
 from vision_lens.media.video import (
+    ALPHA_VIDEO_ENCODINGS,
+    AlphaVideoEncoding,
     SampledVideoFrame,
     VideoMetadata,
     VideoWriter,
@@ -48,7 +50,7 @@ from vision_lens.media.video import (
     iter_video_batches,
     probe_video,
     representative_frame_indices,
-    require_video_dependencies,
+    require_video_encoder,
     resolve_sampling_rate,
     resolved_output_resolution,
 )
@@ -63,7 +65,11 @@ from vision_lens.output.artifacts import (
 )
 from vision_lens.output.manifest import can_write_output as _can_write
 from vision_lens.output.manifest import write_run_manifest
-from vision_lens.output.visualization import overlay_attention, render_heatmap
+from vision_lens.output.visualization import (
+    overlay_attention,
+    render_heatmap,
+    render_transparent_overlay,
+)
 from vision_lens.pipeline.progress import status, track_video_batches
 from vision_lens.pipeline.runtime import anyup_guidance, apply_seed
 
@@ -121,7 +127,7 @@ def run_video_from_config(
         check_artifact_overwrite(video_config)
         video_configs.append(video_config)
 
-    require_video_dependencies()
+    _require_video_encoders(config)
     apply_seed(config.runtime.seed)
     status(f"Loading model {config.model.name}")
     loaded_model = load_model(config, dynamic_img_size=True)
@@ -148,7 +154,7 @@ def _run_single_video_from_config(
     started_at = datetime.now(UTC)
     check_artifact_overwrite(config)
     if loaded_model is None:
-        require_video_dependencies()
+        _require_video_encoders(config)
     source_path = config.input.paths[0]
     source = probe_video(source_path)
     requested_config = config
@@ -423,6 +429,26 @@ class _VideoExports:
                     self._write_video(
                         rendered_stream_name(stream.name, "overlay"), overlay
                     )
+                if self.config.output.transparent_overlays:
+                    transparent_overlay = render_transparent_overlay(
+                        stream.maps,
+                        self.resolution,
+                        alpha=self.config.visualization.overlay_alpha,
+                        alpha_curve_steepness=(
+                            self.config.visualization.overlay_alpha_curve_steepness
+                        ),
+                        alpha_curve_midpoint=(
+                            self.config.visualization.overlay_alpha_curve_midpoint
+                        ),
+                        cmap=self.config.visualization.render_cmap,
+                        batch_index=frame_index,
+                        normalization=normalization,
+                        normalization_range=normalization_range,
+                    )
+                    self._write_transparent_video(
+                        rendered_stream_name(stream.name, "transparent_overlay"),
+                        transparent_overlay,
+                    )
             if self.config.output.raw_arrays:
                 self._write_raw_batch(
                     stream.name,
@@ -470,18 +496,48 @@ class _VideoExports:
         if writer is not None:
             writer.write(image)
 
-    def _writer(self, path: Path, resolution: tuple[int, int]) -> VideoWriter | None:
+    def _write_transparent_video(self, name: str, image: Image.Image) -> None:
+        assert self.config.video is not None
+        encoding = ALPHA_VIDEO_ENCODINGS[self.config.video.alpha_format]
+        path = video_artifact_path(
+            self.config.output.directory,
+            self.source_stem,
+            name,
+            encoding.extension,
+        )
+        writer = self._writer(path, self.resolution, alpha_encoding=encoding)
+        if writer is not None:
+            writer.write(image)
+
+    def _writer(
+        self,
+        path: Path,
+        resolution: tuple[int, int],
+        *,
+        alpha_encoding: AlphaVideoEncoding | None = None,
+    ) -> VideoWriter | None:
         if path not in self._writers:
             if not _can_write(path, self.config.output.overwrite):
                 self._writers[path] = None
             else:
                 assert self.config.video is not None
-                self._writers[path] = VideoWriter(
-                    path,
-                    frame_rate=self.config.video.sampling_rate,
-                    resolution=resolution,
-                    codec=self.config.video.codec,
-                )
+                if alpha_encoding is None:
+                    self._writers[path] = VideoWriter(
+                        path,
+                        frame_rate=self.config.video.sampling_rate,
+                        resolution=resolution,
+                        codec=self.config.video.codec,
+                    )
+                else:
+                    self._writers[path] = VideoWriter(
+                        path,
+                        frame_rate=self.config.video.sampling_rate,
+                        resolution=resolution,
+                        codec=alpha_encoding.codec,
+                        pixel_format=alpha_encoding.pixel_format,
+                        preserve_alpha=True,
+                        codec_options=alpha_encoding.codec_options,
+                    )
                 self._output_paths.append(path)
         return self._writers[path]
 
@@ -592,6 +648,19 @@ def _video_pca_projection(
         )
 
 
+def _require_video_encoders(config: VisionLensConfig) -> None:
+    assert config.video is not None
+    if config.output.heatmaps or config.output.overlays:
+        require_video_encoder(config.video.codec, field_name="video.codec")
+    if config.output.transparent_overlays:
+        encoding = ALPHA_VIDEO_ENCODINGS[config.video.alpha_format]
+        require_video_encoder(
+            encoding.codec,
+            field_name="video.alpha_format",
+            pixel_format=encoding.pixel_format,
+        )
+
+
 def _video_normalization_range(
     config: VisionLensConfig,
     loaded_model: LoadedModel,
@@ -600,7 +669,9 @@ def _video_normalization_range(
     output_size: tuple[int, int],
 ) -> tuple[float, float] | None:
     if config.analysis.method == "patch_pca" or not (
-        config.output.heatmaps or config.output.overlays
+        config.output.heatmaps
+        or config.output.overlays
+        or config.output.transparent_overlays
     ):
         return None
     if config.visualization.normalization == "fixed":

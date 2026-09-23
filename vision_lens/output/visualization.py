@@ -65,6 +65,86 @@ def overlay_attention(
     alpha_curve_steepness: float | None = None,
     alpha_curve_midpoint: float = 0.5,
 ) -> Any:
+    _validate_overlay_parameters(
+        alpha,
+        alpha_curve_steepness,
+        alpha_curve_midpoint,
+    )
+    base_image = _as_rgb_image(image)
+    array = attention_map_to_array(
+        attention_map,
+        batch_index=batch_index,
+        head_index=head_index,
+        normalization=normalization,
+        normalization_range=normalization_range,
+    )
+    heatmap = _image_from_array(_colormap(array, cmap)).resize(base_image.size)
+
+    transparent_black = isinstance(cmap, ColormapSpec) and cmap.black_transparent
+    if alpha_curve_steepness is not None or transparent_black:
+        overlay_alpha = _overlay_alpha_mask(
+            array,
+            heatmap,
+            base_image.size,
+            alpha,
+            alpha_curve_steepness,
+            alpha_curve_midpoint,
+            transparent_black,
+        )
+        transparent_heatmap = heatmap.convert("RGBA")
+        transparent_heatmap.putalpha(Image.fromarray(overlay_alpha, mode="L"))
+        return Image.alpha_composite(
+            base_image.convert("RGBA"), transparent_heatmap
+        ).convert("RGB")
+    return Image.blend(base_image, heatmap, alpha=alpha)
+
+
+def render_transparent_overlay(
+    attention_map: Any,
+    size: tuple[int, int],
+    alpha: float = 0.45,
+    cmap: str | ColormapSpec = "viridis",
+    batch_index: int = 0,
+    head_index: int = 0,
+    normalization: str = "per_map",
+    normalization_range: tuple[float, float] | None = None,
+    alpha_curve_steepness: float | None = None,
+    alpha_curve_midpoint: float = 0.5,
+) -> Any:
+    """Render a standalone RGBA overlay layer without source-image pixels."""
+    _validate_overlay_parameters(
+        alpha,
+        alpha_curve_steepness,
+        alpha_curve_midpoint,
+    )
+    array = attention_map_to_array(
+        attention_map,
+        batch_index=batch_index,
+        head_index=head_index,
+        normalization=normalization,
+        normalization_range=normalization_range,
+    )
+    heatmap = _image_from_array(_colormap(array, cmap)).resize(size)
+    transparent_black = isinstance(cmap, ColormapSpec) and cmap.black_transparent
+    overlay_alpha = _overlay_alpha_mask(
+        array,
+        heatmap,
+        size,
+        alpha,
+        alpha_curve_steepness,
+        alpha_curve_midpoint,
+        transparent_black,
+    )
+    result = heatmap.convert("RGBA")
+    result.putalpha(Image.fromarray(overlay_alpha, mode="L"))
+    return result
+
+
+def _validate_overlay_parameters(
+    alpha: float,
+    alpha_curve_steepness: float | None,
+    alpha_curve_midpoint: float,
+) -> None:
     if not 0 <= alpha <= 1:
         raise ValueError("alpha must be between 0 and 1.")
     if alpha_curve_steepness is not None and (
@@ -82,46 +162,37 @@ def overlay_attention(
     ):
         raise ValueError("alpha_curve_midpoint must be between 0 and 1.")
 
-    base_image = _as_rgb_image(image)
-    array = attention_map_to_array(
-        attention_map,
-        batch_index=batch_index,
-        head_index=head_index,
-        normalization=normalization,
-        normalization_range=normalization_range,
-    )
-    heatmap = _image_from_array(_colormap(array, cmap)).resize(base_image.size)
 
-    transparent_black = isinstance(cmap, ColormapSpec) and cmap.black_transparent
-    if alpha_curve_steepness is not None or transparent_black:
-        if alpha_curve_steepness is None:
-            overlay_alpha = np.full(
-                (base_image.height, base_image.width),
-                round(alpha * 255),
-                dtype=np.uint8,
-            )
-        else:
-            positions = Image.fromarray(
-                np.rint(array * 255).astype(np.uint8), mode="L"
-            ).resize(base_image.size)
-            opacity = _sigmoid_alpha_curve(
-                np.asarray(positions, dtype=np.float32) / 255,
-                alpha_curve_steepness,
-                alpha_curve_midpoint,
-            )
-            overlay_alpha = np.rint(opacity * alpha * 255).astype(np.uint8)
+def _overlay_alpha_mask(
+    array: Any,
+    heatmap: Image.Image,
+    size: tuple[int, int],
+    alpha: float,
+    alpha_curve_steepness: float | None,
+    alpha_curve_midpoint: float,
+    transparent_black: bool,
+) -> Any:
+    if alpha_curve_steepness is None:
+        overlay_alpha = np.full(
+            (size[1], size[0]),
+            round(alpha * 255),
+            dtype=np.uint8,
+        )
+    else:
+        positions = Image.fromarray(
+            np.rint(array * 255).astype(np.uint8), mode="L"
+        ).resize(size)
+        opacity = _sigmoid_alpha_curve(
+            np.asarray(positions, dtype=np.float32) / 255,
+            alpha_curve_steepness,
+            alpha_curve_midpoint,
+        )
+        overlay_alpha = np.rint(opacity * alpha * 255).astype(np.uint8)
 
     if transparent_black:
         visible = np.any(np.asarray(heatmap) != 0, axis=-1)
         overlay_alpha = np.where(visible, overlay_alpha, 0).astype(np.uint8)
-
-    if alpha_curve_steepness is not None or transparent_black:
-        transparent_heatmap = heatmap.convert("RGBA")
-        transparent_heatmap.putalpha(Image.fromarray(overlay_alpha, mode="L"))
-        return Image.alpha_composite(
-            base_image.convert("RGBA"), transparent_heatmap
-        ).convert("RGB")
-    return Image.blend(base_image, heatmap, alpha=alpha)
+    return overlay_alpha
 
 
 def make_layer_comparison_grid(
@@ -413,11 +484,18 @@ def labeled_image(image: Any, label: str, label_height: int = 28) -> Any:
     return labeled
 
 
-def save_image(image: Any, path: str | Path, dpi: int | None = None) -> Path:
+def save_image(
+    image: Any,
+    path: str | Path,
+    dpi: int | None = None,
+    *,
+    preserve_alpha: bool = False,
+) -> Path:
     output_path = Path(path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     options = {} if dpi is None else {"dpi": (dpi, dpi)}
-    _as_rgb_image(image).save(output_path, **options)
+    output_image = _as_rgba_image(image) if preserve_alpha else _as_rgb_image(image)
+    output_image.save(output_path, **options)
     return output_path
 
 
@@ -514,6 +592,12 @@ def _as_rgb_image(image: Any) -> Any:
     if isinstance(image, Image.Image):
         return image.convert("RGB")
     return Image.fromarray(_to_numpy(image)).convert("RGB")
+
+
+def _as_rgba_image(image: Any) -> Any:
+    if isinstance(image, Image.Image):
+        return image.convert("RGBA")
+    return Image.fromarray(_to_numpy(image)).convert("RGBA")
 
 
 def _grid_columns(item_count: int, columns: int | None) -> int:

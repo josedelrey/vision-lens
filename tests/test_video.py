@@ -12,6 +12,7 @@ from vision_lens.analysis.attention import GradCamResult
 from vision_lens.config import PreprocessingConfig, VideoConfig, parse_config
 from vision_lens.media.processing import build_batch_preprocessor
 from vision_lens.media.video import (
+    SampledVideoFrame,
     VideoMetadata,
     VideoWriter,
     estimated_sample_count,
@@ -160,6 +161,98 @@ def test_video_writer_skips_resize_for_matching_rgb_frame(monkeypatch, tmp_path)
         writer.write(Image.new("RGB", (64, 48), "red"))
 
     assert output.is_file()
+
+
+@pytest.mark.parametrize(
+    ("alpha_format", "extension"),
+    [("prores_4444", "mov"), ("vp9", "webm")],
+)
+def test_transparent_video_overlays_preserve_alpha(tmp_path, alpha_format, extension):
+    from vision_lens.pipeline.video import _MapStream, _VideoExports
+
+    source = tmp_path / "clip.mp4"
+    source.touch()
+    output_dir = tmp_path / "outputs"
+    config = parse_config(
+        {
+            "input": {"files": [str(source)]},
+            "model": {
+                "architecture": "cnn",
+                "backend": "torchvision",
+                "name": "mock_cnn",
+                "pretrained": False,
+            },
+            "preprocessing": {"image_size": 4},
+            "analysis": {"method": "gradcam", "target_layer": "features.0"},
+            "visualization": {
+                "output_size": [64, 48],
+                "overlay_alpha": 0.5,
+                "cmap": "gray",
+                "cmap_black": {
+                    "threshold": 20,
+                    "blend_width": 20,
+                    "transparent": True,
+                },
+                "normalization": "fixed",
+                "normalization_range": [0, 1],
+            },
+            "output": {
+                "directory": str(output_dir),
+                "heatmaps": False,
+                "overlays": False,
+                "transparent_overlays": True,
+            },
+            "video": {"sampling_rate": 1, "alpha_format": alpha_format},
+        }
+    )
+    original = Image.new("RGB", (64, 48), "red")
+    frames = (SampledVideoFrame(0, 0.0, 0.0, original),)
+    streams = (
+        _MapStream(
+            "gradcam",
+            torch.tensor([[[[0.0, 0.0], [1.0, 1.0]]]]),
+        ),
+    )
+    exports = _VideoExports(config, "clip", (64, 48))
+
+    exports.write_map_batch(frames, (original,), streams, 0, (0, 1))
+    exports.close()
+
+    path = output_dir / f"clip_gradcam_transparent_overlay.{extension}"
+    assert exports.output_paths == (path,)
+    alpha = _decode_alpha_channel(path, alpha_format)
+    assert alpha.min() == 0
+    assert 120 <= alpha.max() <= 135
+    assert np.any(alpha == 0)
+    assert np.any(alpha > 0)
+
+
+def test_transparent_only_video_checks_only_the_alpha_encoder(monkeypatch):
+    from vision_lens.pipeline import video as video_pipeline
+
+    calls = []
+    config = SimpleNamespace(
+        output=SimpleNamespace(
+            heatmaps=False,
+            overlays=False,
+            transparent_overlays=True,
+        ),
+        video=VideoConfig(alpha_format="vp9"),
+    )
+    monkeypatch.setattr(
+        video_pipeline,
+        "require_video_encoder",
+        lambda codec, **kwargs: calls.append((codec, kwargs)),
+    )
+
+    video_pipeline._require_video_encoders(config)
+
+    assert calls == [
+        (
+            "libvpx-vp9",
+            {"field_name": "video.alpha_format", "pixel_format": "yuva420p"},
+        )
+    ]
 
 
 def test_temporal_smoothing_is_sequential_across_batches():
@@ -599,3 +692,18 @@ def _make_video(path, *, frame_count, frame_rate):
             array[:, :, 0] = index * 20
             array[:, :, 1] = np.arange(64, dtype=np.uint8)
             writer.write(Image.fromarray(array, mode="RGB"))
+
+
+def _decode_alpha_channel(path, alpha_format):
+    with av.open(str(path)) as container:
+        stream = container.streams.video[0]
+        if alpha_format == "vp9":
+            decoder = av.CodecContext.create("libvpx-vp9", "r")
+            frames = []
+            for packet in container.demux(stream):
+                if packet.size:
+                    frames.extend(decoder.decode(packet))
+            frame = frames[0]
+        else:
+            frame = next(container.decode(stream))
+        return frame.to_ndarray(format="rgba")[..., 3]

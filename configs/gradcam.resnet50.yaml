@@ -1,6 +1,6 @@
 input:
-  files:
-    - videos/2.mp4
+  folders:
+    - examples
 
 model:
   architecture: cnn
@@ -17,13 +17,10 @@ analysis:
 visualization:
   output_size: match
   interpolation: nearest
-  overlay_alpha: 1.0
-  overlay_alpha_curve: {steepness: 15, midpoint: 0.25}
+  overlay_alpha: 0.8
   cmap_black: {threshold: 20, blend_width: 35, transparent: true}
 
 output:
-  directory: outputs/video/resnet50_gradcam
+  directory: outputs/image/resnet50/gradcam
+  transparent_overlays: true
   overwrite: replace
-
-video:
-  sampling_rate: auto
