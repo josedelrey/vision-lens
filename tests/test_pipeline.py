@@ -18,6 +18,7 @@ from vision_lens.config import (
     VisualizationConfig,
     parse_config,
 )
+from vision_lens.errors import PipelineError
 from vision_lens.models import LoadedModel, ModelMetadata
 from vision_lens.pipeline import run_pipeline_from_config
 from vision_lens.pipeline.image import (
@@ -30,6 +31,35 @@ from vision_lens.pipeline.image import (
     run_vit_attention_from_config,
     run_vit_rollout_comparison_from_config,
 )
+
+
+def test_gradcam_rejects_target_class_outside_torchvision_output_range(tmp_path):
+    config = parse_config(
+        {
+            "input": {"files": ["examples/1.jpg"]},
+            "model": {
+                "architecture": "cnn",
+                "backend": "torchvision",
+                "name": "resnet18",
+                "pretrained": False,
+                "options": {"num_classes": 2},
+            },
+            "preprocessing": {"image_size": 32},
+            "analysis": {
+                "method": "gradcam",
+                "target_layer": "layer4",
+                "target_class": 2,
+            },
+            "runtime": {"device": "cpu"},
+            "output": {"directory": str(tmp_path)},
+        }
+    )
+
+    with pytest.raises(
+        PipelineError,
+        match=r"target_class=2.*class range 0 through 1",
+    ):
+        run_pipeline_from_config(config, show_progress=False)
 
 
 def test_vit_pipeline_exports_figures_with_mocked_model(monkeypatch, tmp_path):

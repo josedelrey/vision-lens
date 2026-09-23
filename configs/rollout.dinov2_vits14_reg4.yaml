@@ -17,7 +17,7 @@ analysis:
 visualization:
   output_size: match
   interpolation: nearest
-  overlay_alpha: 0.8
+  overlay_alpha: 1.0
   cmap_black: {threshold: 20, blend_width: 35, transparent: true}
 
 output:
