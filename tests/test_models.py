@@ -15,6 +15,7 @@ from vision_lens.config import (
 from vision_lens.models import (
     _accepted_timm_image_size,
     load_timm_vit,
+    load_torchvision_cnn,
 )
 
 
@@ -75,6 +76,22 @@ def test_timm_loader_uses_authoritative_preprocessing_size(monkeypatch):
     assert loaded.metadata.input_size == (3, 672, 672)
     assert loaded.metadata.image_size == (672, 672)
     assert loaded.metadata.data_config["crop_mode"] == "none"
+
+
+def test_torchvision_loader_records_classifier_class_count():
+    loaded = load_torchvision_cnn(
+        ModelConfig(
+            "cnn",
+            "torchvision",
+            "resnet18",
+            pretrained=False,
+            options={"num_classes": 7},
+        ),
+        PreprocessingConfig(image_size=32),
+        RuntimeConfig(device="cpu"),
+    )
+
+    assert loaded.metadata.num_classes == 7
 
 
 def test_dynamic_vit_attention_uses_rectangular_patch_grid():

@@ -132,7 +132,7 @@ def load_torchvision_cnn(
             preprocessing_config.image_size,
         ),
         patch_size=None,
-        num_classes=_num_classes(model),
+        num_classes=_num_classes(model, weights=weights),
         data_config=data_config,
     )
     return LoadedModel(model=model, metadata=metadata)
@@ -298,7 +298,7 @@ def _patch_size(model: Any) -> tuple[int, int] | None:
     return None
 
 
-def _num_classes(model: Any) -> int | None:
+def _num_classes(model: Any, *, weights: Any | None = None) -> int | None:
     num_classes = getattr(model, "num_classes", None)
     if isinstance(num_classes, int):
         return num_classes
@@ -308,4 +308,33 @@ def _num_classes(model: Any) -> int | None:
         cfg_num_classes = pretrained_cfg.get("num_classes")
         if isinstance(cfg_num_classes, int):
             return cfg_num_classes
+
+    weights_metadata = getattr(weights, "meta", None)
+    if isinstance(weights_metadata, dict):
+        categories = weights_metadata.get("categories")
+        if isinstance(categories, (list, tuple)):
+            return len(categories)
+
+    for attribute in ("fc", "head", "heads", "classifier"):
+        output_size = _classifier_output_size(getattr(model, attribute, None))
+        if output_size is not None:
+            return output_size
+    return None
+
+
+def _classifier_output_size(module: Any) -> int | None:
+    if module is None:
+        return None
+    for attribute in ("out_features", "out_channels"):
+        output_size = getattr(module, attribute, None)
+        if isinstance(output_size, int):
+            return output_size
+
+    children = getattr(module, "children", None)
+    if not callable(children):
+        return None
+    for child in reversed(tuple(children())):
+        output_size = _classifier_output_size(child)
+        if output_size is not None:
+            return output_size
     return None
