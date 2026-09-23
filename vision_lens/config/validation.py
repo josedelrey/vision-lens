@@ -55,11 +55,26 @@ from vision_lens.output.artifacts import validate_artifact_paths
 
 def validate_config(config: VisionLensConfig) -> None:
     _validate_resolved_values(config)
-    method = config.analysis.method
     applicable = applicable_setting_keys(config)
     validate_canonical_settings(config, applicable)
     validate_artifact_paths(config)
     validate_precision_device_pair(config.runtime.precision, config.runtime.device)
+    _validate_video_workflow(config)
+    _validate_model_workflow(config)
+    _validate_preprocessing_workflow(config)
+    _validate_visualization_workflow(config, applicable)
+    _validate_output_workflow(config)
+
+    if "cmap" in applicable["visualization"]:
+        _validate_colormap(config.visualization.cmap)
+    if (
+        "background" in applicable["visualization"]
+        and config.visualization.background is not None
+    ):
+        _validate_color(config.visualization.background, "visualization.background")
+
+
+def _validate_video_workflow(config: VisionLensConfig) -> None:
     if config.video is not None:
         if config.preprocessing.crop != "none" or config.preprocessing.pad != "none":
             raise ValueError(
@@ -78,6 +93,9 @@ def validate_config(config: VisionLensConfig) -> None:
                 "visualization.output_size values must be even numbers for video."
             )
 
+
+def _validate_model_workflow(config: VisionLensConfig) -> None:
+    method = config.analysis.method
     actual_pair = (config.model.architecture, config.model.backend)
     expected_pair = ("cnn", "torchvision") if method == "gradcam" else ("vit", "timm")
     if actual_pair != expected_pair:
@@ -112,6 +130,8 @@ def validate_config(config: VisionLensConfig) -> None:
     if isinstance(config.analysis, AttentionAnalysisConfig | RolloutAnalysisConfig):
         _validate_known_attention_constraints(config)
 
+
+def _validate_preprocessing_workflow(config: VisionLensConfig) -> None:
     if config.preprocessing.crop != "none" and config.preprocessing.pad != "none":
         raise ValueError(
             "preprocessing.crop and preprocessing.pad cannot both be enabled."
@@ -123,6 +143,12 @@ def validate_config(config: VisionLensConfig) -> None:
             "preprocessing.resize='stretch' already produces the exact model size; "
             "crop and pad must be 'none'."
         )
+
+
+def _validate_visualization_workflow(
+    config: VisionLensConfig,
+    applicable: dict[str, set[str]],
+) -> None:
     if (
         "interpolation" in applicable["visualization"]
         and config.visualization.anyup_query_chunk_size is not None
@@ -159,6 +185,8 @@ def validate_config(config: VisionLensConfig) -> None:
             "normalization='fixed'."
         )
 
+
+def _validate_output_workflow(config: VisionLensConfig) -> None:
     save_projection = (
         config.analysis.save_projection
         if isinstance(config.analysis, PatchPCAAnalysisConfig)
@@ -201,14 +229,6 @@ def validate_config(config: VisionLensConfig) -> None:
                     f"{config.analysis.projection_path}."
                 )
 
-    if "cmap" in applicable["visualization"]:
-        _validate_colormap(config.visualization.cmap)
-    if (
-        "background" in applicable["visualization"]
-        and config.visualization.background is not None
-    ):
-        _validate_color(config.visualization.background, "visualization.background")
-
 
 def _validate_resolved_values(config: VisionLensConfig) -> None:
     if not isinstance(config, VisionLensConfig):
@@ -236,24 +256,39 @@ def _validate_resolved_values(config: VisionLensConfig) -> None:
             f"analysis must be {expected}; got {type(config.analysis).__name__}."
         )
 
-    if not isinstance(config.input.paths, tuple) or not config.input.paths:
+    _validate_input_values(config.input)
+    _validate_model_values(config.model)
+    _validate_preprocessing_values(config.preprocessing)
+    _validate_analysis_values(config)
+    _validate_runtime_values(config.runtime)
+    _validate_visualization_values(config.visualization)
+    _validate_output_values(config.output)
+    if config.video is not None:
+        _validate_video_values(config.video)
+
+
+def _validate_input_values(input_config: InputConfig) -> None:
+    if not isinstance(input_config.paths, tuple) or not input_config.paths:
         raise ValueError("input.paths must contain at least one file.")
-    for path in config.input.paths:
+    for path in input_config.paths:
         _require_path(path, "input.paths")
         if not path.is_file():
             raise ValueError(f"Input file does not exist: {path}.")
 
-    _require_string(config.model.architecture, "model.architecture")
-    _require_string(config.model.backend, "model.backend")
-    _require_string(config.model.name, "model.name")
-    _require_bool(config.model.pretrained, "model.pretrained")
-    if config.model.options is not None:
-        if not isinstance(config.model.options, dict) or not all(
-            isinstance(key, str) for key in config.model.options
+
+def _validate_model_values(model: ModelConfig) -> None:
+    _require_string(model.architecture, "model.architecture")
+    _require_string(model.backend, "model.backend")
+    _require_string(model.name, "model.name")
+    _require_bool(model.pretrained, "model.pretrained")
+    if model.options is not None:
+        if not isinstance(model.options, dict) or not all(
+            isinstance(key, str) for key in model.options
         ):
             raise ValueError("model.options must be a mapping with string keys.")
 
-    preprocessing = config.preprocessing
+
+def _validate_preprocessing_values(preprocessing: PreprocessingConfig) -> None:
     _require_int(preprocessing.image_size, "preprocessing.image_size", minimum=1)
     _require_choice(
         preprocessing.resize,
@@ -272,76 +307,91 @@ def _validate_resolved_values(config: VisionLensConfig) -> None:
     _require_triplet(preprocessing.mean, "preprocessing.mean")
     _require_triplet(preprocessing.std, "preprocessing.std", positive=True)
 
+
+def _validate_analysis_values(config: VisionLensConfig) -> None:
     analysis = config.analysis
     if isinstance(analysis, AttentionAnalysisConfig | RolloutAnalysisConfig):
-        _require_indices_or_all(analysis.layers, "analysis.layers")
-        _require_optional_indices(analysis.heads, "analysis.heads")
-        _require_choice(
-            analysis.head_fusion, "analysis.head_fusion", HEAD_FUSION_CHOICES
-        )
+        _validate_attention_analysis_values(analysis)
     elif isinstance(analysis, GradCAMAnalysisConfig):
-        if analysis.target_layer is not None:
-            _require_string(analysis.target_layer, "analysis.target_layer")
-        if analysis.target_class is not None:
-            _require_int(analysis.target_class, "analysis.target_class", minimum=0)
+        _validate_gradcam_analysis_values(analysis)
     else:
         assert isinstance(analysis, PatchPCAAnalysisConfig)
-        if analysis.foreground_separation is not None:
-            _require_bool(
-                analysis.foreground_separation,
-                "analysis.foreground_separation",
-            )
-        if (
-            analysis.foreground_threshold is not None
-            and analysis.foreground_threshold != "auto"
-        ):
-            _require_number(
-                analysis.foreground_threshold,
-                "analysis.foreground_threshold",
-                minimum=0,
-                maximum=1,
-            )
-        if analysis.foreground_side is not None:
-            _require_choice(
-                analysis.foreground_side,
-                "analysis.foreground_side",
-                FOREGROUND_SIDE_CHOICES,
-            )
-        if analysis.rgb_fit_scope is not None:
-            _require_choice(
-                analysis.rgb_fit_scope,
-                "analysis.rgb_fit_scope",
-                RGB_FIT_SCOPE_CHOICES,
-            )
-        _require_choice(
-            analysis.projection,
-            "analysis.projection",
-            PROJECTION_CHOICES,
-        )
-        if analysis.projection_path is not None:
-            _require_path(analysis.projection_path, "analysis.projection_path")
-        if analysis.save_projection is not None:
-            _require_path(analysis.save_projection, "analysis.save_projection")
-        if (
-            config.video is None
-            and analysis.projection == "fit"
-            and analysis.foreground_separation is None
-        ):
-            raise ValueError("Image patch PCA requires analysis.foreground_separation.")
-        if analysis.foreground_separation is True and any(
-            value is None
-            for value in (
-                analysis.foreground_threshold,
-                analysis.foreground_side,
-                analysis.rgb_fit_scope,
-            )
-        ):
-            raise ValueError(
-                "Foreground-separated patch PCA requires threshold, side, and "
-                "RGB fit scope settings."
-            )
+        _validate_patch_pca_analysis_values(analysis, is_video=config.video is not None)
 
-    runtime = config.runtime
+
+def _validate_attention_analysis_values(
+    analysis: AttentionAnalysisConfig | RolloutAnalysisConfig,
+) -> None:
+    _require_indices_or_all(analysis.layers, "analysis.layers")
+    _require_optional_indices(analysis.heads, "analysis.heads")
+    _require_choice(analysis.head_fusion, "analysis.head_fusion", HEAD_FUSION_CHOICES)
+
+
+def _validate_gradcam_analysis_values(analysis: GradCAMAnalysisConfig) -> None:
+    if analysis.target_layer is not None:
+        _require_string(analysis.target_layer, "analysis.target_layer")
+    if analysis.target_class is not None:
+        _require_int(analysis.target_class, "analysis.target_class", minimum=0)
+
+
+def _validate_patch_pca_analysis_values(
+    analysis: PatchPCAAnalysisConfig,
+    *,
+    is_video: bool,
+) -> None:
+    if analysis.foreground_separation is not None:
+        _require_bool(
+            analysis.foreground_separation,
+            "analysis.foreground_separation",
+        )
+    if (
+        analysis.foreground_threshold is not None
+        and analysis.foreground_threshold != "auto"
+    ):
+        _require_number(
+            analysis.foreground_threshold,
+            "analysis.foreground_threshold",
+            minimum=0,
+            maximum=1,
+        )
+    if analysis.foreground_side is not None:
+        _require_choice(
+            analysis.foreground_side,
+            "analysis.foreground_side",
+            FOREGROUND_SIDE_CHOICES,
+        )
+    if analysis.rgb_fit_scope is not None:
+        _require_choice(
+            analysis.rgb_fit_scope,
+            "analysis.rgb_fit_scope",
+            RGB_FIT_SCOPE_CHOICES,
+        )
+    _require_choice(analysis.projection, "analysis.projection", PROJECTION_CHOICES)
+    if analysis.projection_path is not None:
+        _require_path(analysis.projection_path, "analysis.projection_path")
+    if analysis.save_projection is not None:
+        _require_path(analysis.save_projection, "analysis.save_projection")
+    if (
+        not is_video
+        and analysis.projection == "fit"
+        and analysis.foreground_separation is None
+    ):
+        raise ValueError("Image patch PCA requires analysis.foreground_separation.")
+    if analysis.foreground_separation is True and any(
+        value is None
+        for value in (
+            analysis.foreground_threshold,
+            analysis.foreground_side,
+            analysis.rgb_fit_scope,
+        )
+    ):
+        raise ValueError(
+            "Foreground-separated patch PCA requires threshold, side, and "
+            "RGB fit scope settings."
+        )
+
+
+def _validate_runtime_values(runtime: RuntimeConfig) -> None:
     _require_choice(runtime.device, "runtime.device", DEVICE_CHOICES)
     _require_int(runtime.batch_size, "runtime.batch_size", minimum=1)
     _require_int(runtime.workers, "runtime.workers", minimum=0)
@@ -353,7 +403,15 @@ def _validate_resolved_values(config: VisionLensConfig) -> None:
     if runtime.seed is not None:
         _require_int(runtime.seed, "runtime.seed", minimum=0, maximum=2**32 - 1)
 
-    visualization = config.visualization
+
+def _validate_visualization_values(visualization: VisualizationConfig) -> None:
+    _validate_visualization_layout_values(visualization)
+    _validate_visualization_rendering_values(visualization)
+
+
+def _validate_visualization_layout_values(
+    visualization: VisualizationConfig,
+) -> None:
     _require_optional_size(visualization.tile_size, "visualization.tile_size")
     for key in ("columns", "items_per_grid", "dpi", "anyup_query_chunk_size"):
         value = getattr(visualization, key)
@@ -369,6 +427,11 @@ def _validate_resolved_values(config: VisionLensConfig) -> None:
         _require_string(visualization.background, "visualization.background")
     if visualization.output_size != "match":
         _require_optional_size(visualization.output_size, "visualization.output_size")
+
+
+def _validate_visualization_rendering_values(
+    visualization: VisualizationConfig,
+) -> None:
     _require_choice(
         visualization.interpolation,
         "visualization.interpolation",
@@ -431,7 +494,8 @@ def _validate_resolved_values(config: VisionLensConfig) -> None:
             maximum=1,
         )
 
-    output = config.output
+
+def _validate_output_values(output: OutputConfig) -> None:
     _require_path(output.directory, "output.directory")
     for key in (
         "heatmaps",
@@ -449,33 +513,33 @@ def _validate_resolved_values(config: VisionLensConfig) -> None:
     _require_choice(output.raw_format, "output.raw_format", RAW_FORMAT_CHOICES)
     _require_choice(output.overwrite, "output.overwrite", OVERWRITE_CHOICES)
 
-    if config.video is not None:
-        video = config.video
-        _require_number(video.start_time, "video.start_time", minimum=0)
-        if video.end_time is not None:
-            _require_number(video.end_time, "video.end_time", minimum=0)
-        if video.sampling_rate != "auto":
-            _require_number(
-                video.sampling_rate,
-                "video.sampling_rate",
-                minimum=0,
-                minimum_inclusive=False,
-            )
-        if video.frame_limit is not None:
-            _require_int(video.frame_limit, "video.frame_limit", minimum=1)
-        _require_int(video.pca_fit_frames, "video.pca_fit_frames", minimum=1)
+
+def _validate_video_values(video: VideoConfig) -> None:
+    _require_number(video.start_time, "video.start_time", minimum=0)
+    if video.end_time is not None:
+        _require_number(video.end_time, "video.end_time", minimum=0)
+    if video.sampling_rate != "auto":
         _require_number(
-            video.temporal_smoothing,
-            "video.temporal_smoothing",
+            video.sampling_rate,
+            "video.sampling_rate",
             minimum=0,
-            maximum=1,
+            minimum_inclusive=False,
         )
-        _require_string(video.codec, "video.codec")
-        _require_choice(
-            video.alpha_format,
-            "video.alpha_format",
-            ALPHA_FORMAT_CHOICES,
-        )
+    if video.frame_limit is not None:
+        _require_int(video.frame_limit, "video.frame_limit", minimum=1)
+    _require_int(video.pca_fit_frames, "video.pca_fit_frames", minimum=1)
+    _require_number(
+        video.temporal_smoothing,
+        "video.temporal_smoothing",
+        minimum=0,
+        maximum=1,
+    )
+    _require_string(video.codec, "video.codec")
+    _require_choice(
+        video.alpha_format,
+        "video.alpha_format",
+        ALPHA_FORMAT_CHOICES,
+    )
 
 
 def _require_instance(value: Any, expected: type[Any], field_name: str) -> None:
@@ -624,17 +688,41 @@ def validate_precision_device_pair(precision: str, device: str) -> None:
 
 
 def applicable_setting_keys(config: VisionLensConfig) -> dict[str, set[str]]:
-    method = config.analysis.method
     is_video = config.video is not None
-    rendered = _renders_output(config)
-    spatial_output = rendered or (config.output.raw_arrays and method != "patch_pca")
+    runtime = {"batch_size", "device", "precision", "seed"}
+    if not is_video:
+        runtime.add("workers")
+    return {
+        "input": set(SECTION_KEYS["input"]),
+        "model": set(SECTION_KEYS["model"]),
+        "preprocessing": _applicable_preprocessing_keys(config, is_video=is_video),
+        "analysis": _applicable_analysis_keys(config, is_video=is_video),
+        "runtime": runtime,
+        "visualization": _applicable_visualization_keys(config, is_video=is_video),
+        "output": _applicable_output_keys(config, is_video=is_video),
+        "video": _applicable_video_keys(config, is_video=is_video),
+    }
 
+
+def _applicable_preprocessing_keys(
+    config: VisionLensConfig,
+    *,
+    is_video: bool,
+) -> set[str]:
     preprocessing = {"image_size", "interpolation", "normalize"}
     if not is_video:
         preprocessing.update({"resize", "crop", "pad"})
     if config.preprocessing.normalize:
         preprocessing.update({"mean", "std"})
+    return preprocessing
 
+
+def _applicable_analysis_keys(
+    config: VisionLensConfig,
+    *,
+    is_video: bool,
+) -> set[str]:
+    method = config.analysis.method
     analysis = set(ANALYSIS_KEYS[method])
     if method == "rollout" and (is_video or not config.output.grids):
         analysis.difference_update({"heads", "head_fusion"})
@@ -656,11 +744,17 @@ def applicable_setting_keys(config: VisionLensConfig) -> dict[str, set[str]]:
                 analysis.difference_update(
                     {"foreground_threshold", "foreground_side", "rgb_fit_scope"}
                 )
+    return analysis
 
-    runtime = {"batch_size", "device", "precision", "seed"}
-    if not is_video:
-        runtime.add("workers")
 
+def _applicable_visualization_keys(
+    config: VisionLensConfig,
+    *,
+    is_video: bool,
+) -> set[str]:
+    method = config.analysis.method
+    rendered = _renders_output(config)
+    spatial_output = rendered or (config.output.raw_arrays and method != "patch_pca")
     visualization: set[str] = set()
     if spatial_output:
         visualization.update({"output_size", "interpolation"})
@@ -680,7 +774,15 @@ def applicable_setting_keys(config: VisionLensConfig) -> dict[str, set[str]]:
         visualization.update(GRID_VISUALIZATION_KEYS)
         if method == "patch_pca":
             visualization.discard("labels")
+    return visualization
 
+
+def _applicable_output_keys(
+    config: VisionLensConfig,
+    *,
+    is_video: bool,
+) -> set[str]:
+    method = config.analysis.method
     output = {"directory", "heatmaps", "raw_arrays", "overwrite"}
     if method != "patch_pca":
         output.update({"overlays", "transparent_overlays"})
@@ -690,7 +792,15 @@ def applicable_setting_keys(config: VisionLensConfig) -> dict[str, set[str]]:
         output.add("image_format")
     if config.output.raw_arrays:
         output.add("raw_format")
+    return output
 
+
+def _applicable_video_keys(
+    config: VisionLensConfig,
+    *,
+    is_video: bool,
+) -> set[str]:
+    method = config.analysis.method
     video: set[str] = set()
     if is_video:
         video.update({"start_time", "end_time", "sampling_rate", "frame_limit"})
@@ -705,17 +815,7 @@ def applicable_setting_keys(config: VisionLensConfig) -> dict[str, set[str]]:
             video.add("codec")
         if config.output.transparent_overlays:
             video.add("alpha_format")
-
-    return {
-        "input": set(SECTION_KEYS["input"]),
-        "model": set(SECTION_KEYS["model"]),
-        "preprocessing": preprocessing,
-        "analysis": analysis,
-        "runtime": runtime,
-        "visualization": visualization,
-        "output": output,
-        "video": video,
-    }
+    return video
 
 
 def validate_canonical_settings(

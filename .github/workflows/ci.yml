@@ -22,8 +22,3 @@ jobs:
       - run: uv run ruff check vision_lens tests
       - run: uv run ruff format --check vision_lens tests
       - run: uv run pytest -m "not real_model"
-      - run: uv build
-      - uses: actions/upload-artifact@v4
-        with:
-          name: distributions
-          path: dist/

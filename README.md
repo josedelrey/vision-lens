@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/josedelrey/vision-lens/actions/workflows/ci.yml/badge.svg)](https://github.com/josedelrey/vision-lens/actions/workflows/ci.yml)
 
-Vision Lens produces visualizations of pretrained vision models for images and sampled video frames. It supports transformer attention, attention rollout, Grad-CAM, and principal component analysis (PCA) of patch features. Runs are defined in YAML and record their resolved settings in a manifest.
+Vision Lens visualizes pretrained vision models on images and sampled video frames. It supports transformer attention, attention rollout, Grad-CAM, and principal component analysis (PCA) of patch features. YAML configurations make runs reproducible, and each run records its resolved settings in a manifest.
 
 ## Results
 
@@ -21,11 +21,6 @@ Vision Lens produces visualizations of pretrained vision models for images and s
       <td align="center" style="border: 0;"><img src="examples/6.jpg" alt="Original horse 6" width="320"></td>
     </tr>
     <tr style="background: transparent; border: 0;">
-      <th align="center" style="border: 0;">Bilinear</th>
-      <td align="center" style="border: 0;"><img src="assets/pca/bilinear-5.png" alt="Horse 5 PCA with bilinear interpolation" width="320"></td>
-      <td align="center" style="border: 0;"><img src="assets/pca/bilinear-6.png" alt="Horse 6 PCA with bilinear interpolation" width="320"></td>
-    </tr>
-    <tr style="background: transparent; border: 0;">
       <th align="center" style="border: 0;">Bilinear mask</th>
       <td align="center" style="border: 0;"><img src="assets/pca/bilinear-mask-5.png" alt="Horse 5 PCA with bilinear mask interpolation" width="320"></td>
       <td align="center" style="border: 0;"><img src="assets/pca/bilinear-mask-6.png" alt="Horse 6 PCA with bilinear mask interpolation" width="320"></td>
@@ -34,11 +29,6 @@ Vision Lens produces visualizations of pretrained vision models for images and s
       <th align="center" style="border: 0;">Nearest</th>
       <td align="center" style="border: 0;"><img src="assets/pca/nearest-5.png" alt="Horse 5 PCA with nearest-neighbor interpolation" width="320"></td>
       <td align="center" style="border: 0;"><img src="assets/pca/nearest-6.png" alt="Horse 6 PCA with nearest-neighbor interpolation" width="320"></td>
-    </tr>
-    <tr style="background: transparent; border: 0;">
-      <th align="center" style="border: 0;">AnyUp soft</th>
-      <td align="center" style="border: 0;"><img src="assets/pca/anyup-soft-5.png" alt="Horse 5 PCA with AnyUp soft interpolation" width="320"></td>
-      <td align="center" style="border: 0;"><img src="assets/pca/anyup-soft-6.png" alt="Horse 6 PCA with AnyUp soft interpolation" width="320"></td>
     </tr>
     <tr style="background: transparent; border: 0;">
       <th align="center" style="border: 0;">AnyUp soft mask</th>
@@ -140,33 +130,34 @@ Vision Lens produces visualizations of pretrained vision models for images and s
 | Grad-CAM | Class-specific activation maps | CNN via `torchvision` |
 | Patch PCA | RGB projection of patch embeddings, with optional image foreground selection | Vision Transformer via `timm` |
 
-These are diagnostic representations of model behavior. Attention and Grad-CAM maps do not establish causal explanations; PCA colors represent feature variation rather than semantic classes.
+These outputs are diagnostic views of model behavior, not causal explanations. PCA colors show feature variation rather than semantic classes.
 
 ## Install
 
-Vision Lens supports Linux and Python 3.12 or newer. With [uv](https://docs.astral.sh/uv/) installed, create the locked environment from the repository root:
+Vision Lens is distributed from this repository and supports Linux with Python
+3.12 or newer. With [Git](https://git-scm.com/) and
+[uv](https://docs.astral.sh/uv/) installed, clone the repository and create its
+locked environment:
 
 ```bash
+git clone https://github.com/josedelrey/vision-lens.git
+cd vision-lens
 uv sync --locked
 ```
 
-For video decoding and export, include the optional dependency:
-
-```bash
-uv sync --locked --extra video
-```
-
-Pretrained weights are downloaded on first use. AnyUp interpolation also downloads its model and checkpoint on first use.
+Use `uv sync --locked --extra video` instead when video decoding or export is needed. Pretrained weights are downloaded on first use; AnyUp interpolation also downloads its model and checkpoint.
 
 ## Run
 
-Run an image workflow:
+Run an image workflow from the repository root:
 
 ```bash
 uv run vision-lens run --config configs/attention.dino_vits8.yaml --set input.limit=1
 ```
 
-To process your own video, copy an image configuration, replace its `input` section, and add a `video` section:
+Runs use a YAML configuration plus optional `--set section.key=value` overrides. The CLI also provides `validate` to check a configuration without loading a model and `resolve` to print all resolved settings. See the [configuration reference](docs/configuration.md) for every setting and compatibility rule.
+
+To process a video, point `input.files` to it and add a `video` section:
 
 ```yaml
 input:
@@ -176,20 +167,11 @@ video:
   sampling_rate: auto
 ```
 
-Then run it with `uv run vision-lens run --config path/to/your/config.yaml`. Standard video outputs are silent MP4 files; transparent overlays can additionally be exported as ProRes 4444 MOV or VP9 WebM files. See the [configuration reference](docs/configuration.md#video) for sampling and encoding options.
-
-Validate settings without loading a model, or inspect all resolved values before a run:
-
-```bash
-uv run vision-lens validate --config configs/attention.dino_vits8.yaml
-uv run vision-lens resolve --config configs/attention.dino_vits8.yaml
-```
-
-`--set section.key=value` overrides a setting using YAML value syntax and can be repeated. For example, `--set runtime.batch_size=2` changes the inference batch size. See the [configuration reference](docs/configuration.md) for available settings and workflow constraints.
+Standard video outputs are silent MP4 files. Transparent overlays can also be exported as ProRes 4444 MOV or VP9 WebM files; the [video reference](docs/configuration.md#video) covers sampling and encoding.
 
 ### Configuration
 
-A minimal image workflow selects inputs, a model, an analysis, and an output directory:
+A minimal image configuration selects an input, model, analysis, and output directory:
 
 ```yaml
 input:
@@ -211,13 +193,13 @@ output:
   directory: outputs/attention
 ```
 
-The configurations in [`configs/`](configs/) cover all four methods. Image inputs can be listed explicitly or selected from folders. A `video` section enables timestamp-based frame sampling. Relative paths in a configuration resolve from the nearest project root containing `pyproject.toml`, or from the working directory when no project root is found.
+The examples in [`configs/`](configs/) cover all four methods. Inputs may be explicit files or files selected from folders. A `video` section enables timestamp-based frame sampling. Relative paths resolve from the nearest project root containing `pyproject.toml`, falling back to the working directory.
 
 ### Outputs
 
-Depending on the workflow, Vision Lens writes heatmaps or PCA color maps, flattened overlays, transparent RGBA overlays, comparison grids, MP4/MOV/WebM streams, and optional raw arrays. Each completed image or single-video run writes `run-manifest.json` with resolved settings, model and runtime details, input metadata, and output paths. Multiple videos produce separate subdirectories and manifests.
+Depending on the workflow, Vision Lens writes heatmaps or PCA color maps, flattened or transparent overlays, comparison grids, video streams, and optional raw arrays. Each completed image or single-video run writes `run-manifest.json` with its configuration, model and runtime details, inputs, and output paths. Multiple videos receive separate directories and manifests.
 
-Grid layout, output resolution, interpolation, colormap, normalization, and overwrite behavior are configurable. The [configuration reference](docs/configuration.md) documents their defaults and compatibility rules.
+Grid layout, output size, interpolation, colormap, normalization, and overwrite behavior are configurable.
 
 ## Python API
 
@@ -231,7 +213,7 @@ for path in result.output_paths:
     print(path)
 ```
 
-The public API also provides `run_pipeline(path)`, `parse_config`, `validate_config`, and `resolved_config_yaml`. Results expose the resolved `config` and generated `output_paths`. Configuration failures raise `ConfigurationError`; execution failures raise `PipelineError`. Both inherit from `VisionLensError`.
+The public API also includes `run_pipeline`, `parse_config`, `validate_config`, and `resolved_config_yaml`. Results expose the resolved configuration and generated output paths. Configuration and execution failures raise `ConfigurationError` and `PipelineError`, both derived from `VisionLensError`.
 
 ## License and attribution
 
