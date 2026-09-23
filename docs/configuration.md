@@ -1,6 +1,6 @@
 # Configuration reference
 
-Vision Lens uses YAML sections for `input`, `model`, `preprocessing`, `analysis`, `runtime`, `visualization`, and `output`. Adding `video` selects frame-based processing. Omitted settings use the defaults below. Unknown or inapplicable settings are rejected during validation, before model weights are loaded.
+Vision Lens configuration can come from a YAML file, command-line flags, or both. The configuration sections are `input`, `model`, `preprocessing`, `analysis`, `runtime`, `visualization`, and `output`. Adding `video` selects frame-based processing. Omitted settings use the defaults below. Missing, unknown, or inapplicable settings are rejected during validation, before model weights are loaded.
 
 ```bash
 uv run vision-lens validate --config workflow.yaml
@@ -8,9 +8,24 @@ uv run vision-lens resolve --config workflow.yaml
 uv run vision-lens run --config workflow.yaml
 ```
 
-`resolve` prints the configuration after defaults, input expansion, and path resolution. `--set section.key=value` can be repeated on any command; values are parsed as YAML. Overrides cannot switch `analysis.method`, PCA projection or foreground modes, or add a `video` section. Put mode changes in a separate YAML file.
+The YAML file is optional. Every setting also has a named CLI flag formed as `--section-key`, and each value is parsed as YAML:
 
-Paths inside a configuration, including overridden paths, resolve from the nearest ancestor of the configuration file containing `pyproject.toml`. If none exists, the loader searches upward from the working directory. Otherwise it uses the working directory. The `--config` argument itself follows normal shell path rules.
+```bash
+uv run vision-lens validate \
+  --input-files '[examples/1.jpg]' \
+  --model-architecture vit \
+  --model-backend timm \
+  --model-name vit_small_patch8_224.dino \
+  --analysis-method attention \
+  --analysis-layers '[11]' \
+  --output-directory outputs/attention
+```
+
+`--set section.key=value` remains available and can be repeated. Configuration precedence is YAML, then `--set`, then named `--section-key` flags. The final merged mapping goes through the same parser and validator regardless of its sources. This means a partial CLI-only configuration is accepted by argument parsing and then reports the same missing-setting error as an equivalent partial YAML file.
+
+Use `--video` to add an empty video section with default settings, or pass any `--video-*` field to select a video workflow. `resolve` prints the configuration after merging, defaults, input expansion, and path resolution. Run `vision-lens --help` for the complete generated flag list.
+
+With `--config`, paths resolve from the nearest ancestor of the configuration file containing `pyproject.toml`. Without `--config`, path resolution starts from the working directory and searches for a project root. If no project root exists, paths use the working directory. The `--config` argument itself follows normal shell path rules.
 
 ## Input
 

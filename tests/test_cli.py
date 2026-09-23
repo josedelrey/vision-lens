@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
-from vision_lens.cli import _parse_overrides, main
+from vision_lens.cli import CONFIG_OPTION_PATHS, _build_parser, _parse_overrides, main
 
 
 @pytest.fixture
@@ -50,11 +50,158 @@ def test_cli_rejects_malformed_override():
         _parse_overrides(["preprocessing.image_size"])
 
 
-def test_cli_requires_a_config_file(capsys):
+def test_cli_without_config_validates_the_supplied_mapping(capsys):
     with pytest.raises(SystemExit, match="2"):
-        main(["validate"])
+        main(["validate", "--runtime-device", "cpu"])
 
-    assert "--config" in capsys.readouterr().err
+    error = capsys.readouterr().err
+    assert "input must select at least one existing file" in error
+
+
+def test_cli_supports_set_only_configuration(capsys, tmp_path):
+    source = tmp_path / "input.jpg"
+    source.touch()
+
+    assert (
+        main(
+            [
+                "validate",
+                "--set",
+                f"input.files=[{source}]",
+                "--set",
+                "model.architecture=vit",
+                "--set",
+                "model.backend=timm",
+                "--set",
+                "model.name=mock_vit",
+                "--set",
+                "analysis.method=attention",
+                "--set",
+                "analysis.layers=[0]",
+                "--set",
+                f"output.directory={tmp_path / 'results'}",
+            ]
+        )
+        == 0
+    )
+
+    assert capsys.readouterr().out == "configuration is valid\n"
+
+
+def test_cli_supports_named_flags_without_config(capsys, tmp_path):
+    source = tmp_path / "input.jpg"
+    source.touch()
+
+    assert (
+        main(
+            [
+                "resolve",
+                "--input-files",
+                f"[{source}]",
+                "--model-architecture",
+                "vit",
+                "--model-backend",
+                "timm",
+                "--model-name",
+                "mock_vit",
+                "--preprocessing-interpolation",
+                "bilinear",
+                "--analysis-method",
+                "attention",
+                "--analysis-layers",
+                "[0]",
+                "--runtime-device",
+                "cpu",
+                "--visualization-output-size",
+                "match",
+                "--visualization-interpolation",
+                "nearest",
+                "--visualization-cmap-black",
+                "{threshold: 20, blend_width: 35, transparent: true}",
+                "--output-directory",
+                str(tmp_path / "results"),
+                "--output-transparent-overlays",
+                "true",
+                "--output-overwrite",
+                "replace",
+            ]
+        )
+        == 0
+    )
+
+    output = capsys.readouterr().out
+    assert "architecture: vit" in output
+    assert "method: attention" in output
+    assert "device: cpu" in output
+    assert "transparent_overlays: true" in output
+
+
+def test_named_flags_override_set_and_yaml_values(capsys, config_path):
+    assert (
+        main(
+            [
+                "resolve",
+                "--config",
+                str(config_path),
+                "--set",
+                "runtime.device=cpu",
+                "--runtime-device",
+                "cuda",
+            ]
+        )
+        == 0
+    )
+
+    assert "device: cuda" in capsys.readouterr().out
+
+
+def test_video_flag_adds_default_video_section(capsys, tmp_path):
+    source = tmp_path / "input.mp4"
+    source.touch()
+
+    assert (
+        main(
+            [
+                "resolve",
+                "--video",
+                "--input-files",
+                f"[{source}]",
+                "--model-architecture",
+                "vit",
+                "--model-backend",
+                "timm",
+                "--model-name",
+                "mock_vit",
+                "--analysis-method",
+                "attention",
+                "--analysis-layers",
+                "[0]",
+                "--output-directory",
+                str(tmp_path / "results"),
+            ]
+        )
+        == 0
+    )
+
+    output = capsys.readouterr().out
+    assert "video:" in output
+    assert "sampling_rate: 5.0" in output
+
+
+def test_every_config_setting_has_a_named_cli_flag():
+    parser = _build_parser()
+    available = {
+        option
+        for action in parser._actions
+        for option in action.option_strings
+    }
+    expected = {
+        f"--{section}-{key.replace('_', '-')}"
+        for section, key in CONFIG_OPTION_PATHS
+    }
+
+    assert expected <= available
+    assert "--video" in available
 
 
 def test_cli_hides_individual_output_paths_by_default(monkeypatch, capsys, config_path):

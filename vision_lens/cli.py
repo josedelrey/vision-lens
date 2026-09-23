@@ -1,42 +1,45 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
 import yaml
 
-from vision_lens import VisionLensError, load_config, resolved_config_yaml
+from vision_lens import (
+    VisionLensError,
+    load_config,
+    parse_config,
+    resolved_config_yaml,
+)
+from vision_lens.config.schema import ANALYSIS_KEYS, SECTION_KEYS
+
+CONFIG_OPTION_PATHS = tuple(
+    (section, key)
+    for section, keys in {
+        **SECTION_KEYS,
+        "analysis": set().union(*ANALYSIS_KEYS.values()),
+    }.items()
+    for key in sorted(keys)
+)
+CONFIG_OPTION_DESTINATIONS = {
+    f"config_{section}_{key}": f"{section}.{key}"
+    for section, key in CONFIG_OPTION_PATHS
+}
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        prog="vision-lens",
-        description="Run Vision Lens model visualization pipelines.",
-    )
-    parser.add_argument(
-        "command",
-        nargs="?",
-        choices=("run", "validate", "resolve"),
-        default="run",
-        help="Run the workflow, validate configuration, or print resolved YAML.",
-    )
-    parser.add_argument(
-        "--config",
-        required=True,
-        help="Path to the YAML config file.",
-    )
-    parser.add_argument(
-        "--set",
-        action="append",
-        default=[],
-        metavar="SECTION.KEY=VALUE",
-        help="Override one setting; may be repeated and accepts YAML values.",
-    )
+    parser = _build_parser()
     args = parser.parse_args(argv)
 
     try:
-        overrides = _parse_overrides(args.set)
-        config = load_config(Path(args.config), overrides=overrides)
+        overrides = _cli_overrides(args)
+        config = (
+            load_config(Path(args.config), overrides=overrides)
+            if args.config is not None
+            else parse_config(overrides)
+        )
     except (OSError, ValueError, yaml.YAMLError) as error:
         parser.error(str(error))
 
@@ -68,6 +71,63 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="vision-lens",
+        description="Run Vision Lens model visualization pipelines.",
+    )
+    parser.add_argument(
+        "command",
+        nargs="?",
+        choices=("run", "validate", "resolve"),
+        default="run",
+        help="Run the workflow, validate configuration, or print resolved YAML.",
+    )
+    parser.add_argument(
+        "--config",
+        help="Optional YAML config file; command-line values override it.",
+    )
+    parser.add_argument(
+        "--set",
+        action="append",
+        default=[],
+        metavar="SECTION.KEY=VALUE",
+        help="Override one setting; may be repeated and accepts YAML values.",
+    )
+    parser.add_argument(
+        "--video",
+        action="store_true",
+        help="Enable a video workflow using the default video settings.",
+    )
+    config_group = parser.add_argument_group(
+        "configuration fields",
+        "Named flags accept the same YAML values as their config fields. "
+        "They override both --config and --set values.",
+    )
+    for destination, path in CONFIG_OPTION_DESTINATIONS.items():
+        config_group.add_argument(
+            f"--{path.replace('.', '-').replace('_', '-')}",
+            dest=destination,
+            default=argparse.SUPPRESS,
+            metavar="YAML",
+            help=f"Set {path}.",
+        )
+    return parser
+
+
+def _cli_overrides(args: argparse.Namespace) -> dict[str, Any]:
+    set_overrides = _parse_overrides(args.set)
+    named_assignments = [
+        f"{path}={getattr(args, destination)}"
+        for destination, path in CONFIG_OPTION_DESTINATIONS.items()
+        if hasattr(args, destination)
+    ]
+    named_overrides = _parse_overrides(named_assignments)
+    if args.video:
+        named_overrides = _deep_merge({"video": {}}, named_overrides)
+    return _deep_merge(set_overrides, named_overrides)
+
+
 def _parse_overrides(assignments: list[str]) -> dict[str, object]:
     overrides: dict[str, object] = {}
     for assignment in assignments:
@@ -88,6 +148,20 @@ def _parse_overrides(assignments: list[str]) -> dict[str, object]:
             target = existing
         target[keys[-1]] = yaml.safe_load(raw_value)
     return overrides
+
+
+def _deep_merge(
+    base: Mapping[str, Any],
+    override: Mapping[str, Any],
+) -> dict[str, Any]:
+    merged = dict(base)
+    for key, value in override.items():
+        current = merged.get(key)
+        if isinstance(current, Mapping) and isinstance(value, Mapping):
+            merged[key] = _deep_merge(current, value)
+        else:
+            merged[key] = value
+    return merged
 
 
 if __name__ == "__main__":

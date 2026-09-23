@@ -99,7 +99,6 @@ def parse_config(
     base = _project_root(Path.cwd()) if base_dir is None else Path(base_dir).resolve()
     resolved = _deep_merge(raw_config, overrides or {})
     _validate_keys(resolved)
-    _validate_mode_overrides(raw_config, overrides or {})
 
     input_section = config_section(resolved, "input")
     model_section = config_section(resolved, "model")
@@ -588,40 +587,6 @@ def _deep_merge(
         else:
             merged[key] = value
     return merged
-
-
-def _validate_mode_overrides(
-    raw_config: Mapping[str, Any],
-    overrides: Mapping[str, Any],
-) -> None:
-    if not overrides:
-        return
-
-    raw_analysis = config_section(raw_config, "analysis")
-    override_analysis = config_section(overrides, "analysis")
-    mode_settings = {
-        "method": raw_analysis.get("method", DEFAULT_ANALYSIS_METHOD),
-        "projection": raw_analysis.get(
-            "projection", ANALYSIS_DEFAULTS["patch_pca"]["projection"]
-        ),
-        "foreground_separation": raw_analysis.get(
-            "foreground_separation",
-            PATCH_PCA_IMAGE_FIT_DEFAULTS["foreground_separation"],
-        ),
-    }
-    changed = [
-        f"analysis.{key}"
-        for key, current in mode_settings.items()
-        if key in override_analysis and override_analysis[key] != current
-    ]
-    if "video" in overrides and "video" not in raw_config:
-        changed.append("video workflow")
-    if changed:
-        settings = ", ".join(changed)
-        raise ValueError(
-            f"CLI/config overrides cannot switch conditional mode setting(s): "
-            f"{settings}. Edit or create a configuration file for that workflow."
-        )
 
 
 def _optional_string(value: Any, field_name: str) -> str | None:
