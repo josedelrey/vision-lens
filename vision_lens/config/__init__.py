@@ -13,6 +13,7 @@ import yaml
 from vision_lens.config import parsing as _parsing
 from vision_lens.config import validation as _validation
 from vision_lens.config.schema import (
+    AlphaFormat,
     AnalysisConfig,
     AnalysisMethod,
     AttentionAnalysisConfig,
@@ -40,6 +41,7 @@ from vision_lens.config.schema import (
 from vision_lens.errors import ConfigurationError
 
 __all__ = [
+    "AlphaFormat",
     "AnalysisConfig",
     "AnalysisMethod",
     "AttentionAnalysisConfig",

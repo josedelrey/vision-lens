@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from vision_lens.config.schema import (
+    ALPHA_FORMAT_CHOICES,
     ANALYSIS_CONFIG_TYPES,
     ANALYSIS_DEFAULTS,
     ANALYSIS_KEYS,
@@ -167,6 +168,7 @@ def validate_config(config: VisionLensConfig) -> None:
         (
             config.output.heatmaps,
             config.output.overlays,
+            config.output.transparent_overlays,
             config.output.grids,
             config.output.raw_arrays,
             save_projection is not None,
@@ -184,6 +186,10 @@ def validate_config(config: VisionLensConfig) -> None:
     if isinstance(config.analysis, PatchPCAAnalysisConfig):
         if config.output.overlays:
             raise ValueError("output.overlays is not supported for patch PCA.")
+        if config.output.transparent_overlays:
+            raise ValueError(
+                "output.transparent_overlays is not supported for patch PCA."
+            )
         if config.analysis.projection == "load":
             if config.analysis.projection_path is None:
                 raise ValueError(
@@ -427,7 +433,13 @@ def _validate_resolved_values(config: VisionLensConfig) -> None:
 
     output = config.output
     _require_path(output.directory, "output.directory")
-    for key in ("heatmaps", "overlays", "grids", "raw_arrays"):
+    for key in (
+        "heatmaps",
+        "overlays",
+        "transparent_overlays",
+        "grids",
+        "raw_arrays",
+    ):
         _require_bool(getattr(output, key), f"output.{key}")
     _require_choice(
         output.image_format,
@@ -459,6 +471,11 @@ def _validate_resolved_values(config: VisionLensConfig) -> None:
             maximum=1,
         )
         _require_string(video.codec, "video.codec")
+        _require_choice(
+            video.alpha_format,
+            "video.alpha_format",
+            ALPHA_FORMAT_CHOICES,
+        )
 
 
 def _require_instance(value: Any, expected: type[Any], field_name: str) -> None:
@@ -653,7 +670,11 @@ def applicable_setting_keys(config: VisionLensConfig) -> dict[str, set[str]]:
         visualization.update({"normalization", "cmap", "cmap_black"})
         if config.visualization.normalization == "fixed":
             visualization.add("normalization_range")
-        if config.output.overlays or config.output.grids:
+        if (
+            config.output.overlays
+            or config.output.transparent_overlays
+            or config.output.grids
+        ):
             visualization.update({"overlay_alpha", "overlay_alpha_curve"})
     if not is_video and config.output.grids:
         visualization.update(GRID_VISUALIZATION_KEYS)
@@ -662,7 +683,7 @@ def applicable_setting_keys(config: VisionLensConfig) -> dict[str, set[str]]:
 
     output = {"directory", "heatmaps", "raw_arrays", "overwrite"}
     if method != "patch_pca":
-        output.add("overlays")
+        output.update({"overlays", "transparent_overlays"})
     if not is_video:
         output.add("grids")
     if not is_video and (config.output.heatmaps or config.output.overlays):
@@ -682,6 +703,8 @@ def applicable_setting_keys(config: VisionLensConfig) -> dict[str, set[str]]:
             video.add("temporal_smoothing")
         if config.output.heatmaps or config.output.overlays:
             video.add("codec")
+        if config.output.transparent_overlays:
+            video.add("alpha_format")
 
     return {
         "input": set(SECTION_KEYS["input"]),
@@ -736,7 +759,12 @@ def validate_canonical_settings(
 
 
 def _renders_output(config: VisionLensConfig) -> bool:
-    return config.output.heatmaps or config.output.overlays or config.output.grids
+    return (
+        config.output.heatmaps
+        or config.output.overlays
+        or config.output.transparent_overlays
+        or config.output.grids
+    )
 
 
 def validate_applicable_settings(

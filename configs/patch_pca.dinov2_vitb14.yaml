@@ -20,5 +20,5 @@ visualization:
   interpolation: nearest
 
 output:
-  directory: outputs/image/dinov2_patch_pca
+  directory: outputs/image/dinov2_vitb14/patch_pca
   overwrite: replace

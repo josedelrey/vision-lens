@@ -1,30 +1,26 @@
 input:
-  files:
-    - videos/2.mp4
+  folders:
+    - examples
 
 model:
   architecture: vit
   backend: timm
-  name: vit_small_patch8_224.dino
+  name: hf_hub:timm/vit_small_patch14_reg4_dinov2.lvd142m
 
 preprocessing:
-  image_size: 224
   interpolation: bilinear
 
 analysis:
   method: attention
-  layers: [11]
+  layers: [2, 5, 8, 11]
 
 visualization:
   output_size: match
   interpolation: nearest
-  overlay_alpha: 1.0
-  overlay_alpha_curve: {steepness: 15, midpoint: 0.25}
+  overlay_alpha: 0.8
   cmap_black: {threshold: 20, blend_width: 35, transparent: true}
 
 output:
-  directory: outputs/video/dino_vits8_attention
+  directory: outputs/image/dinov2_vits14_reg4/attention
+  transparent_overlays: true
   overwrite: replace
-
-video:
-  sampling_rate: auto

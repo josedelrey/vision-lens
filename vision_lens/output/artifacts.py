@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Literal
 
 from vision_lens.config.schema import (
+    ALPHA_FORMAT_EXTENSIONS,
     KNOWN_VIT_DEPTHS,
     KNOWN_VIT_HEADS,
     AttentionAnalysisConfig,
@@ -137,7 +138,7 @@ def map_stream_name(method: str, layer_index: int, head_name: str) -> str:
 
 def rendered_stream_name(
     stream_name: str,
-    kind: Literal["heatmap", "overlay"],
+    kind: Literal["heatmap", "overlay", "transparent_overlay"],
 ) -> str:
     return f"{stream_name}_{kind}"
 
@@ -154,8 +155,13 @@ def grid_page_path(
     return directory / f"{stem}_part-{page_index + 1:03d}.{extension}"
 
 
-def video_artifact_path(directory: Path, source_stem: str, name: str) -> Path:
-    return directory / f"{source_stem}_{name}.mp4"
+def video_artifact_path(
+    directory: Path,
+    source_stem: str,
+    name: str,
+    extension: str = "mp4",
+) -> Path:
+    return directory / f"{source_stem}_{name}.{extension}"
 
 
 def video_raw_batch_path(
@@ -366,6 +372,8 @@ def _image_artifact_patterns(
             patterns.append(rf"(?:{labels})_gradcam_heatmap\.{image_extension}")
         if config.output.overlays:
             patterns.append(rf"(?:{labels})_gradcam_overlay\.{image_extension}")
+        if config.output.transparent_overlays:
+            patterns.append(rf"(?:{labels})_gradcam_transparent_overlay\.png")
         if config.output.raw_arrays:
             patterns.append(rf"(?:{labels})_gradcam\.{raw_extension}")
         if config.output.grids:
@@ -421,6 +429,7 @@ def _video_artifact_patterns(
     config: VisionLensConfig,
     source_stem: str,
 ) -> tuple[re.Pattern[str], ...]:
+    assert config.video is not None
     prefix = re.escape(source_stem)
     patterns: list[str] = []
     stream: str
@@ -451,6 +460,9 @@ def _video_artifact_patterns(
         patterns.append(rf"{prefix}_{heatmap_stream}\.mp4")
     if config.output.overlays:
         patterns.append(rf"{prefix}_{stream}_overlay\.mp4")
+    if config.output.transparent_overlays:
+        alpha_extension = ALPHA_FORMAT_EXTENSIONS[config.video.alpha_format]
+        patterns.append(rf"{prefix}_{stream}_transparent_overlay\.{alpha_extension}")
     if config.output.raw_arrays:
         raw_stream = "patch_pca_rgb" if stream == "patch_pca" else stream
         extension = re.escape(config.output.raw_format)
@@ -469,6 +481,8 @@ def _append_map_output_patterns(
         patterns.append(rf"{stem}_heatmap\.{image_extension}")
     if config.output.overlays:
         patterns.append(rf"{stem}_overlay\.{image_extension}")
+    if config.output.transparent_overlays:
+        patterns.append(rf"{stem}_transparent_overlay\.png")
     if config.output.raw_arrays:
         patterns.append(rf"{stem}\.{raw_extension}")
 

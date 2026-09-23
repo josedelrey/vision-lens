@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from fractions import Fraction
 from math import isfinite
@@ -10,7 +10,32 @@ from typing import Any
 import numpy as np
 from PIL import Image
 
-from vision_lens.config import VideoConfig
+from vision_lens.config import AlphaFormat, VideoConfig
+from vision_lens.config.schema import ALPHA_FORMAT_EXTENSIONS
+
+
+@dataclass(frozen=True)
+class AlphaVideoEncoding:
+    extension: str
+    codec: str
+    pixel_format: str
+    codec_options: Mapping[str, str]
+
+
+ALPHA_VIDEO_ENCODINGS: dict[AlphaFormat, AlphaVideoEncoding] = {
+    "prores_4444": AlphaVideoEncoding(
+        extension=ALPHA_FORMAT_EXTENSIONS["prores_4444"],
+        codec="prores_ks",
+        pixel_format="yuva444p10le",
+        codec_options={"profile": "4444"},
+    ),
+    "vp9": AlphaVideoEncoding(
+        extension=ALPHA_FORMAT_EXTENSIONS["vp9"],
+        codec="libvpx-vp9",
+        pixel_format="yuva420p",
+        codec_options={"crf": "18", "b": "0", "auto-alt-ref": "0"},
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -45,6 +70,30 @@ def require_video_dependencies() -> Any:
             'Install it with `pip install "vision-lens[video]"`.'
         ) from error
     return av
+
+
+def require_video_encoder(
+    codec: str,
+    *,
+    field_name: str,
+    pixel_format: str | None = None,
+) -> None:
+    av = require_video_dependencies()
+    try:
+        encoder = av.Codec(codec, "w")
+    except (ValueError, LookupError) as error:
+        raise RuntimeError(
+            f"{field_name} requires unavailable video encoder {codec!r}."
+        ) from error
+    if pixel_format is None:
+        return
+    supported_formats = {
+        video_format.name for video_format in (encoder.video_formats or ())
+    }
+    if pixel_format not in supported_formats:
+        raise RuntimeError(
+            f"{field_name} requires {codec!r} to support pixel format {pixel_format!r}."
+        )
 
 
 def probe_video(path: str | Path) -> VideoMetadata:
@@ -216,6 +265,9 @@ class VideoWriter:
         frame_rate: float,
         resolution: tuple[int, int],
         codec: str,
+        pixel_format: str = "yuv420p",
+        preserve_alpha: bool = False,
+        codec_options: Mapping[str, str] | None = None,
     ) -> None:
         av = require_video_dependencies()
         self._av = av
@@ -224,16 +276,23 @@ class VideoWriter:
         self._container = av.open(str(self.path), mode="w")
         self._rate = Fraction(str(frame_rate)).limit_denominator(100_000)
         self._time_base = 1 / self._rate
-        self._stream = self._container.add_stream(codec, rate=self._rate)
+        self._stream = self._container.add_stream(
+            codec,
+            rate=self._rate,
+            options=dict(codec_options or {}),
+        )
         self._stream.width, self._stream.height = resolution
-        self._stream.pix_fmt = "yuv420p"
+        self._stream.pix_fmt = pixel_format
         self._stream.codec_context.time_base = self._time_base
         self._resolution = resolution
+        self._preserve_alpha = preserve_alpha
         self._frame_index = 0
         self._closed = False
 
     def write(self, image: Image.Image) -> None:
-        resized = image if image.mode == "RGB" else image.convert("RGB")
+        mode = "RGBA" if self._preserve_alpha else "RGB"
+        frame_format = "rgba" if self._preserve_alpha else "rgb24"
+        resized = image if image.mode == mode else image.convert(mode)
         if resized.size != self._resolution:
             resized = resized.resize(
                 self._resolution,
@@ -241,7 +300,7 @@ class VideoWriter:
             )
         frame = self._av.VideoFrame.from_ndarray(
             np.asarray(resized),
-            format="rgb24",
+            format=frame_format,
         )
         frame.pts = self._frame_index
         frame.time_base = self._time_base

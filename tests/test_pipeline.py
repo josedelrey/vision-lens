@@ -2,6 +2,7 @@ import json
 from dataclasses import replace
 from pathlib import Path
 
+import numpy as np
 import pytest
 import torch
 from PIL import Image
@@ -272,6 +273,41 @@ def test_gradcam_export_preserves_heatmap_overlay_and_grid_layout(tmp_path):
     }
     with Image.open(tmp_path / "gradcam_images.png") as grid:
         assert grid.size == (460, 256)
+
+
+def test_gradcam_exports_independent_transparent_png(tmp_path):
+    image = Image.new("RGB", (4, 4), "red")
+    gradcam = GradCamResult(
+        logits=torch.zeros(1, 2),
+        maps=torch.tensor([[[[0.0, 0.25], [0.75, 1.0]]]]),
+        target_classes=(0,),
+        target_layer="layer4",
+        image_size=(4, 4),
+    )
+    output = OutputConfig(
+        tmp_path,
+        heatmaps=False,
+        overlays=False,
+        transparent_overlays=True,
+        grids=False,
+        image_format="jpeg",
+    )
+
+    paths = export_gradcam_outputs(
+        images=[image],
+        image_paths=(Path("first.jpg"),),
+        gradcam=gradcam,
+        output_dir=tmp_path,
+        alpha=0.8,
+        cmap="viridis",
+        grid_format="png",
+        output_config=output,
+    )
+
+    assert [path.name for path in paths] == ["first_gradcam_transparent_overlay.png"]
+    with Image.open(paths[0]) as overlay:
+        assert overlay.mode == "RGBA"
+        assert set(np.asarray(overlay)[..., 3].flat) == {204}
 
 
 def test_matching_output_size_applies_to_all_image_exporters(tmp_path):
