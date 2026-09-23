@@ -1,6 +1,6 @@
 # Configuration reference
 
-Vision Lens configuration can come from a YAML file, command-line flags, or both. The configuration sections are `input`, `model`, `preprocessing`, `analysis`, `runtime`, `visualization`, and `output`. Adding `video` selects frame-based processing. Omitted settings use the defaults below. Missing, unknown, or inapplicable settings are rejected during validation, before model weights are loaded.
+Vision Lens configuration can come from a YAML file, command-line flags, or both. The configuration sections are `input`, `model`, `preprocessing`, `analysis`, `runtime`, `visualization`, and `output`. Image and video inputs are detected automatically; the optional `video` section customizes frame-based processing. Omitted settings use the defaults below. Missing, unknown, or inapplicable settings are rejected during validation, before model weights are loaded.
 
 ```bash
 uv run vision-lens validate --config workflow.yaml
@@ -23,23 +23,25 @@ uv run vision-lens validate \
 
 `--set section.key=value` remains available and can be repeated. Configuration precedence is YAML, then `--set`, then named `--section-key` flags. The final merged mapping goes through the same parser and validator regardless of its sources. This means a partial CLI-only configuration is accepted by argument parsing and then reports the same missing-setting error as an equivalent partial YAML file.
 
-Use `--video` to add an empty video section with default settings, or pass any `--video-*` field to select a video workflow. `resolve` prints the configuration after merging, defaults, input expansion, and path resolution. Run `vision-lens --help` for the complete generated flag list.
+Video files do not require a mode flag or a `video` section. The legacy `--video` flag remains accepted for compatibility but is no longer needed. Pass a `--video-*` field only to override a video default. `validate` reports the detected image and video counts. `resolve` includes the same counts in a YAML comment and prints the configuration after merging, media detection, defaults, input expansion, and path resolution. Run `vision-lens --help` for the complete generated flag list.
 
 With `--config`, paths resolve from the nearest ancestor of the configuration file containing `pyproject.toml`. Without `--config`, path resolution starts from the working directory and searches for a project root. If no project root exists, paths use the working directory. The `--config` argument itself follows normal shell path rules.
 
 ## Input
 
-At least one existing file must be selected. Explicit files retain their listed order; duplicate paths are removed. Folder patterns are relative globs, and `limit` applies after expansion.
+At least one existing supported media file must be selected. Explicit files retain their listed order, duplicate paths are removed, and unsupported explicit file types are rejected. Folder patterns are relative globs; matching unsupported files are ignored. `limit` applies after expansion and media filtering.
 
 | Setting | Default | Meaning |
 |---|---|---|
 | `input.files` | `[]` | Image or video file paths. |
 | `input.folders` | `[]` | Folders searched for inputs. |
-| `input.patterns` | `*.jpg`, `*.jpeg`, `*.png`, `*.webp` | Globs applied within each folder. Set video patterns when selecting videos from folders. |
+| `input.patterns` | `*` | Globs applied within each folder before supported-media filtering. |
 | `input.recursive` | `false` | Search nested folders. |
 | `input.limit` | `null` | Maximum number of selected files. |
 
-Absolute glob patterns and patterns containing `..` are rejected.
+Absolute glob patterns and patterns containing `..` are rejected. Supported image extensions are `.jpg`, `.jpeg`, `.png`, and `.webp`. Supported video extensions are `.avi`, `.m4v`, `.mkv`, `.mov`, `.mp4`, and `.webm`. Extension matching is case-insensitive. The selected image and video groups are decoded by Pillow and PyAV respectively, so corrupt or misleadingly renamed files still fail with a decoder error.
+
+When both media types are selected, images are processed together and videos are processed independently. Outputs use `output.directory/images/` for the image run and `output.directory/videos/<name>/` for each video. Image-only and video-only runs retain the ordinary output layout.
 
 ## Model
 
@@ -207,7 +209,7 @@ At least one output type must be enabled. `output.overlays` retains the existing
 
 ## Video
 
-Install video support with `uv sync --locked --extra video`. A `video` section processes timestamp-sampled frames and exports silent MP4 streams, plus optional alpha-capable MOV or WebM streams. Source audio is not copied.
+Install video support with `uv sync --locked --extra video`. Detected videos are processed as timestamp-sampled frames and exported as silent MP4 streams, plus optional alpha-capable MOV or WebM streams. Source audio is not copied. The `video` section is optional and only changes the defaults below.
 
 | Setting | Default | Meaning |
 |---|---|---|

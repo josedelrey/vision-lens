@@ -13,6 +13,7 @@ from vision_lens import (
     parse_config,
     resolved_config_yaml,
 )
+from vision_lens.config.media import media_count_summary
 from vision_lens.config.schema import ANALYSIS_KEYS, SECTION_KEYS
 
 CONFIG_OPTION_PATHS = tuple(
@@ -44,20 +45,32 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(str(error))
 
     if args.command == "validate":
-        print("configuration is valid")
+        print(f"configuration is valid ({media_count_summary(config.input.paths)})")
         return 0
     if args.command == "resolve":
         print(resolved_config_yaml(config), end="")
         return 0
 
     from vision_lens import run_pipeline_from_config
+    from vision_lens.pipeline import MixedPipelineResult
     from vision_lens.pipeline.video import VideoBatchPipelineResult
 
     try:
         result = run_pipeline_from_config(config)
     except VisionLensError as error:
         parser.error(str(error))
-    if isinstance(result, VideoBatchPipelineResult):
+    if isinstance(result, MixedPipelineResult):
+        video_count = (
+            len(result.video.videos)
+            if isinstance(result.video, VideoBatchPipelineResult)
+            else 1
+        )
+        print(
+            f"saved {len(result.output_paths)} outputs plus "
+            f"{video_count + 1} run manifests under "
+            f"{result.config.output.directory}"
+        )
+    elif isinstance(result, VideoBatchPipelineResult):
         print(
             f"saved {len(result.output_paths)} outputs plus "
             f"{len(result.videos)} run manifests under "
@@ -97,7 +110,9 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--video",
         action="store_true",
-        help="Enable a video workflow using the default video settings.",
+        help=(
+            "Deprecated compatibility flag; video inputs are detected automatically."
+        ),
     )
     config_group = parser.add_argument_group(
         "configuration fields",

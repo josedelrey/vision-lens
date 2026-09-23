@@ -237,7 +237,7 @@ class VisionLensConfig:
     video: VideoConfig | None = None
 
 
-DEFAULT_INPUT_PATTERNS = ("*.jpg", "*.jpeg", "*.png", "*.webp")
+DEFAULT_INPUT_PATTERNS = ("*",)
 DEFAULT_ANALYSIS_METHOD = "attention"
 PATCH_PCA_IMAGE_FIT_DEFAULTS = {
     "foreground_separation": True,
