@@ -87,6 +87,9 @@ def test_mixed_pipeline_dispatches_images_and_videos_separately(
     )
     calls = []
 
+    def preflight(full_config, branch_config):
+        calls.append(("preflight", full_config, branch_config))
+
     def run_images(branch_config):
         calls.append(("images", branch_config))
         return SimpleNamespace(output_paths=(tmp_path / "image-output.png",))
@@ -95,6 +98,7 @@ def test_mixed_pipeline_dispatches_images_and_videos_separately(
         calls.append(("videos", branch_config))
         return SimpleNamespace(output_paths=(tmp_path / "video-output.mp4",))
 
+    monkeypatch.setattr(pipeline, "_preflight_mixed_pipeline", preflight)
     monkeypatch.setattr(pipeline, "_dispatch_image_pipeline", run_images)
     monkeypatch.setattr(pipeline._video_pipeline, "run_video_from_config", run_videos)
 
@@ -105,12 +109,94 @@ def test_mixed_pipeline_dispatches_images_and_videos_separately(
         tmp_path / "image-output.png",
         tmp_path / "video-output.mp4",
     )
-    assert calls[0][0] == "images"
-    assert calls[0][1].input.paths == (image,)
-    assert calls[0][1].output.directory == tmp_path / "results" / "images"
-    assert calls[1][0] == "videos"
-    assert calls[1][1].input.paths == (video,)
-    assert calls[1][1].output.directory == (tmp_path / "results" / "videos" / "video")
+    assert calls[0][0] == "preflight"
+    assert calls[1][0] == "images"
+    assert calls[1][1].input.paths == (image,)
+    assert calls[1][1].output.directory == tmp_path / "results" / "images"
+    assert calls[2][0] == "videos"
+    assert calls[2][1].input.paths == (video,)
+    assert calls[2][1].output.directory == (tmp_path / "results" / "videos" / "video")
+
+
+def test_mixed_pipeline_preflight_failure_prevents_image_writes(monkeypatch, tmp_path):
+    from vision_lens import pipeline
+
+    image = tmp_path / "image.jpg"
+    video = tmp_path / "video.mp4"
+    image.touch()
+    video.touch()
+    config = parse_config(
+        {
+            "input": {"files": [str(image), str(video)]},
+            "model": {
+                "architecture": "vit",
+                "backend": "timm",
+                "name": "mock_vit",
+            },
+            "analysis": {"method": "attention", "layers": [0]},
+            "output": {"directory": str(tmp_path / "results")},
+        }
+    )
+    image_dispatched = False
+
+    def fail_video_preflight(branch_config):
+        raise RuntimeError("video dependency unavailable")
+
+    def run_images(branch_config):
+        nonlocal image_dispatched
+        image_dispatched = True
+
+    monkeypatch.setattr(
+        pipeline._video_pipeline,
+        "preflight_video_dependencies",
+        fail_video_preflight,
+    )
+    monkeypatch.setattr(pipeline, "_dispatch_image_pipeline", run_images)
+
+    with pytest.raises(RuntimeError, match="video dependency unavailable"):
+        pipeline._dispatch_pipeline(config)
+
+    assert image_dispatched is False
+
+
+def test_mixed_pipeline_checks_video_artifacts_before_image_writes(
+    monkeypatch,
+    tmp_path,
+):
+    from vision_lens import pipeline
+
+    image = tmp_path / "image.jpg"
+    video = tmp_path / "video.mp4"
+    image.touch()
+    video.touch()
+    output_directory = tmp_path / "results"
+    config = parse_config(
+        {
+            "input": {"files": [str(image), str(video)]},
+            "model": {
+                "architecture": "vit",
+                "backend": "timm",
+                "name": "mock_vit",
+            },
+            "analysis": {"method": "attention", "layers": [0]},
+            "output": {"directory": str(output_directory)},
+        }
+    )
+    video_manifest = output_directory / "videos" / "video" / "run-manifest.json"
+    video_manifest.parent.mkdir(parents=True)
+    video_manifest.touch()
+    image_dispatched = False
+
+    def run_images(branch_config):
+        nonlocal image_dispatched
+        image_dispatched = True
+
+    monkeypatch.setattr(pipeline, "_dispatch_image_pipeline", run_images)
+
+    with pytest.raises(FileExistsError, match="run-manifest.json"):
+        pipeline._dispatch_pipeline(config)
+
+    assert image_dispatched is False
 
 
 def test_vit_pipeline_exports_figures_with_mocked_model(monkeypatch, tmp_path):

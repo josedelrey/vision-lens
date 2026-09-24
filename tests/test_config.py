@@ -262,6 +262,27 @@ def test_mixed_patch_pca_derives_media_specific_analysis(tmp_path):
     assert video_config.analysis.save_projection == projection
 
 
+def test_mixed_patch_pca_rejects_cross_workflow_artifact_collision(tmp_path):
+    image = tmp_path / "image.jpg"
+    video = tmp_path / "video.mp4"
+    image.touch()
+    video.touch()
+    output_directory = tmp_path / "results"
+    raw = _minimal_config(method="patch_pca")
+    raw["input"] = {"files": [str(image), str(video)]}
+    raw["analysis"]["save_projection"] = str(
+        output_directory / "images" / "image_patch_embeddings.npz"
+    )
+    raw["output"] = {
+        "directory": str(output_directory),
+        "raw_arrays": True,
+        "raw_format": "npz",
+    }
+
+    with pytest.raises(ValueError, match="image output collides.*video output"):
+        parse_config(raw)
+
+
 @pytest.mark.parametrize(
     ("alpha_format", "extension"),
     [("prores_4444", "mov"), ("vp9", "webm")],

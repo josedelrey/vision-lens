@@ -50,6 +50,7 @@ from vision_lens.media.video import (
     iter_video_batches,
     probe_video,
     representative_frame_indices,
+    require_video_dependencies,
     require_video_encoder,
     resolve_sampling_rate,
     resolved_output_resolution,
@@ -659,6 +660,14 @@ def _require_video_encoders(config: VisionLensConfig) -> None:
             field_name="video.alpha_format",
             pixel_format=encoding.pixel_format,
         )
+
+
+def preflight_video_dependencies(config: VisionLensConfig) -> None:
+    """Verify video decoding and configured output encoders are available."""
+    if config.video is None:
+        raise ValueError("Video preflight requires a video configuration section.")
+    require_video_dependencies()
+    _require_video_encoders(config)
 
 
 def _video_normalization_range(
