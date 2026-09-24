@@ -112,38 +112,9 @@ def test_named_flags_override_yaml_values(capsys, config_path):
     assert "device: cuda" in capsys.readouterr().out
 
 
-def test_video_flag_adds_default_video_section(capsys, tmp_path):
-    source = tmp_path / "input.mp4"
-    source.touch()
-
-    assert (
-        main(
-            [
-                "resolve",
-                "--video",
-                "--input-files",
-                f"[{source}]",
-                "--model-architecture",
-                "vit",
-                "--model-backend",
-                "timm",
-                "--model-name",
-                "mock_vit",
-                "--analysis-method",
-                "attention",
-                "--analysis-layers",
-                "[0]",
-                "--output-directory",
-                str(tmp_path / "results"),
-            ]
-        )
-        == 0
-    )
-
-    output = capsys.readouterr().out
-    assert output.startswith("# detected media: 0 images, 1 video\n")
-    assert "video:" in output
-    assert "sampling_rate: 5.0" in output
+def test_legacy_video_flag_is_rejected():
+    with pytest.raises(SystemExit, match="2"):
+        _build_parser().parse_args(["--video"])
 
 
 def test_video_input_adds_default_video_settings_automatically(capsys, tmp_path):
@@ -189,7 +160,7 @@ def test_every_config_setting_has_a_named_cli_flag():
     }
 
     assert expected <= available
-    assert "--video" in available
+    assert "--video" not in available
 
 
 @pytest.mark.parametrize("config_path", BUNDLED_CONFIGS, ids=lambda path: path.stem)
@@ -197,8 +168,6 @@ def test_bundled_configs_match_their_cli_only_forms(capsys, config_path):
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     arguments = ["resolve"]
     for section, values in raw.items():
-        if section == "video" and not values:
-            arguments.append("--video")
         for key, value in values.items():
             arguments.extend(
                 [
