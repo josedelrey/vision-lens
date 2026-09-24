@@ -29,10 +29,10 @@ uv run vision-lens validate \
 Named flags override values from the YAML file. Both sources go through the same
 parser and validator.
 
-Video files do not require a mode flag or a `video` section. The legacy
-`--video` flag is accepted for compatibility but is unnecessary. Use
-`--video-*` only to override a video default. `validate` reports detected media
-counts; `resolve` prints the merged, expanded, defaulted, and path-resolved
+Video inputs are detected automatically and processed with the default video
+settings. Individual settings can be customized in YAML or with the
+corresponding `--video-*` named flags. `validate` reports detected media counts.
+`resolve` prints the merged, expanded, defaulted, and path-resolved
 configuration. Run `uv run vision-lens --help` for every generated flag.
 
 With `--config`, relative paths resolve from the nearest ancestor of that file
@@ -57,7 +57,7 @@ configuration.
 
 At least one existing supported media file must be selected. Explicit files
 retain their order, duplicate paths are removed, and unsupported explicit file
-types are rejected. Folder patterns are relative globs; unsupported matches are
+types are rejected. Folder patterns are relative globs. Unsupported matches are
 ignored. `limit` applies after expansion and media filtering.
 
 | Setting | Default | Meaning |
@@ -72,7 +72,7 @@ ignored. `limit` applies after expansion and media filtering.
 each folder independently.
 
 Absolute glob patterns and patterns containing `..` are rejected. Supported
-image extensions are `.jpg`, `.jpeg`, `.png`, and `.webp`; supported video
+image extensions are `.jpg`, `.jpeg`, `.png`, and `.webp`. Supported video
 extensions are `.avi`, `.m4v`, `.mkv`, `.mov`, `.mp4`, and `.webm`. Matching is
 case-insensitive. Pillow and PyAV perform the actual decoding, so corrupt or
 mislabelled files still fail.
@@ -98,24 +98,24 @@ Attention, rollout, and patch PCA require `architecture: vit` with
 Vision Lens manages `img_size` and `pretrained` for timm,
 `dynamic_img_size` for timm video models, and `weights` for torchvision. Do not
 repeat those keys in `model.options`. Custom models must expose the internals
-required by the selected method; backend compatibility alone is insufficient.
+required by the selected method. Backend compatibility alone is insufficient.
 
 ## Preprocessing
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `preprocessing.image_size` | `672` | Square input size for images; longest inference side for video. |
+| `preprocessing.image_size` | `672` | Square input size for images and longest inference side for video. |
 | `preprocessing.resize` | `stretch` | Image resize: `stretch`, `shortest`, `longest`, or `none`. |
 | `preprocessing.crop` | `none` | `none` or `center` crop to the input size. |
 | `preprocessing.pad` | `none` | `none` or `center` padding to the input size. |
 | `preprocessing.interpolation` | model-derived | `nearest`, `bilinear`, `bicubic`, or `lanczos`. |
 | `preprocessing.normalize` | `true` | Apply RGB channel normalization. |
-| `preprocessing.mean` | model-derived | Three RGB means; valid when normalization is enabled. |
-| `preprocessing.std` | model-derived | Three positive RGB standard deviations; valid when normalization is enabled. |
+| `preprocessing.mean` | model-derived | Three RGB means. Valid when normalization is enabled. |
+| `preprocessing.std` | model-derived | Three positive RGB standard deviations. Valid when normalization is enabled. |
 
 For images, `longest` with center padding or `shortest` with center cropping
 preserves aspect ratio. Crop and pad cannot both be enabled. Video always
-preserves frame aspect ratio; `resize`, `crop`, and `pad` are image-only and
+preserves frame aspect ratio. `resize`, `crop`, and `pad` are image-only and
 must be omitted from video-only configurations. ViT video dimensions are
 aligned to patch multiples. The known fixed-size DINO ViT-S/8 model requires
 `image_size: 224`.
@@ -137,7 +137,7 @@ analysis:
 | `analysis.heads` | all heads | Nonempty list of head indices. For rollout, affects image comparison grids only. |
 | `analysis.head_fusion` | `mean` | `mean`, `max`, or `none`. For rollout, affects image comparison grids only. |
 
-`mean` and `max` fuse the selected heads into one map; `none` emits one map per
+`mean` and `max` fuse the selected heads into one map. `none` emits one map per
 selected head. When `heads` is omitted, all heads participate.
 
 For rollout image grids, choose whether to show rollout maps alone or compare
@@ -187,14 +187,14 @@ analysis:
 
 One image run fits a shared projection, threshold, and RGB range across all its
 images, making colors comparable. With `foreground_separation: false`, omit the
-other foreground settings; all patches contribute. With `projection: load`,
-supply only `projection_path`; the saved foreground rule and color range are
+other foreground settings. All patches contribute. With `projection: load`,
+supply only `projection_path`. The saved foreground rule and color range are
 reused. Video PCA fits a full-frame projection from representative frames,
-controlled by `video.pca_fit_frames`; foreground settings are invalid. Saving a
+controlled by `video.pca_fit_frames`. Foreground settings are invalid. Saving a
 projection may be the sole output of a PCA run.
 
 Loaded projections must match the model's patch-embedding feature count. PCA
-uses an approximate low-rank fit over selected embeddings; large image groups or
+uses an approximate low-rank fit over selected embeddings. Large image groups or
 long video fit windows may require substantial memory. PCA component signs do
 not identify the subject, so choose `foreground_side` from the intended
 selection.
@@ -205,11 +205,11 @@ selection.
 |---|---|---|
 | `runtime.batch_size` | `8` | Maximum images or decoded frames processed together. |
 | `runtime.device` | `auto` | `auto`, `cpu`, `cuda`, or `mps`. |
-| `runtime.workers` | `0` | Image-loading threads; omit for video. |
+| `runtime.workers` | `0` | Image-loading threads. Omit for video. |
 | `runtime.precision` | `float32` | `float32`, `float16`, or `bfloat16`. |
 | `runtime.seed` | `null` | Seed Python, NumPy, and PyTorch. |
 
-`auto` selects CUDA, then MPS, then CPU. CPU does not support `float16`; MPS
+`auto` selects CUDA, then MPS, then CPU. CPU does not support `float16`. MPS
 does not support `bfloat16`. Image PCA and `shared` normalization can require an
 additional fitting pass. Multi-batch Python results report processed inputs
 without retaining all analysis tensors.
@@ -224,7 +224,7 @@ The grid settings below apply only to image runs with `output.grids: true`. Patc
 |---|---|---|
 | `visualization.tile_size` | workflow default | Grid tile `[width, height]`. |
 | `visualization.columns` | automatic | Number of grid columns. |
-| `visualization.items_per_grid` | all items | Maximum tiles per grid file; further pages use `_part-001` suffixes. |
+| `visualization.items_per_grid` | all items | Maximum tiles per grid file. Further pages use `_part-001` suffixes. |
 | `visualization.spacing` | workflow default | Pixels between tiles. |
 | `visualization.padding` | workflow default | Outer pixels around the grid. |
 | `visualization.labels` | workflow default | Show labels on non-PCA grids. |
@@ -243,7 +243,7 @@ dimensions. Set an explicit size to interpolate directly at that resolution.
 | Setting | Default | Meaning |
 |---|---|---|
 | `visualization.interpolation` | `bilinear` | `nearest`, `bilinear`, `bilinear_mask`, `anyup`, `anyup_mask`, `anyup_soft`, or `anyup_soft_mask`. |
-| `visualization.anyup_query_chunk_size` | `null` | Positive query count per AnyUp chunk; required for soft modes. |
+| `visualization.anyup_query_chunk_size` | `null` | Positive query count per AnyUp chunk. Required for soft modes. |
 | `visualization.overlay_alpha` | `0.45` | Overlay opacity from 0 to 1. |
 | `visualization.overlay_alpha_curve` | `null` | Value-dependent opacity, e.g. `{steepness: 10, midpoint: 0.25}`. |
 | `visualization.cmap` | `viridis` | Matplotlib colormap for rendered maps. |
@@ -251,17 +251,17 @@ dimensions. Set an explicit size to interpolate directly at that resolution.
 | `visualization.normalization` | `per_map` | `per_map`, `shared` across the run, or `fixed`. |
 | `visualization.normalization_range` | `null` | Required `[min, max]` when normalization is `fixed`. |
 
-`nearest` preserves patch or activation blocks; `bilinear` blends between them.
+`nearest` preserves patch or activation blocks. `bilinear` blends between them.
 For foreground-separated image PCA, `bilinear_mask` blends projected colors but
 keeps a sharp foreground boundary. Without foreground separation it behaves
 like bilinear. The AnyUp modes load model code from a pinned revision of the
 [official repository](https://github.com/wimmerth/anyup) and download its
-pretrained checkpoint. Mask variants preserve a coarse PCA boundary; soft
+pretrained checkpoint. Mask variants preserve a coarse PCA boundary. Soft
 variants taper the local attention window and require query chunking. Smaller
 chunks trade speed for lower peak memory.
 
 `overlay_alpha_curve` uses `steepness` and an optional `midpoint` (default
-`0.5`) to vary opacity with normalized map values; `overlay_alpha` scales the
+`0.5`) to vary opacity with normalized map values. `overlay_alpha` scales the
 result. `cmap_black` uses 0–255 palette positions: `threshold` remains black,
 `blend_width` transitions into the selected colormap, and `transparent: true`
 reveals the source where the resulting color is pure black. These controls
@@ -278,22 +278,22 @@ analysis values before visualization normalization.
 | `output.directory` | required | Output directory. |
 | `output.heatmaps` | `true` | Save heatmaps or PCA color maps. |
 | `output.overlays` | `true` except PCA | Save attention, rollout, or Grad-CAM overlays. |
-| `output.transparent_overlays` | `false` | Save standalone attention, rollout, or Grad-CAM layers with transparency. Images are RGBA PNGs; videos use `video.alpha_format`. |
-| `output.grids` | `true` for images | Save image comparison grids; invalid for video. |
+| `output.transparent_overlays` | `false` | Save standalone attention, rollout, or Grad-CAM layers with transparency. Images are RGBA PNGs. Videos use `video.alpha_format`. |
+| `output.grids` | `true` for images | Save image comparison grids. Invalid for video. |
 | `output.raw_arrays` | `false` | Save analysis arrays. |
 | `output.image_format` | `png` | Image heatmap and flattened-overlay format: `png`, `jpeg`, `tiff`, or `webp`. |
-| `output.raw_format` | `npy` | `npy` or compressed `npz`; requires raw arrays. |
+| `output.raw_format` | `npy` | `npy` or compressed `npz`. Requires raw arrays. |
 | `output.overwrite` | `error` | `error`, `replace`, or `skip` existing outputs. |
 
 At least one output type must be enabled. `overlays` writes a flattened
-source-plus-map image; `transparent_overlays` writes the map layer without
+source-plus-map image. `transparent_overlays` writes the map layer without
 source pixels. Both are invalid for PCA. Transparent image overlays are always
 PNG, and grids use `visualization.grid_format`. `output.grids` and
 `output.image_format` are image-only.
 
 With `overwrite: error`, the run fails during preflight if any planned artifact
 already exists. `replace` removes the previous managed `images/` and `videos/`
-trees before writing a pristine set of outputs; it refuses to remove
+trees before writing a pristine set of outputs. It refuses to remove
 an unrecognized root manifest or unrecognized contents from those reserved
 paths. Unrelated files directly under `output.directory` are preserved. `skip`
 preserves existing artifacts and writes missing ones. Input files, loaded PCA
@@ -311,23 +311,23 @@ times.
 Install video support with `uv sync --locked --extra video`. Videos are sampled
 by timestamp and exported as silent MP4 streams, plus optional alpha-capable MOV
 or WebM streams. Source audio is not copied. The `video` section is optional and
-only overrides the defaults below; it is invalid when no video is selected.
+only overrides the defaults below. It is invalid when no video is selected.
 
 | Setting | Default | Meaning |
 |---|---|---|
 | `video.start_time` | `0.0` | First source timestamp in seconds. |
-| `video.end_time` | `null` | Exclusive end timestamp; `null` reads to the end. |
-| `video.sampling_rate` | `5.0` | Sampled frames per second and output playback FPS; `auto` uses reported average source FPS. |
+| `video.end_time` | `null` | Exclusive end timestamp. `null` reads to the end. |
+| `video.sampling_rate` | `5.0` | Sampled frames per second and output playback FPS. `auto` uses reported average source FPS. |
 | `video.frame_limit` | `null` | Maximum sampled frames in the selected time range. |
 | `video.pca_fit_frames` | `32` | Representative frames used to fit video PCA. |
 | `video.temporal_smoothing` | `0.0` | Previous-frame blend strength from 0 to 1 for consecutive rendered maps. |
 | `video.codec` | `libx264` | PyAV/FFmpeg encoder for MP4 outputs. |
-| `video.alpha_format` | `prores_4444` | Transparent-overlay encoding: `prores_4444` produces a `.mov`; `vp9` produces a `.webm`. Only applicable when `output.transparent_overlays: true`. |
+| `video.alpha_format` | `prores_4444` | Transparent-overlay encoding. `prores_4444` produces a `.mov`, while `vp9` produces a `.webm`. Only applicable when `output.transparent_overlays: true`. |
 
 Each video runs independently in a source-named subdirectory.
-`sampling_rate: auto` requires a valid reported average source FPS; use a number
+`sampling_rate: auto` requires a valid reported average source FPS. Use a number
 otherwise. Output streams have a constant playback rate even for variable-rate
-sources. Raw arrays are exported in bounded batches; NPZ batches include sample
+sources. Raw arrays are exported in bounded batches. NPZ batches include sample
 timestamps.
 
 ProRes 4444 is the default transparent-video format and targets editing

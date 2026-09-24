@@ -99,13 +99,6 @@ def _build_parser() -> argparse.ArgumentParser:
         "--config",
         help="Optional YAML config file; command-line values override it.",
     )
-    parser.add_argument(
-        "--video",
-        action="store_true",
-        help=(
-            "Deprecated compatibility flag; video inputs are detected automatically."
-        ),
-    )
     config_group = parser.add_argument_group(
         "configuration fields",
         "Named flags accept the same YAML values as their config fields. "
@@ -131,8 +124,6 @@ def _cli_overrides(args: argparse.Namespace) -> dict[str, Any]:
         overrides.setdefault(section, {})[key] = yaml.safe_load(
             getattr(args, destination)
         )
-    if args.video:
-        overrides.setdefault("video", {})
     return overrides
 
 

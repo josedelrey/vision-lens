@@ -143,8 +143,8 @@ input:
   recursive: true
 ```
 
-Media types are detected automatically. A `video` section is only needed to
-override video defaults:
+Media types are detected automatically. Video settings are optional and can be
+customized when needed:
 
 ```yaml
 video:
