@@ -1255,6 +1255,24 @@ def test_replace_refuses_unrecognized_reserved_directory_contents(tmp_path):
     assert unknown.is_file()
 
 
+def test_replace_refuses_unrecognized_root_manifest(tmp_path):
+    source = tmp_path / "source.jpg"
+    source.touch()
+    output = tmp_path / "outputs"
+    output.mkdir()
+    manifest = output / "run-manifest.json"
+    manifest.write_text('{"unrelated": true}\n', encoding="utf-8")
+    raw = _minimal_config()
+    raw["input"]["files"] = [str(source)]
+    raw["output"].update({"directory": str(output), "overwrite": "replace"})
+    config = parse_config(raw)
+
+    with pytest.raises(ValueError, match="unrecognized root manifest"):
+        prepare_output_directory(config)
+
+    assert manifest.read_text(encoding="utf-8") == '{"unrelated": true}\n'
+
+
 def test_replace_does_not_trust_manifest_directories_as_artifacts(tmp_path):
     source = tmp_path / "source.jpg"
     source.touch()

@@ -430,6 +430,17 @@ def prepare_output_directory(config: VisionLensConfig) -> None:
 def _replacement_candidates(root: Path) -> set[Path]:
     root_manifest = run_manifest_path(root)
     previous_manifest = _read_managed_manifest(root_manifest)
+    manifest_exists = root_manifest.exists() or root_manifest.is_symlink()
+    if root_manifest.is_dir() and not root_manifest.is_symlink():
+        raise ValueError(
+            f"Expected the run manifest path to be a file: {root_manifest}."
+        )
+    if manifest_exists and previous_manifest is None:
+        raise ValueError(
+            "output.overwrite='replace' will not remove an unrecognized root "
+            f"manifest: {root_manifest}. Choose a different output.directory or "
+            "remove the file manually."
+        )
     aggregate_layout = _is_aggregate_manifest(previous_manifest)
     candidates = _manifest_output_paths(previous_manifest, root)
     for name in ("images", "videos"):
@@ -444,11 +455,7 @@ def _replacement_candidates(root: Path) -> set[Path]:
                 f"contents from reserved output path {path}. Choose an empty "
                 "output.directory or remove those contents manually."
             )
-    if root_manifest.is_dir() and not root_manifest.is_symlink():
-        raise ValueError(
-            f"Expected the run manifest path to be a file: {root_manifest}."
-        )
-    if root_manifest.exists() or root_manifest.is_symlink():
+    if manifest_exists:
         candidates.add(root_manifest)
     return candidates
 
