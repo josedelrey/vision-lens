@@ -738,27 +738,71 @@ def test_load_config_resolves_yaml_and_overrides_from_project_root(
     assert overridden.output.directory == tmp_path / "other-figures"
 
 
-def test_paths_fall_back_to_working_directory_without_project(tmp_path, monkeypatch):
-    config_dir = tmp_path / "configs"
-    config_dir.mkdir()
+def test_load_config_without_project_uses_config_directory(tmp_path, monkeypatch):
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    (project_dir / "pyproject.toml").write_text("[project]\nname = 'example'\n")
+    working_dir = project_dir / "nested"
+    working_dir.mkdir()
+
+    config_dir = tmp_path / "external" / "configs"
+    config_dir.mkdir(parents=True)
     config_path = config_dir / "workflow.yaml"
-    image_path = tmp_path / "photo.jpg"
+    image_path = config_dir / "photo.jpg"
     image_path.touch()
     raw_config = _minimal_config()
     raw_config["input"]["files"] = ["photo.jpg"]
     raw_config["input"]["folders"] = []
     raw_config["output"]["directory"] = "outputs"
     config_path.write_text(yaml.safe_dump(raw_config), encoding="utf-8")
-    monkeypatch.chdir(tmp_path)
+    monkeypatch.chdir(working_dir)
 
     config = load_config(config_path)
+
+    assert config.input.paths == (image_path,)
+    assert config.output.directory == config_dir / "outputs"
+
+
+def test_parse_config_uses_working_project_root(tmp_path, monkeypatch):
+    (tmp_path / "pyproject.toml").write_text("[project]\nname = 'example'\n")
+    working_dir = tmp_path / "nested"
+    working_dir.mkdir()
+    image_path = tmp_path / "photo.jpg"
+    image_path.touch()
+    raw_config = _minimal_config()
+    raw_config["input"]["files"] = ["photo.jpg"]
+    raw_config["input"]["folders"] = []
+    raw_config["output"]["directory"] = "outputs"
+    monkeypatch.chdir(working_dir)
+
+    config = parse_config(raw_config)
 
     assert config.input.paths == (image_path,)
     assert config.output.directory == tmp_path / "outputs"
 
 
+def test_parse_config_without_project_uses_working_directory(tmp_path, monkeypatch):
+    working_dir = tmp_path / "working"
+    working_dir.mkdir()
+    image_path = working_dir / "photo.jpg"
+    image_path.touch()
+    raw_config = _minimal_config()
+    raw_config["input"]["files"] = ["photo.jpg"]
+    raw_config["input"]["folders"] = []
+    raw_config["output"]["directory"] = "outputs"
+    monkeypatch.chdir(working_dir)
+
+    config = parse_config(raw_config)
+
+    assert config.input.paths == (image_path,)
+    assert config.output.directory == working_dir / "outputs"
+
+
 def test_yaml_uses_parser_defaults_for_omitted_settings(tmp_path):
     raw = _minimal_config()
+    example_path = tmp_path / "examples" / "1.jpg"
+    example_path.parent.mkdir()
+    example_path.touch()
     path = tmp_path / "minimal.yaml"
     path.write_text(yaml.safe_dump(raw))
 
