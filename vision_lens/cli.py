@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -101,13 +100,6 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Optional YAML config file; command-line values override it.",
     )
     parser.add_argument(
-        "--set",
-        action="append",
-        default=[],
-        metavar="SECTION.KEY=VALUE",
-        help="Override one setting; may be repeated and accepts YAML values.",
-    )
-    parser.add_argument(
         "--video",
         action="store_true",
         help=(
@@ -117,7 +109,7 @@ def _build_parser() -> argparse.ArgumentParser:
     config_group = parser.add_argument_group(
         "configuration fields",
         "Named flags accept the same YAML values as their config fields. "
-        "They override both --config and --set values.",
+        "They override --config values.",
     )
     for destination, path in CONFIG_OPTION_DESTINATIONS.items():
         config_group.add_argument(
@@ -131,52 +123,17 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _cli_overrides(args: argparse.Namespace) -> dict[str, Any]:
-    set_overrides = _parse_overrides(args.set)
-    named_assignments = [
-        f"{path}={getattr(args, destination)}"
-        for destination, path in CONFIG_OPTION_DESTINATIONS.items()
-        if hasattr(args, destination)
-    ]
-    named_overrides = _parse_overrides(named_assignments)
+    overrides: dict[str, Any] = {}
+    for destination, path in CONFIG_OPTION_DESTINATIONS.items():
+        if not hasattr(args, destination):
+            continue
+        section, key = path.split(".", maxsplit=1)
+        overrides.setdefault(section, {})[key] = yaml.safe_load(
+            getattr(args, destination)
+        )
     if args.video:
-        named_overrides = _deep_merge({"video": {}}, named_overrides)
-    return _deep_merge(set_overrides, named_overrides)
-
-
-def _parse_overrides(assignments: list[str]) -> dict[str, object]:
-    overrides: dict[str, object] = {}
-    for assignment in assignments:
-        path, separator, raw_value = assignment.partition("=")
-        keys = path.split(".")
-        if not separator or not all(keys):
-            raise ValueError(
-                f"Invalid override {assignment!r}; expected SECTION.KEY=VALUE."
-            )
-
-        target = overrides
-        for key in keys[:-1]:
-            existing = target.setdefault(key, {})
-            if not isinstance(existing, dict):
-                raise ValueError(
-                    f"Override path {path!r} conflicts with another value."
-                )
-            target = existing
-        target[keys[-1]] = yaml.safe_load(raw_value)
+        overrides.setdefault("video", {})
     return overrides
-
-
-def _deep_merge(
-    base: Mapping[str, Any],
-    override: Mapping[str, Any],
-) -> dict[str, Any]:
-    merged = dict(base)
-    for key, value in override.items():
-        current = merged.get(key)
-        if isinstance(current, Mapping) and isinstance(value, Mapping):
-            merged[key] = _deep_merge(current, value)
-        else:
-            merged[key] = value
-    return merged
 
 
 if __name__ == "__main__":

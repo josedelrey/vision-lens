@@ -52,10 +52,17 @@ from vision_lens.config.schema import (
     VisualizationConfig,
     config_section,
 )
-from vision_lens.output.artifacts import validate_artifact_paths
+from vision_lens.output.artifacts import (
+    validate_artifact_paths,
+    validate_branch_artifact_paths,
+)
 
 
-def validate_config(config: VisionLensConfig) -> None:
+def validate_config(
+    config: VisionLensConfig,
+    *,
+    _branch_layout: bool = False,
+) -> None:
     _validate_resolved_values(config)
     image_paths, video_paths = partition_media_paths(config.input.paths)
     if video_paths and config.video is None:
@@ -69,12 +76,15 @@ def validate_config(config: VisionLensConfig) -> None:
         validate_precision_device_pair(config.runtime.precision, config.runtime.device)
         image_config, video_config = split_media_configs(config)
         assert image_config is not None and video_config is not None
-        validate_config(image_config)
-        validate_config(video_config)
+        validate_config(image_config, _branch_layout=True)
+        validate_config(video_config, _branch_layout=True)
         validate_artifact_paths(config)
         return
 
-    validate_artifact_paths(config)
+    if _branch_layout:
+        validate_branch_artifact_paths(config)
+    else:
+        validate_artifact_paths(config)
     validate_precision_device_pair(config.runtime.precision, config.runtime.device)
     _validate_video_workflow(config)
     _validate_model_workflow(config)

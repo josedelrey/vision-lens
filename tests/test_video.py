@@ -387,11 +387,18 @@ def test_short_pca_video_uses_frozen_projection_and_bounded_batches(
         with av.open(str(output_path)) as container:
             assert not container.streams.audio
 
-    manifest = json.loads((output_dir / "run-manifest.json").read_text())
+    video_manifest = output_dir / "videos" / "clip" / "run-manifest.json"
+    manifest = json.loads(video_manifest.read_text())
     assert manifest["run"]["sampled_frames"] == 3
     assert manifest["run"]["sampling_rate"] == 3
     assert manifest["run"]["encoded_duration"] == 1
     assert manifest["run"]["audio"] == "omitted"
+    root_manifest = json.loads((output_dir / "run-manifest.json").read_text())
+    assert root_manifest["run"] == {
+        "manifests": [str(video_manifest.resolve())],
+        "media": "video",
+    }
+    assert root_manifest["outputs"] == [str(result.output_paths[0].resolve())]
 
 
 @pytest.mark.parametrize(("sampling_rate", "expected_frames"), [(2, 2), ("auto", 4)])
@@ -508,8 +515,9 @@ def test_gradcam_video_exports_heatmaps_and_overlays_with_one_fixed_class(
         probe_video(path).duration == pytest.approx(1.0, abs=0.05)
         for path in result.output_paths
     )
-    assert not (output_dir / "clip_gradcam_comparison.mp4").exists()
-    manifest = json.loads((output_dir / "run-manifest.json").read_text())
+    video_dir = output_dir / "videos" / "clip"
+    assert not (video_dir / "clip_gradcam_comparison.mp4").exists()
+    manifest = json.loads((video_dir / "run-manifest.json").read_text())
     assert manifest["model"]["input_size"] == [3, 3, 4]
     assert manifest["configuration"]["video"]["sampling_rate"] == sampling_rate
     assert manifest["run"]["sampling_rate"] == result.frame_rate
@@ -600,7 +608,9 @@ def test_multiple_videos_have_independent_outputs_and_sampling_rates(
     assert [video.frame_rate for video in result.videos] == [2, 3]
     assert {path.parent.name for path in result.output_paths} == {"first", "second"}
     for name, frame_count in (("first", 2), ("second", 3)):
-        manifest = json.loads((output_dir / name / "run-manifest.json").read_text())
+        manifest = json.loads(
+            (output_dir / "videos" / name / "run-manifest.json").read_text()
+        )
         assert manifest["run"]["sampled_frames"] == frame_count
         assert manifest["inputs"][0]["path"].endswith(f"{name}.mp4")
 

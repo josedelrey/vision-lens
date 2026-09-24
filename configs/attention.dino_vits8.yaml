@@ -24,4 +24,3 @@ visualization:
 output:
   directory: outputs/image/dino_vits8/attention
   transparent_overlays: true
-  overwrite: replace

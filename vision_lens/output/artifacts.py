@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
+import shutil
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from vision_lens.config.media import partition_media_paths, split_media_configs
+from vision_lens.config.media import split_media_configs
 from vision_lens.config.schema import (
     ALPHA_FORMAT_EXTENSIONS,
     KNOWN_VIT_DEPTHS,
@@ -70,6 +72,21 @@ class ArtifactPlan:
                 if path.is_file() and reserved.matches(path)
             )
         return tuple(sorted(existing))
+
+
+def _combine_artifact_plans(plans: Sequence[ArtifactPlan]) -> ArtifactPlan:
+    return ArtifactPlan(
+        output_directories=frozenset(
+            directory for plan in plans for directory in plan.output_directories
+        ),
+        exact_paths=frozenset(path for plan in plans for path in plan.exact_paths),
+        reserved_patterns=tuple(
+            pattern for plan in plans for pattern in plan.reserved_patterns
+        ),
+        non_projection_paths=frozenset(
+            path for plan in plans for path in plan.non_projection_paths
+        ),
+    )
 
 
 def unique_input_labels(paths: Sequence[Path]) -> tuple[str, ...]:
@@ -212,23 +229,25 @@ def video_run_layouts(config: VisionLensConfig) -> tuple[VideoRunLayout, ...]:
 
 
 def artifact_plan(config: VisionLensConfig) -> ArtifactPlan:
-    image_paths, video_paths = partition_media_paths(config.input.paths)
-    if image_paths and video_paths:
-        image_config, video_config = split_media_configs(config)
-        assert image_config is not None and video_config is not None
-        plans = (artifact_plan(image_config), artifact_plan(video_config))
-        return ArtifactPlan(
-            output_directories=frozenset(
-                directory for plan in plans for directory in plan.output_directories
-            ),
-            exact_paths=frozenset(path for plan in plans for path in plan.exact_paths),
-            reserved_patterns=tuple(
-                pattern for plan in plans for pattern in plan.reserved_patterns
-            ),
-            non_projection_paths=frozenset(
-                path for plan in plans for path in plan.non_projection_paths
-            ),
-        )
+    """Plan a complete run using the standard root/images/videos layout."""
+    image_config, video_config = split_media_configs(config)
+    branch_configs = tuple(
+        branch for branch in (image_config, video_config) if branch is not None
+    )
+    plan = _combine_artifact_plans(
+        tuple(_branch_artifact_plan(branch) for branch in branch_configs)
+    )
+    root_manifest = run_manifest_path(config.output.directory)
+    return ArtifactPlan(
+        output_directories=plan.output_directories | {config.output.directory},
+        exact_paths=plan.exact_paths | {root_manifest},
+        reserved_patterns=plan.reserved_patterns,
+        non_projection_paths=plan.non_projection_paths | {root_manifest},
+    )
+
+
+def _branch_artifact_plan(config: VisionLensConfig) -> ArtifactPlan:
+    """Plan artifacts for a config whose output directory is already final."""
 
     exact_paths: set[Path] = set()
     projection_paths: set[Path] = set()
@@ -267,34 +286,39 @@ def artifact_plan(config: VisionLensConfig) -> ArtifactPlan:
 
 
 def validate_artifact_paths(config: VisionLensConfig) -> None:
-    image_paths, video_paths = partition_media_paths(config.input.paths)
-    if image_paths and video_paths:
-        image_config, video_config = split_media_configs(config)
-        assert image_config is not None and video_config is not None
-        validate_artifact_paths(image_config)
-        validate_artifact_paths(video_config)
-        image_plan = artifact_plan(image_config)
-        video_plan = artifact_plan(video_config)
-        collision = _cross_plan_collision(image_plan, video_plan)
-        if collision is not None:
-            raise ValueError(
-                "A planned image output collides with a planned video output: "
-                f"{collision}. Choose different output or projection paths."
-            )
+    image_config, video_config = split_media_configs(config)
+    branch_configs = tuple(
+        branch for branch in (image_config, video_config) if branch is not None
+    )
+    branch_plans = tuple(_branch_artifact_plan(branch) for branch in branch_configs)
+    for branch, plan in zip(branch_configs, branch_plans, strict=True):
         _validate_artifact_plan(
-            config,
-            artifact_plan(config),
-            save_paths=(
-                *_projection_save_paths(image_config),
-                *_projection_save_paths(video_config),
-            ),
+            branch,
+            plan,
+            save_paths=_projection_save_paths(branch),
         )
-        return
-
-    plan = artifact_plan(config)
+    for index, left in enumerate(branch_plans):
+        for right in branch_plans[index + 1 :]:
+            collision = _cross_plan_collision(left, right)
+            if collision is not None:
+                raise ValueError(
+                    "A planned image output collides with a planned video output: "
+                    f"{collision}. Choose different output or projection paths."
+                )
     _validate_artifact_plan(
         config,
-        plan,
+        artifact_plan(config),
+        save_paths=tuple(
+            path for branch in branch_configs for path in _projection_save_paths(branch)
+        ),
+    )
+
+
+def validate_branch_artifact_paths(config: VisionLensConfig) -> None:
+    """Validate an internally derived image or video branch layout."""
+    _validate_artifact_plan(
+        config,
+        _branch_artifact_plan(config),
         save_paths=_projection_save_paths(config),
     )
 
@@ -358,15 +382,161 @@ def _cross_plan_collision(
 
 
 def check_artifact_overwrite(config: VisionLensConfig) -> None:
+    _check_plan_overwrite(config, artifact_plan(config))
+
+
+def check_branch_artifact_overwrite(config: VisionLensConfig) -> None:
+    """Check existing artifacts for an internally derived branch config."""
+    _check_plan_overwrite(config, _branch_artifact_plan(config))
+
+
+def _check_plan_overwrite(config: VisionLensConfig, plan: ArtifactPlan) -> None:
     if config.output.overwrite != "error":
         return
-    existing = artifact_plan(config).existing_paths()
+    existing = plan.existing_paths()
     if existing:
         paths = ", ".join(str(path) for path in existing)
         raise FileExistsError(
             f"Output artifact(s) already exist: {paths}. Choose a new output "
             "directory or set output.overwrite to 'replace' or 'skip'."
         )
+
+
+def prepare_output_directory(config: VisionLensConfig) -> None:
+    """Remove stale managed outputs before a replacement run."""
+    if config.output.overwrite != "replace":
+        return
+
+    candidates = _replacement_candidates(config.output.directory)
+    protected = {path.resolve() for path in config.input.paths}
+    if (
+        isinstance(config.analysis, PatchPCAAnalysisConfig)
+        and config.analysis.projection_path is not None
+    ):
+        protected.add(config.analysis.projection_path.resolve())
+    for candidate in candidates:
+        resolved = candidate.resolve()
+        if any(path == resolved or path.is_relative_to(resolved) for path in protected):
+            raise ValueError(
+                "output.overwrite='replace' cannot clean managed outputs because "
+                f"they contain a protected input: {candidate}. Choose a different "
+                "output.directory."
+            )
+
+    for candidate in sorted(candidates, key=lambda path: len(path.parts)):
+        _remove_managed_path(candidate)
+
+
+def _replacement_candidates(root: Path) -> set[Path]:
+    root_manifest = run_manifest_path(root)
+    previous_manifest = _read_managed_manifest(root_manifest)
+    aggregate_layout = _is_aggregate_manifest(previous_manifest)
+    candidates = _manifest_output_paths(previous_manifest, root)
+    for name in ("images", "videos"):
+        path = root / name
+        if not path.exists() and not path.is_symlink():
+            continue
+        if aggregate_layout or _is_empty_directory(path) or _has_managed_manifest(path):
+            candidates.add(path)
+        else:
+            raise ValueError(
+                "output.overwrite='replace' will not remove unrecognized "
+                f"contents from reserved output path {path}. Choose an empty "
+                "output.directory or remove those contents manually."
+            )
+    if root_manifest.is_dir() and not root_manifest.is_symlink():
+        raise ValueError(
+            f"Expected the run manifest path to be a file: {root_manifest}."
+        )
+    if root_manifest.exists() or root_manifest.is_symlink():
+        candidates.add(root_manifest)
+    return candidates
+
+
+def _is_aggregate_manifest(manifest: dict[str, object] | None) -> bool:
+    if manifest is None:
+        return False
+    run = manifest.get("run")
+    return isinstance(run, dict) and isinstance(run.get("manifests"), list)
+
+
+def _manifest_output_paths(
+    manifest: dict[str, object] | None,
+    root: Path,
+) -> set[Path]:
+    if manifest is None:
+        return set()
+    outputs = manifest.get("outputs")
+    assert isinstance(outputs, list)
+    paths = {Path(value) for value in outputs if isinstance(value, str)}
+    directory = next(
+        (
+            path
+            for path in paths
+            if path.is_absolute()
+            and _is_strict_descendant(path, root)
+            and path.is_dir()
+            and not path.is_symlink()
+        ),
+        None,
+    )
+    if directory is not None:
+        raise ValueError(
+            "output.overwrite='replace' will not recursively remove a directory "
+            f"listed as an artifact in the previous manifest: {directory}."
+        )
+    return {
+        path
+        for path in paths
+        if path.is_absolute() and _is_strict_descendant(path, root)
+    }
+
+
+def _read_managed_manifest(path: Path) -> dict[str, object] | None:
+    if not path.is_file():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict) or payload.get("schema_version") != 1:
+        return None
+    if not isinstance(payload.get("inputs"), list) or not isinstance(
+        payload.get("outputs"), list
+    ):
+        return None
+    return payload
+
+
+def _has_managed_manifest(path: Path) -> bool:
+    if not path.is_dir() or path.is_symlink():
+        return False
+    if _read_managed_manifest(run_manifest_path(path)) is not None:
+        return True
+    return any(
+        _read_managed_manifest(run_manifest_path(child)) is not None
+        for child in path.iterdir()
+        if child.is_dir()
+    )
+
+
+def _is_empty_directory(path: Path) -> bool:
+    return (
+        path.is_dir() and not path.is_symlink() and next(path.iterdir(), None) is None
+    )
+
+
+def _is_strict_descendant(path: Path, directory: Path) -> bool:
+    resolved = path.resolve()
+    root = directory.resolve()
+    return resolved != root and resolved.is_relative_to(root)
+
+
+def _remove_managed_path(path: Path) -> None:
+    if path.is_symlink() or path.is_file():
+        path.unlink(missing_ok=True)
+    elif path.is_dir():
+        shutil.rmtree(path)
 
 
 def _image_patch_pca_paths(config: VisionLensConfig) -> set[Path]:

@@ -1,5 +1,4 @@
 import json
-from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -98,7 +97,10 @@ def test_mixed_pipeline_dispatches_images_and_videos_separately(
         calls.append(("videos", branch_config))
         return SimpleNamespace(output_paths=(tmp_path / "video-output.mp4",))
 
-    monkeypatch.setattr(pipeline, "_preflight_mixed_pipeline", preflight)
+    monkeypatch.setattr(pipeline, "_preflight_pipeline", preflight)
+    monkeypatch.setattr(
+        pipeline, "_write_root_manifest", lambda *_args, **_kwargs: None
+    )
     monkeypatch.setattr(pipeline, "_dispatch_image_pipeline", run_images)
     monkeypatch.setattr(pipeline._video_pipeline, "run_video_from_config", run_videos)
 
@@ -217,6 +219,7 @@ def test_vit_pipeline_exports_figures_with_mocked_model(monkeypatch, tmp_path):
             },
             "output": {
                 "directory": str(tmp_path),
+                "overwrite": "replace",
             },
             "preprocessing": {"image_size": 4},
             "analysis": {
@@ -236,8 +239,6 @@ def test_vit_pipeline_exports_figures_with_mocked_model(monkeypatch, tmp_path):
             },
         }
     )
-    config = replace(config, output=OutputConfig(tmp_path))
-
     loaded_model = LoadedModel(
         model=object(),
         metadata=ModelMetadata(
@@ -286,8 +287,23 @@ def test_vit_pipeline_exports_figures_with_mocked_model(monkeypatch, tmp_path):
         "_extract_attention",
         lambda **_kwargs: attention,
     )
+    stale_output = tmp_path / "images" / "stale.png"
+    stale_output.parent.mkdir()
+    stale_output.touch()
+    (tmp_path / "run-manifest.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "inputs": [],
+                "outputs": [str(stale_output.resolve())],
+                "run": {"manifests": []},
+            }
+        ),
+        encoding="utf-8",
+    )
 
-    result = run_vit_attention_from_config(config)
+    result = run_pipeline_from_config(config)
+    output_dir = tmp_path / "images"
 
     assert len(result.output_paths) == 4
     assert {path.name for path in result.output_paths} == {
@@ -297,15 +313,22 @@ def test_vit_pipeline_exports_figures_with_mocked_model(monkeypatch, tmp_path):
         "layer-0_images_heads-mean.svg",
     }
     assert all(Path(path).is_file() for path in result.output_paths)
-    with Image.open(tmp_path / "1_layer-0_heads-mean_heatmap.png") as heatmap:
+    assert not stale_output.exists()
+    with Image.open(output_dir / "1_layer-0_heads-mean_heatmap.png") as heatmap:
         assert heatmap.size == (7, 5)
-    with Image.open(tmp_path / "1_layer-0_heads-mean_overlay.png") as overlay:
+    with Image.open(output_dir / "1_layer-0_heads-mean_overlay.png") as overlay:
         assert overlay.size == (7, 5)
-    manifest = json.loads((tmp_path / "run-manifest.json").read_text())
+    branch_manifest = output_dir / "run-manifest.json"
+    manifest = json.loads(branch_manifest.read_text())
     assert manifest["status"] == "completed"
     assert manifest["model"]["name"] == "mock_vit"
     assert manifest["inputs"][0]["id"] == "1"
     assert len(manifest["outputs"]) == 4
+    root_manifest = json.loads((tmp_path / "run-manifest.json").read_text())
+    assert root_manifest["run"] == {
+        "manifests": [str(branch_manifest.resolve())],
+        "media": "image",
+    }
 
 
 def test_rollout_grid_items_place_layer_row_above_rollout_row():
@@ -541,7 +564,12 @@ def test_rollout_config_dispatches_to_rollout_pipeline(monkeypatch, tmp_path):
     monkeypatch.setattr(
         image_pipeline,
         "run_vit_rollout_comparison_from_config",
-        lambda received: sentinel if received is config else None,
+        lambda _received: sentinel,
+    )
+    from vision_lens import pipeline
+
+    monkeypatch.setattr(
+        pipeline, "_write_root_manifest", lambda *_args, **_kwargs: None
     )
 
     assert run_pipeline_from_config(config) is sentinel

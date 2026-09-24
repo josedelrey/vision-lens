@@ -26,8 +26,8 @@ uv run vision-lens validate \
   --output-directory outputs/attention
 ```
 
-`--set section.key=value` can be repeated. Precedence is YAML, then `--set`,
-then named flags. All sources go through the same parser and validator.
+Named flags override values from the YAML file. Both sources go through the same
+parser and validator.
 
 Video files do not require a mode flag or a `video` section. The legacy
 `--video` flag is accepted for compatibility but is unnecessary. Use
@@ -77,10 +77,9 @@ extensions are `.avi`, `.m4v`, `.mkv`, `.mov`, `.mp4`, and `.webm`. Matching is
 case-insensitive. Pillow and PyAV perform the actual decoding, so corrupt or
 mislabelled files still fail.
 
-Images are processed as one group; videos are processed independently. Mixed
-runs write images under `output.directory/images/` and each video under
-`output.directory/videos/<name>/`. Single-media runs use `output.directory`
-directly, except that multiple videos receive source-named subdirectories.
+Images are processed as one group under `output.directory/images/`. Videos are
+processed independently under `output.directory/videos/<name>/`. This layout is
+used consistently for image-only, video-only, and mixed runs.
 
 ## Model
 
@@ -293,14 +292,18 @@ PNG, and grids use `visualization.grid_format`. `output.grids` and
 `output.image_format` are image-only.
 
 With `overwrite: error`, the run fails during preflight if any planned artifact
-already exists. `replace` overwrites generated artifacts; `skip` preserves
-existing artifacts and writes missing ones. The policy also applies to the run
-manifest. Input files, loaded PCA projections, saved projections, and planned
-outputs are checked for path collisions before execution.
+already exists. `replace` removes the previous managed `images/` and `videos/`
+trees before writing a pristine set of outputs; it refuses to remove
+unrecognized contents from those reserved paths. Unrelated files directly under
+`output.directory` are preserved. `skip` preserves existing artifacts and writes
+missing ones. Input files, loaded PCA projections, saved projections, and
+planned outputs are checked for path collisions before execution.
 
-Each completed image or single-video run writes `run-manifest.json`. It records
-the resolved configuration, model identity, package versions, input metadata,
-output paths, and UTC run times.
+Each completed run writes an aggregate `run-manifest.json` directly under
+`output.directory`. Image and per-video directories also contain manifests with
+branch-specific processing details. Manifests record the resolved configuration,
+model identity, package versions, input metadata, output paths, and UTC run
+times.
 
 ## Video
 
@@ -320,11 +323,11 @@ only overrides the defaults below; it is invalid when no video is selected.
 | `video.codec` | `libx264` | PyAV/FFmpeg encoder for MP4 outputs. |
 | `video.alpha_format` | `prores_4444` | Transparent-overlay encoding: `prores_4444` produces a `.mov`; `vp9` produces a `.webm`. Only applicable when `output.transparent_overlays: true`. |
 
-Each video runs independently. With multiple inputs, outputs and manifests are
-written in source-named subdirectories. `sampling_rate: auto` requires a valid
-reported average source FPS; use a number otherwise. Output streams have a
-constant playback rate even for variable-rate sources. Raw arrays are exported
-in bounded batches; NPZ batches include sample timestamps.
+Each video runs independently in a source-named subdirectory.
+`sampling_rate: auto` requires a valid reported average source FPS; use a number
+otherwise. Output streams have a constant playback rate even for variable-rate
+sources. Raw arrays are exported in bounded batches; NPZ batches include sample
+timestamps.
 
 ProRes 4444 is the default transparent-video format and targets editing
 workflows. VP9 alpha produces smaller WebM files, but alpha playback support
