@@ -5,142 +5,46 @@
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.2%2B-EE4C2C?logo=pytorch&logoColor=white)](https://pytorch.org/)
 [![License](https://img.shields.io/badge/License-MIT-22A559)](LICENSE)
 
-Vision Lens visualizes pretrained vision models on images and sampled video frames. It supports transformer attention, attention rollout, Grad-CAM, and principal component analysis (PCA) of patch features. YAML configurations make runs reproducible, and each run records its resolved settings in a manifest.
+Vision Lens renders diagnostic views of pretrained vision models for images and
+video. It supports transformer attention, attention rollout, Grad-CAM, and PCA
+of patch embeddings. Runs are configured through validated YAML or CLI settings.
+
+## What it does
+
+| Method | Result | Models |
+|---|---|---|
+| Attention | Per-layer, per-head, or fused spatial maps | Vision Transformers through `timm` |
+| Rollout | Attention propagated through successive transformer blocks | Vision Transformers through `timm` |
+| Grad-CAM | Class-specific activation maps | CNNs through `torchvision` |
+| Patch PCA | RGB projections of patch embeddings, with optional foreground selection | Vision Transformers through `timm` |
+
+- Processes images, videos, or mixed folders automatically.
+- Writes heatmaps, overlays, grids, raw arrays, and silent video streams.
+- Supports shared/fixed normalization and nearest, bilinear, or AnyUp feature
+  interpolation.
+- Saves a `run-manifest.json` with resolved settings, model metadata, inputs,
+  outputs, package versions, and run times.
+
+These visualizations are diagnostic views, not causal explanations. PCA colors
+show feature variation, not semantic classes.
 
 ## Results
 
-<table border="0" cellspacing="0" style="border: 0; border-collapse: collapse;">
-  <thead>
-    <tr style="background: transparent; border: 0;">
-      <th align="center" style="border: 0;">Interpolation</th>
-      <th style="border: 0;"><div align="center">Horse 5</div></th>
-      <th style="border: 0;"><div align="center">Horse 6</div></th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr style="background: transparent; border: 0;">
-      <th align="center" style="border: 0;">Original</th>
-      <td align="center" style="border: 0;"><img src="examples/5.jpg" alt="Original horse 5" width="320"></td>
-      <td align="center" style="border: 0;"><img src="examples/6.jpg" alt="Original horse 6" width="320"></td>
-    </tr>
-    <tr style="background: transparent; border: 0;">
-      <th align="center" style="border: 0;">Bilinear mask</th>
-      <td align="center" style="border: 0;"><img src="assets/pca/bilinear-mask-5.png" alt="Horse 5 PCA with bilinear mask interpolation" width="320"></td>
-      <td align="center" style="border: 0;"><img src="assets/pca/bilinear-mask-6.png" alt="Horse 6 PCA with bilinear mask interpolation" width="320"></td>
-    </tr>
-    <tr style="background: transparent; border: 0;">
-      <th align="center" style="border: 0;">Nearest</th>
-      <td align="center" style="border: 0;"><img src="assets/pca/nearest-5.png" alt="Horse 5 PCA with nearest-neighbor interpolation" width="320"></td>
-      <td align="center" style="border: 0;"><img src="assets/pca/nearest-6.png" alt="Horse 6 PCA with nearest-neighbor interpolation" width="320"></td>
-    </tr>
-    <tr style="background: transparent; border: 0;">
-      <th align="center" style="border: 0;">AnyUp soft mask</th>
-      <td align="center" style="border: 0;"><img src="assets/pca/anyup-soft-mask-5.png" alt="Horse 5 PCA with AnyUp soft mask interpolation" width="320"></td>
-      <td align="center" style="border: 0;"><img src="assets/pca/anyup-soft-mask-6.png" alt="Horse 6 PCA with AnyUp soft mask interpolation" width="320"></td>
-    </tr>
-  </tbody>
-</table>
+| Example | Patch PCA | Layer 11 attention overlay |
+|:---|:---:|:---:|
+| Horse 5 | <img src="assets/pca/bilinear-mask-5.png" alt="Patch PCA of horse 5" width="360"> | <img src="assets/attention/example-5-layer-11-overlay.png" alt="Layer 11 attention overlay for horse 5" width="360"> |
+| Horse 6 | <img src="assets/pca/bilinear-mask-6.png" alt="Patch PCA of horse 6" width="360"> | <img src="assets/attention/example-6-layer-11-overlay.png" alt="Layer 11 attention overlay for horse 6" width="360"> |
 
-**Figure 1.** Patch PCA of two horse images across the selected interpolation modes.
+## Requirements
 
-## Methods
-
-| Method | Output | Model family |
-|---|---|---|
-| Attention | Spatial maps from selected transformer layers and heads | Vision Transformer via `timm` |
-| Rollout | Attention propagated through successive transformer layers | Vision Transformer via `timm` |
-| Grad-CAM | Class-specific activation maps | CNN via `torchvision` |
-| Patch PCA | RGB projection of patch embeddings, with optional image foreground selection | Vision Transformer via `timm` |
-
-These outputs are diagnostic views of model behavior, not causal explanations. PCA colors show feature variation rather than semantic classes.
-
-<table border="0" cellspacing="0" style="border: 0; border-collapse: collapse;">
-  <thead>
-    <tr style="background: transparent; border: 0;">
-      <th style="border: 0;"><div align="center">Example</div></th>
-      <th style="border: 0;"><div align="center">Original</div></th>
-      <th style="border: 0;"><div align="center">Layer 2</div></th>
-      <th style="border: 0;"><div align="center">Layer 5</div></th>
-      <th style="border: 0;"><div align="center">Layer 8</div></th>
-      <th style="border: 0;"><div align="center">Layer 11</div></th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr style="background: transparent; border: 0;">
-      <th style="border: 0;"><div align="center">1</div></th>
-      <td align="center" style="border: 0;"><img src="examples/1.jpg" alt="Original example 1" width="160"></td>
-      <td align="center" style="border: 0;"><img src="assets/attention/example-1-layer-2.png" alt="Example 1 attention heatmap at layer 2" width="160"></td>
-      <td align="center" style="border: 0;"><img src="assets/attention/example-1-layer-5.png" alt="Example 1 attention heatmap at layer 5" width="160"></td>
-      <td align="center" style="border: 0;"><img src="assets/attention/example-1-layer-8.png" alt="Example 1 attention heatmap at layer 8" width="160"></td>
-      <td align="center" style="border: 0;"><img src="assets/attention/example-1-layer-11.png" alt="Example 1 attention heatmap at layer 11" width="160"></td>
-    </tr>
-    <tr style="background: transparent; border: 0;">
-      <th style="border: 0;"><div align="center">2</div></th>
-      <td align="center" style="border: 0;"><img src="examples/2.jpg" alt="Original example 2" width="160"></td>
-      <td align="center" style="border: 0;"><img src="assets/attention/example-2-layer-2.png" alt="Example 2 attention heatmap at layer 2" width="160"></td>
-      <td align="center" style="border: 0;"><img src="assets/attention/example-2-layer-5.png" alt="Example 2 attention heatmap at layer 5" width="160"></td>
-      <td align="center" style="border: 0;"><img src="assets/attention/example-2-layer-8.png" alt="Example 2 attention heatmap at layer 8" width="160"></td>
-      <td align="center" style="border: 0;"><img src="assets/attention/example-2-layer-11.png" alt="Example 2 attention heatmap at layer 11" width="160"></td>
-    </tr>
-    <tr style="background: transparent; border: 0;">
-      <th style="border: 0;"><div align="center">3</div></th>
-      <td align="center" style="border: 0;"><img src="examples/3.jpg" alt="Original example 3" width="160"></td>
-      <td align="center" style="border: 0;"><img src="assets/attention/example-3-layer-2.png" alt="Example 3 attention heatmap at layer 2" width="160"></td>
-      <td align="center" style="border: 0;"><img src="assets/attention/example-3-layer-5.png" alt="Example 3 attention heatmap at layer 5" width="160"></td>
-      <td align="center" style="border: 0;"><img src="assets/attention/example-3-layer-8.png" alt="Example 3 attention heatmap at layer 8" width="160"></td>
-      <td align="center" style="border: 0;"><img src="assets/attention/example-3-layer-11.png" alt="Example 3 attention heatmap at layer 11" width="160"></td>
-    </tr>
-    <tr style="background: transparent; border: 0;">
-      <th style="border: 0;"><div align="center">4</div></th>
-      <td align="center" style="border: 0;"><img src="examples/4.jpg" alt="Original example 4" width="160"></td>
-      <td align="center" style="border: 0;"><img src="assets/attention/example-4-layer-2.png" alt="Example 4 attention heatmap at layer 2" width="160"></td>
-      <td align="center" style="border: 0;"><img src="assets/attention/example-4-layer-5.png" alt="Example 4 attention heatmap at layer 5" width="160"></td>
-      <td align="center" style="border: 0;"><img src="assets/attention/example-4-layer-8.png" alt="Example 4 attention heatmap at layer 8" width="160"></td>
-      <td align="center" style="border: 0;"><img src="assets/attention/example-4-layer-11.png" alt="Example 4 attention heatmap at layer 11" width="160"></td>
-    </tr>
-    <tr style="background: transparent; border: 0;">
-      <th style="border: 0;"><div align="center">5</div></th>
-      <td align="center" style="border: 0;"><img src="examples/5.jpg" alt="Original example 5" width="160"></td>
-      <td align="center" style="border: 0;"><img src="assets/attention/example-5-layer-2.png" alt="Example 5 attention heatmap at layer 2" width="160"></td>
-      <td align="center" style="border: 0;"><img src="assets/attention/example-5-layer-5.png" alt="Example 5 attention heatmap at layer 5" width="160"></td>
-      <td align="center" style="border: 0;"><img src="assets/attention/example-5-layer-8.png" alt="Example 5 attention heatmap at layer 8" width="160"></td>
-      <td align="center" style="border: 0;"><img src="assets/attention/example-5-layer-11.png" alt="Example 5 attention heatmap at layer 11" width="160"></td>
-    </tr>
-    <tr style="background: transparent; border: 0;">
-      <th style="border: 0;"><div align="center">6</div></th>
-      <td align="center" style="border: 0;"><img src="examples/6.jpg" alt="Original example 6" width="160"></td>
-      <td align="center" style="border: 0;"><img src="assets/attention/example-6-layer-2.png" alt="Example 6 attention heatmap at layer 2" width="160"></td>
-      <td align="center" style="border: 0;"><img src="assets/attention/example-6-layer-5.png" alt="Example 6 attention heatmap at layer 5" width="160"></td>
-      <td align="center" style="border: 0;"><img src="assets/attention/example-6-layer-8.png" alt="Example 6 attention heatmap at layer 8" width="160"></td>
-      <td align="center" style="border: 0;"><img src="assets/attention/example-6-layer-11.png" alt="Example 6 attention heatmap at layer 11" width="160"></td>
-    </tr>
-    <tr style="background: transparent; border: 0;">
-      <th style="border: 0;"><div align="center">7</div></th>
-      <td align="center" style="border: 0;"><img src="examples/7.jpg" alt="Original example 7" width="160"></td>
-      <td align="center" style="border: 0;"><img src="assets/attention/example-7-layer-2.png" alt="Example 7 attention heatmap at layer 2" width="160"></td>
-      <td align="center" style="border: 0;"><img src="assets/attention/example-7-layer-5.png" alt="Example 7 attention heatmap at layer 5" width="160"></td>
-      <td align="center" style="border: 0;"><img src="assets/attention/example-7-layer-8.png" alt="Example 7 attention heatmap at layer 8" width="160"></td>
-      <td align="center" style="border: 0;"><img src="assets/attention/example-7-layer-11.png" alt="Example 7 attention heatmap at layer 11" width="160"></td>
-    </tr>
-    <tr style="background: transparent; border: 0;">
-      <th style="border: 0;"><div align="center">8</div></th>
-      <td align="center" style="border: 0;"><img src="examples/8.jpg" alt="Original example 8" width="160"></td>
-      <td align="center" style="border: 0;"><img src="assets/attention/example-8-layer-2.png" alt="Example 8 attention heatmap at layer 2" width="160"></td>
-      <td align="center" style="border: 0;"><img src="assets/attention/example-8-layer-5.png" alt="Example 8 attention heatmap at layer 5" width="160"></td>
-      <td align="center" style="border: 0;"><img src="assets/attention/example-8-layer-8.png" alt="Example 8 attention heatmap at layer 8" width="160"></td>
-      <td align="center" style="border: 0;"><img src="assets/attention/example-8-layer-11.png" alt="Example 8 attention heatmap at layer 11" width="160"></td>
-    </tr>
-  </tbody>
-</table>
-
-**Figure 2.** Mean-head attention heatmaps from layers 2, 5, 8, and 11 of DINOv2 ViT-S/14 with registers, rendered with AnyUp.
+- Linux
+- Python 3.12 or newer
+- [Git](https://git-scm.com/)
+- [uv](https://docs.astral.sh/uv/)
 
 ## Install
 
-Vision Lens is distributed from this repository and supports Linux with Python
-3.12 or newer. With [Git](https://git-scm.com/) and
-[uv](https://docs.astral.sh/uv/) installed, clone the repository and create its
-locked environment:
+Clone the repository and create its locked environment:
 
 ```bash
 git clone https://github.com/josedelrey/vision-lens.git
@@ -148,68 +52,39 @@ cd vision-lens
 uv sync --locked
 ```
 
-Use `uv sync --locked --extra video` instead when video decoding or export is needed. Pretrained weights are downloaded on first use; AnyUp interpolation also downloads its model and checkpoint.
+For video decoding and export, include the optional video dependency:
 
-## Run
+```bash
+uv sync --locked --extra video
+```
 
-Run an image workflow entirely from command-line options:
+Pretrained weights are downloaded on first use. AnyUp interpolation also
+downloads model code from a pinned AnyUp revision and its pretrained checkpoint.
+
+## Quick start
+
+Run one bundled attention example:
 
 ```bash
 uv run vision-lens run \
-  --input-folders '[examples]' \
-  --model-architecture vit \
-  --model-backend timm \
-  --model-name vit_small_patch8_224.dino \
-  --preprocessing-image-size 224 \
-  --preprocessing-interpolation bilinear \
-  --analysis-method attention \
-  --analysis-layers '[2, 5, 8, 11]' \
-  --visualization-output-size match \
-  --visualization-interpolation nearest \
-  --visualization-overlay-alpha 1.0 \
-  --visualization-cmap-black '{threshold: 20, blend_width: 35, transparent: true}' \
-  --output-directory outputs/image/dino_vits8/attention \
-  --output-transparent-overlays true \
-  --output-overwrite replace
+  --config configs/attention.dino_vits8.yaml \
+  --input-limit 1
 ```
 
-Every configuration setting has a `--section-key` flag. YAML files remain optional reusable bases, and command-line values override them:
+The example writes its artifacts and `run-manifest.json` under
+`outputs/image/dino_vits8/attention/`.
+
+Validate a configuration without loading a model, or inspect its fully resolved
+form:
 
 ```bash
-uv run vision-lens run --config configs/attention.dino_vits8.yaml --input-limit 1
+uv run vision-lens validate --config configs/attention.dino_vits8.yaml
+uv run vision-lens resolve --config configs/attention.dino_vits8.yaml
 ```
 
-The repeatable `--set section.key=value` form is also supported. The CLI provides `validate` to check the merged configuration without loading a model and `resolve` to print all resolved settings. See the [configuration reference](docs/configuration.md) for every setting, precedence, and compatibility rule.
+## Configuration
 
-Image and video inputs are detected automatically. To process a video, point
-`input.files` to it:
-
-```yaml
-input:
-  files: [/path/to/your/video.mp4]
-```
-
-The optional `video` section only overrides video-processing defaults:
-
-```yaml
-video:
-  sampling_rate: auto
-```
-
-Folders can contain images, videos, or both. Supported media files are selected
-automatically and unrelated files are ignored:
-
-```yaml
-input:
-  folders: [/path/to/your/media]
-  recursive: true
-```
-
-Standard video outputs are silent MP4 files. Transparent overlays can also be exported as ProRes 4444 MOV or VP9 WebM files; the [video reference](docs/configuration.md#video) covers sampling and encoding.
-
-### Configuration
-
-A minimal image configuration selects an input, model, analysis, and output directory:
+A minimal image workflow looks like this:
 
 ```yaml
 input:
@@ -231,34 +106,99 @@ output:
   directory: outputs/attention
 ```
 
-The examples in [`configs/`](configs/) cover all four methods. Inputs may be explicit files or files selected from folders. Media types are detected automatically; a `video` section is needed only to customize timestamp sampling or encoding. Relative paths resolve from the nearest project root containing `pyproject.toml`, falling back to the working directory.
+Save it as `workflow.yaml`, then run:
 
-### Outputs
+```bash
+uv run vision-lens run --config workflow.yaml
+```
 
-Depending on the workflow, Vision Lens writes heatmaps or PCA color maps, flattened or transparent overlays, comparison grids, video streams, and optional raw arrays. Each completed image or single-video run writes `run-manifest.json` with its configuration, model and runtime details, inputs, and output paths. Multiple videos receive separate directories and manifests. Mixed runs write the grouped image run under `images/` and each video under `videos/<name>/`.
+Every setting is also available as a `--section-key` flag. CLI values are YAML,
+so lists and mappings should normally be quoted:
 
-Grid layout, output size, interpolation, colormap, normalization, and overwrite behavior are configurable.
+```bash
+uv run vision-lens run \
+  --input-files '[examples/1.jpg]' \
+  --model-architecture vit \
+  --model-backend timm \
+  --model-name vit_small_patch8_224.dino \
+  --preprocessing-image-size 224 \
+  --analysis-method attention \
+  --analysis-layers '[11]' \
+  --output-directory outputs/attention
+```
 
-<table border="0" cellspacing="0" style="border: 0; border-collapse: collapse;">
-  <thead>
-    <tr style="background: transparent; border: 0;">
-      <th style="border: 0;"><div align="center">Layer 2</div></th>
-      <th style="border: 0;"><div align="center">Layer 5</div></th>
-      <th style="border: 0;"><div align="center">Layer 8</div></th>
-      <th style="border: 0;"><div align="center">Layer 11</div></th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr style="background: transparent; border: 0;">
-      <td align="center" style="border: 0;"><img src="assets/attention/example-6-layer-2-overlay.png" alt="Example 6 attention overlay at layer 2" width="240"></td>
-      <td align="center" style="border: 0;"><img src="assets/attention/example-6-layer-5-overlay.png" alt="Example 6 attention overlay at layer 5" width="240"></td>
-      <td align="center" style="border: 0;"><img src="assets/attention/example-6-layer-8-overlay.png" alt="Example 6 attention overlay at layer 8" width="240"></td>
-      <td align="center" style="border: 0;"><img src="assets/attention/example-6-layer-11-overlay.png" alt="Example 6 attention overlay at layer 11" width="240"></td>
-    </tr>
-  </tbody>
-</table>
+You can combine a YAML file with repeatable `--set section.key=value` overrides
+or named flags. Precedence is: YAML, then `--set`, then named flags.
 
-**Figure 3.** Mean-head attention overlays for example 6 at layers 2, 5, 8, and 11 of DINOv2 ViT-S/14 with registers, rendered with bilinear interpolation.
+The bundled [`configs/`](configs/) cover all four methods. The complete setting
+reference, defaults, compatibility rules, and path-resolution behavior are in
+[`docs/configuration.md`](docs/configuration.md).
+
+## Images and video
+
+Supported image formats are JPEG, PNG, and WebP. Supported video containers are
+AVI, M4V, MKV, MOV, MP4, and WebM. Extensions are matched case-insensitively;
+Pillow and PyAV perform the actual decoding.
+
+Folders may contain images, videos, or both:
+
+```yaml
+input:
+  folders: [/path/to/media]
+  recursive: true
+```
+
+Media types are detected automatically. A `video` section is only needed to
+override video defaults:
+
+```yaml
+video:
+  sampling_rate: 2.5
+  frame_limit: 100
+```
+
+Video outputs are silent. Ordinary heatmaps and flattened overlays are MP4;
+transparent overlays can be ProRes 4444 MOV or VP9 WebM. Source audio is not
+copied.
+
+## Outputs
+
+Depending on the workflow, Vision Lens can write:
+
+- heatmaps or PCA color maps;
+- flattened and transparent overlays;
+- paginated comparison grids;
+- raw NumPy arrays;
+- fitted PCA projections; and
+- rendered video streams.
+
+### Attention across layers
+
+Images 2 and 3 from the AnyUp DINOv2 ViT-S/14 run show how mean-head attention
+changes across transformer depth:
+
+| Example | Layer 2 | Layer 5 | Layer 8 | Layer 11 |
+|:---|:---:|:---:|:---:|:---:|
+| Image 2 | <img src="assets/attention/example-2-layer-2.png" alt="Image 2 attention at layer 2" width="150"> | <img src="assets/attention/example-2-layer-5.png" alt="Image 2 attention at layer 5" width="150"> | <img src="assets/attention/example-2-layer-8.png" alt="Image 2 attention at layer 8" width="150"> | <img src="assets/attention/example-2-layer-11.png" alt="Image 2 attention at layer 11" width="150"> |
+| Image 3 | <img src="assets/attention/example-3-layer-2.png" alt="Image 3 attention at layer 2" width="150"> | <img src="assets/attention/example-3-layer-5.png" alt="Image 3 attention at layer 5" width="150"> | <img src="assets/attention/example-3-layer-8.png" alt="Image 3 attention at layer 8" width="150"> | <img src="assets/attention/example-3-layer-11.png" alt="Image 3 attention at layer 11" width="150"> |
+
+Image-only runs write directly to `output.directory`. A single video does the
+same. Multiple videos receive separate source-named subdirectories. Mixed runs
+use this layout:
+
+```text
+output.directory/
+├── images/
+│   ├── ...
+│   └── run-manifest.json
+└── videos/
+    └── <video-name>/
+        ├── ...
+        └── run-manifest.json
+```
+
+The default overwrite policy is `error`; use `replace` or `skip` explicitly when
+rerunning into an existing output directory.
 
 ## Python API
 
@@ -272,8 +212,30 @@ for path in result.output_paths:
     print(path)
 ```
 
-The public API also includes `run_pipeline`, `parse_config`, `validate_config`, and `resolved_config_yaml`. Results expose the resolved configuration and generated output paths. Configuration and execution failures raise `ConfigurationError` and `PipelineError`, both derived from `VisionLensError`.
+The public API also exposes `run_pipeline`, `parse_config`, `validate_config`,
+`config_to_dict`, and `resolved_config_yaml`. Configuration and execution errors
+derive from `VisionLensError`.
+
+## Development
+
+Install all optional and development dependencies, then run the same checks as
+CI:
+
+```bash
+uv sync --locked --all-extras
+uv run ruff check vision_lens tests
+uv run ruff format --check vision_lens tests
+uv run pytest -m "not real_model"
+```
+
+Real-model smoke tests download pretrained weights and are opt-in:
+
+```bash
+VISION_LENS_RUN_REAL_MODELS=1 \
+  uv run pytest tests/test_real_models.py -m real_model
+```
 
 ## License and attribution
 
-Vision Lens is available under the [MIT License](LICENSE). Sources for bundled [images](examples/ATTRIBUTION.md) are documented separately.
+Vision Lens is available under the [MIT License](LICENSE). Sources for the
+bundled [example images](examples/ATTRIBUTION.md) are documented separately.

@@ -1,6 +1,10 @@
 # Configuration reference
 
-Vision Lens configuration can come from a YAML file, command-line flags, or both. The configuration sections are `input`, `model`, `preprocessing`, `analysis`, `runtime`, `visualization`, and `output`. Image and video inputs are detected automatically; the optional `video` section customizes frame-based processing. Omitted settings use the defaults below. Missing, unknown, or inapplicable settings are rejected during validation, before model weights are loaded.
+Vision Lens accepts YAML files, CLI flags, or both. The sections are `input`,
+`model`, `preprocessing`, `analysis`, `runtime`, `visualization`, `output`, and
+the optional `video` section. Media types are detected from the selected files.
+Unknown, missing, conflicting, and inapplicable settings are rejected before
+model weights are loaded.
 
 ```bash
 uv run vision-lens validate --config workflow.yaml
@@ -8,7 +12,8 @@ uv run vision-lens resolve --config workflow.yaml
 uv run vision-lens run --config workflow.yaml
 ```
 
-The YAML file is optional. Every setting also has a named CLI flag formed as `--section-key`, and each value is parsed as YAML:
+The YAML file is optional. Every setting has a `--section-key` flag, and every
+flag value is parsed as YAML:
 
 ```bash
 uv run vision-lens validate \
@@ -21,15 +26,39 @@ uv run vision-lens validate \
   --output-directory outputs/attention
 ```
 
-`--set section.key=value` remains available and can be repeated. Configuration precedence is YAML, then `--set`, then named `--section-key` flags. The final merged mapping goes through the same parser and validator regardless of its sources. This means a partial CLI-only configuration is accepted by argument parsing and then reports the same missing-setting error as an equivalent partial YAML file.
+`--set section.key=value` can be repeated. Precedence is YAML, then `--set`,
+then named flags. All sources go through the same parser and validator.
 
-Video files do not require a mode flag or a `video` section. The legacy `--video` flag remains accepted for compatibility but is no longer needed. Pass a `--video-*` field only to override a video default. `validate` reports the detected image and video counts. `resolve` includes the same counts in a YAML comment and prints the configuration after merging, media detection, defaults, input expansion, and path resolution. Run `vision-lens --help` for the complete generated flag list.
+Video files do not require a mode flag or a `video` section. The legacy
+`--video` flag is accepted for compatibility but is unnecessary. Use
+`--video-*` only to override a video default. `validate` reports detected media
+counts; `resolve` prints the merged, expanded, defaulted, and path-resolved
+configuration. Run `uv run vision-lens --help` for every generated flag.
 
-With `--config`, paths resolve from the nearest ancestor of the configuration file containing `pyproject.toml`. Without `--config`, path resolution starts from the working directory and searches for a project root. If no project root exists, paths use the working directory. The `--config` argument itself follows normal shell path rules.
+With `--config`, relative paths resolve from the nearest ancestor of that file
+containing `pyproject.toml`. Without `--config`, resolution starts from the
+working directory and uses its nearest project root. If none exists, paths use
+the working directory. The `--config` path itself follows normal shell rules.
+
+## Workflow compatibility
+
+| Method | Required model | Images | Video |
+|---|---|---:|---:|
+| `attention` | `architecture: vit`, `backend: timm` | yes | yes |
+| `rollout` | `architecture: vit`, `backend: timm` | yes | yes |
+| `gradcam` | `architecture: cnn`, `backend: torchvision` | yes | yes |
+| `patch_pca` | `architecture: vit`, `backend: timm` | yes | yes |
+
+Image and video settings differ where noted below. Mixed inputs use the union of
+the applicable settings, while each branch still receives its own canonical
+configuration.
 
 ## Input
 
-At least one existing supported media file must be selected. Explicit files retain their listed order, duplicate paths are removed, and unsupported explicit file types are rejected. Folder patterns are relative globs; matching unsupported files are ignored. `limit` applies after expansion and media filtering.
+At least one existing supported media file must be selected. Explicit files
+retain their order, duplicate paths are removed, and unsupported explicit file
+types are rejected. Folder patterns are relative globs; unsupported matches are
+ignored. `limit` applies after expansion and media filtering.
 
 | Setting | Default | Meaning |
 |---|---|---|
@@ -39,13 +68,25 @@ At least one existing supported media file must be selected. Explicit files reta
 | `input.recursive` | `false` | Search nested folders. |
 | `input.limit` | `null` | Maximum number of selected files. |
 
-Absolute glob patterns and patterns containing `..` are rejected. Supported image extensions are `.jpg`, `.jpeg`, `.png`, and `.webp`. Supported video extensions are `.avi`, `.m4v`, `.mkv`, `.mov`, `.mp4`, and `.webm`. Extension matching is case-insensitive. The selected image and video groups are decoded by Pillow and PyAV respectively, so corrupt or misleadingly renamed files still fail with a decoder error.
+`patterns` and `recursive` require at least one folder. Patterns are applied to
+each folder independently.
 
-When both media types are selected, images are processed together and videos are processed independently. Outputs use `output.directory/images/` for the image run and `output.directory/videos/<name>/` for each video. Image-only and video-only runs retain the ordinary output layout.
+Absolute glob patterns and patterns containing `..` are rejected. Supported
+image extensions are `.jpg`, `.jpeg`, `.png`, and `.webp`; supported video
+extensions are `.avi`, `.m4v`, `.mkv`, `.mov`, `.mp4`, and `.webm`. Matching is
+case-insensitive. Pillow and PyAV perform the actual decoding, so corrupt or
+mislabelled files still fail.
+
+Images are processed as one group; videos are processed independently. Mixed
+runs write images under `output.directory/images/` and each video under
+`output.directory/videos/<name>/`. Single-media runs use `output.directory`
+directly, except that multiple videos receive source-named subdirectories.
 
 ## Model
 
-Attention, rollout, and patch PCA require `architecture: vit` with `backend: timm`. Grad-CAM requires `architecture: cnn` with `backend: torchvision`.
+Attention, rollout, and patch PCA require `architecture: vit` with
+`backend: timm`. Grad-CAM requires `architecture: cnn` with
+`backend: torchvision`.
 
 | Setting | Default | Meaning |
 |---|---|---|
@@ -55,7 +96,10 @@ Attention, rollout, and patch PCA require `architecture: vit` with `backend: tim
 | `model.pretrained` | `true` | Load pretrained weights. |
 | `model.options` | `null` | Additional backend loader arguments. |
 
-Vision Lens manages `img_size` and `pretrained` for timm, `dynamic_img_size` for video timm models, and `weights` for torchvision. These keys cannot be repeated in `model.options`. A custom model must expose the internals required by the selected method; backend compatibility alone is insufficient.
+Vision Lens manages `img_size` and `pretrained` for timm,
+`dynamic_img_size` for timm video models, and `weights` for torchvision. Do not
+repeat those keys in `model.options`. Custom models must expose the internals
+required by the selected method; backend compatibility alone is insufficient.
 
 ## Preprocessing
 
@@ -70,7 +114,12 @@ Vision Lens manages `img_size` and `pretrained` for timm, `dynamic_img_size` for
 | `preprocessing.mean` | model-derived | Three RGB means; valid when normalization is enabled. |
 | `preprocessing.std` | model-derived | Three positive RGB standard deviations; valid when normalization is enabled. |
 
-For images, `longest` with center padding or `shortest` with center cropping preserves the aspect ratio. Crop and pad cannot both be enabled. Video always preserves the frame aspect ratio; `resize`, `crop`, and `pad` are image-only settings and must be omitted from video configurations. ViT video dimensions are aligned to patch multiples. The known fixed-size DINO ViT-S/8 model requires `image_size: 224`.
+For images, `longest` with center padding or `shortest` with center cropping
+preserves aspect ratio. Crop and pad cannot both be enabled. Video always
+preserves frame aspect ratio; `resize`, `crop`, and `pad` are image-only and
+must be omitted from video-only configurations. ViT video dimensions are
+aligned to patch multiples. The known fixed-size DINO ViT-S/8 model requires
+`image_size: 224`.
 
 ## Analysis
 
@@ -89,8 +138,11 @@ analysis:
 | `analysis.heads` | all heads | Nonempty list of head indices. For rollout, affects image comparison grids only. |
 | `analysis.head_fusion` | `mean` | `mean`, `max`, or `none`. For rollout, affects image comparison grids only. |
 
-For rollout image grids, choose whether to show rollout maps alone or compare them
-with direct layer attention:
+`mean` and `max` fuse the selected heads into one map; `none` emits one map per
+selected head. When `heads` is omitted, all heads participate.
+
+For rollout image grids, choose whether to show rollout maps alone or compare
+them with direct layer attention:
 
 ```yaml
 visualization:
@@ -98,8 +150,8 @@ visualization:
 ```
 
 `visualization.rollout_grid` accepts `comparison` (the default) or `rollout`.
-The `analysis.heads` and `analysis.head_fusion` settings are applicable to rollout
-only when `rollout_grid: comparison`, because they control the direct-attention row.
+The `analysis.heads` and `analysis.head_fusion` settings apply to rollout only
+when `rollout_grid: comparison`, because they control the direct-attention row.
 
 ### Grad-CAM
 
@@ -134,9 +186,19 @@ analysis:
 | `analysis.projection_path` | `null` | `.npz` file required with `projection: load`. |
 | `analysis.save_projection` | `null` | Save a fitted projection to `.npz`. |
 
-One image run fits a shared projection, threshold, and RGB range across its selected images, making their colors comparable. With `foreground_separation: false`, omit the other foreground settings; all patches contribute to the RGB fit. With `projection: load`, supply only `projection_path`: the saved foreground rule and color range are reused. Video PCA fits a full-frame projection from representative frames, controlled by `video.pca_fit_frames`; foreground settings are invalid. A saved projection can be the sole output of a PCA run.
+One image run fits a shared projection, threshold, and RGB range across all its
+images, making colors comparable. With `foreground_separation: false`, omit the
+other foreground settings; all patches contribute. With `projection: load`,
+supply only `projection_path`; the saved foreground rule and color range are
+reused. Video PCA fits a full-frame projection from representative frames,
+controlled by `video.pca_fit_frames`; foreground settings are invalid. Saving a
+projection may be the sole output of a PCA run.
 
-PCA uses an approximate low-rank fit over selected patch embeddings. Large image groups or long video fit windows may require substantial memory. PCA component signs do not identify the subject; choose `foreground_side` from the intended selection.
+Loaded projections must match the model's patch-embedding feature count. PCA
+uses an approximate low-rank fit over selected embeddings; large image groups or
+long video fit windows may require substantial memory. PCA component signs do
+not identify the subject, so choose `foreground_side` from the intended
+selection.
 
 ## Runtime
 
@@ -148,7 +210,10 @@ PCA uses an approximate low-rank fit over selected patch embeddings. Large image
 | `runtime.precision` | `float32` | `float32`, `float16`, or `bfloat16`. |
 | `runtime.seed` | `null` | Seed Python, NumPy, and PyTorch. |
 
-CPU does not support `float16`; MPS does not support `bfloat16`. Image PCA and `shared` map normalization can require an additional fitting pass. Multi-batch Python results report processed inputs without retaining all analysis tensors.
+`auto` selects CUDA, then MPS, then CPU. CPU does not support `float16`; MPS
+does not support `bfloat16`. Image PCA and `shared` normalization can require an
+additional fitting pass. Multi-batch Python results report processed inputs
+without retaining all analysis tensors.
 
 ## Visualization
 
@@ -170,7 +235,9 @@ The grid settings below apply only to image runs with `output.grids: true`. Patc
 | `visualization.rollout_grid` | `comparison` | For rollout image grids, `comparison` includes direct attention or `rollout` shows rollout maps only. |
 | `visualization.output_size` | model-processed size | `match` for source dimensions, a positive square size, or `[width, height]`. |
 
-Video output dimensions must be even. `output_size: match` renders at model resolution, then resizes the completed visualization to source dimensions. Set an explicit size to perform AnyUp interpolation at that resolution.
+Video output dimensions must be even. For video, `output_size: match` analyzes
+at model resolution and resizes the completed visualization to the source
+dimensions. Set an explicit size to interpolate directly at that resolution.
 
 ### Maps and overlays
 
@@ -185,11 +252,25 @@ Video output dimensions must be even. `output_size: match` renders at model reso
 | `visualization.normalization` | `per_map` | `per_map`, `shared` across the run, or `fixed`. |
 | `visualization.normalization_range` | `null` | Required `[min, max]` when normalization is `fixed`. |
 
-`nearest` preserves patch or activation blocks; `bilinear` blends between them. For foreground-separated image PCA, `bilinear_mask` blends projected colors but keeps a sharp foreground boundary. Without foreground separation, it behaves like bilinear. The four AnyUp modes use the [official AnyUp model](https://github.com/wimmerth/anyup) to upsample features. Mask variants preserve a coarse PCA foreground boundary; soft variants taper the local attention window and require query chunking. Smaller chunks reduce peak memory at the cost of runtime.
+`nearest` preserves patch or activation blocks; `bilinear` blends between them.
+For foreground-separated image PCA, `bilinear_mask` blends projected colors but
+keeps a sharp foreground boundary. Without foreground separation it behaves
+like bilinear. The AnyUp modes load model code from a pinned revision of the
+[official repository](https://github.com/wimmerth/anyup) and download its
+pretrained checkpoint. Mask variants preserve a coarse PCA boundary; soft
+variants taper the local attention window and require query chunking. Smaller
+chunks trade speed for lower peak memory.
 
-`overlay_alpha_curve` uses `steepness` and an optional `midpoint` (default `0.5`) to vary opacity with normalized map values; `overlay_alpha` scales the result. `cmap_black` uses 0–255 palette positions: `threshold` remains black, `blend_width` transitions into the selected colormap, and `transparent: true` reveals the source where the resulting color is pure black. These controls require corresponding rendered map or overlay outputs. Patch PCA does not accept map colormaps or overlay settings.
+`overlay_alpha_curve` uses `steepness` and an optional `midpoint` (default
+`0.5`) to vary opacity with normalized map values; `overlay_alpha` scales the
+result. `cmap_black` uses 0–255 palette positions: `threshold` remains black,
+`blend_width` transitions into the selected colormap, and `transparent: true`
+reveals the source where the resulting color is pure black. These controls
+require corresponding rendered outputs. Patch PCA does not accept map
+colormaps or overlay settings.
 
-Normalization affects rendered maps, overlays, and grids. Raw arrays retain analysis values before visualization normalization.
+Normalization affects rendered maps, overlays, and grids. Raw arrays retain
+analysis values before visualization normalization.
 
 ## Output
 
@@ -201,15 +282,32 @@ Normalization affects rendered maps, overlays, and grids. Raw arrays retain anal
 | `output.transparent_overlays` | `false` | Save standalone attention, rollout, or Grad-CAM layers with transparency. Images are RGBA PNGs; videos use `video.alpha_format`. |
 | `output.grids` | `true` for images | Save image comparison grids; invalid for video. |
 | `output.raw_arrays` | `false` | Save analysis arrays. |
-| `output.image_format` | `png` | Standalone image format: `png`, `jpeg`, `tiff`, or `webp`. |
+| `output.image_format` | `png` | Image heatmap and flattened-overlay format: `png`, `jpeg`, `tiff`, or `webp`. |
 | `output.raw_format` | `npy` | `npy` or compressed `npz`; requires raw arrays. |
 | `output.overwrite` | `error` | `error`, `replace`, or `skip` existing outputs. |
 
-At least one output type must be enabled. `output.overlays` retains the existing flattened source-plus-map output, while `output.transparent_overlays` writes a separate map layer without source-image pixels. Both overlay modes are invalid for PCA. Transparent image overlays are always PNG regardless of `output.image_format`; `output.grids` and `output.image_format` are image-only settings. `output.overwrite` also applies to the run manifest. The manifest records the resolved configuration, model identity, package versions, input metadata, output paths, and UTC run times. A loaded or saved PCA projection cannot collide with inputs or other planned outputs.
+At least one output type must be enabled. `overlays` writes a flattened
+source-plus-map image; `transparent_overlays` writes the map layer without
+source pixels. Both are invalid for PCA. Transparent image overlays are always
+PNG, and grids use `visualization.grid_format`. `output.grids` and
+`output.image_format` are image-only.
+
+With `overwrite: error`, the run fails during preflight if any planned artifact
+already exists. `replace` overwrites generated artifacts; `skip` preserves
+existing artifacts and writes missing ones. The policy also applies to the run
+manifest. Input files, loaded PCA projections, saved projections, and planned
+outputs are checked for path collisions before execution.
+
+Each completed image or single-video run writes `run-manifest.json`. It records
+the resolved configuration, model identity, package versions, input metadata,
+output paths, and UTC run times.
 
 ## Video
 
-Install video support with `uv sync --locked --extra video`. Detected videos are processed as timestamp-sampled frames and exported as silent MP4 streams, plus optional alpha-capable MOV or WebM streams. Source audio is not copied. The `video` section is optional and only changes the defaults below.
+Install video support with `uv sync --locked --extra video`. Videos are sampled
+by timestamp and exported as silent MP4 streams, plus optional alpha-capable MOV
+or WebM streams. Source audio is not copied. The `video` section is optional and
+only overrides the defaults below; it is invalid when no video is selected.
 
 | Setting | Default | Meaning |
 |---|---|---|
@@ -218,10 +316,18 @@ Install video support with `uv sync --locked --extra video`. Detected videos are
 | `video.sampling_rate` | `5.0` | Sampled frames per second and output playback FPS; `auto` uses reported average source FPS. |
 | `video.frame_limit` | `null` | Maximum sampled frames in the selected time range. |
 | `video.pca_fit_frames` | `32` | Representative frames used to fit video PCA. |
-| `video.temporal_smoothing` | `0.0` | Previous-frame blend strength from 0 to 1 for rendered PCA video. |
+| `video.temporal_smoothing` | `0.0` | Previous-frame blend strength from 0 to 1 for consecutive rendered maps. |
 | `video.codec` | `libx264` | PyAV/FFmpeg encoder for MP4 outputs. |
 | `video.alpha_format` | `prores_4444` | Transparent-overlay encoding: `prores_4444` produces a `.mov`; `vp9` produces a `.webm`. Only applicable when `output.transparent_overlays: true`. |
 
-Each selected video runs independently. With multiple inputs, outputs and `run-manifest.json` are written in separate source-named subdirectories. `sampling_rate: auto` requires a valid reported source FPS; use a number otherwise. Output frames have constant playback FPS even for variable-rate sources. Raw arrays are exported in bounded batches; NPZ batches include sample timestamps.
+Each video runs independently. With multiple inputs, outputs and manifests are
+written in source-named subdirectories. `sampling_rate: auto` requires a valid
+reported average source FPS; use a number otherwise. Output streams have a
+constant playback rate even for variable-rate sources. Raw arrays are exported
+in bounded batches; NPZ batches include sample timestamps.
 
-ProRes 4444 is the default transparent-video format and is intended for editing workflows. VP9 alpha produces smaller WebM files for browser-oriented workflows, but alpha playback support varies between applications. `video.codec` continues to control only ordinary heatmap and flattened-overlay MP4 files.
+ProRes 4444 is the default transparent-video format and targets editing
+workflows. VP9 alpha produces smaller WebM files, but alpha playback support
+varies by application. `video.codec` controls only ordinary heatmap and
+flattened-overlay MP4 files. Video dependencies and requested encoders are
+checked before a mixed run writes image outputs.
