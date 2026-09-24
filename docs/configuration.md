@@ -78,10 +78,6 @@ extensions are `.avi`, `.m4v`, `.mkv`, `.mov`, `.mp4`, and `.webm`. Matching is
 case-insensitive. Pillow and PyAV perform the actual decoding, so corrupt or
 mislabelled files still fail.
 
-Images are processed as one group under `output.directory/images/`. Videos are
-processed independently under `output.directory/videos/<name>/`. This layout is
-used consistently for image-only, video-only, and mixed runs.
-
 ## Model
 
 Attention, rollout, and patch PCA require `architecture: vit` with
@@ -190,15 +186,15 @@ One image run fits a shared projection, threshold, and RGB range across all its
 images, making colors comparable. With `foreground_separation: false`, omit the
 other foreground settings. All patches contribute. With `projection: load`,
 supply only `projection_path`. The saved foreground rule and color range are
-reused. Video PCA fits a full-frame projection from representative frames,
-controlled by `video.pca_fit_frames`. Foreground settings are invalid. Saving a
-projection may be the sole output of a PCA run.
+reused. Video PCA fits a full-frame projection from representative frames
+controlled by `video.pca_fit_frames`, so foreground settings are invalid for
+video. Saving a projection may be the sole output of a PCA run.
 
 Loaded projections must match the model's patch-embedding feature count. PCA
 uses an approximate low-rank fit over selected embeddings. Large image groups or
-long video fit windows may require substantial memory. PCA component signs do
-not identify the subject, so choose `foreground_side` from the intended
-selection.
+long video fit windows may require substantial memory. The subject may appear on
+either side of the first PCA component. Use `foreground_side: high` to keep
+values above the threshold or `foreground_side: low` to keep values below it.
 
 ## Runtime
 
@@ -214,6 +210,11 @@ selection.
 does not support `bfloat16`. Image PCA and `shared` normalization can require an
 additional fitting pass. Multi-batch Python results report processed inputs
 without retaining all analysis tensors.
+
+If a run exhausts device memory, reduce `runtime.batch_size` from its default of
+`8`. AnyUp can require substantially more memory. For an AnyUp out-of-memory
+error, try `visualization.anyup_query_chunk_size: 4096` and lower it further if
+needed.
 
 ## Visualization
 
@@ -263,11 +264,12 @@ chunks trade speed for lower peak memory.
 
 `overlay_alpha_curve` uses `steepness` and an optional `midpoint` (default
 `0.5`) to vary opacity with normalized map values. `overlay_alpha` scales the
-result. `cmap_black` uses 0–255 palette positions: `threshold` remains black,
+result. It applies when overlays, transparent overlays, or grids are enabled.
+`cmap_black` uses 0–255 palette positions: `threshold` remains black,
 `blend_width` transitions into the selected colormap, and `transparent: true`
-reveals the source where the resulting color is pure black. These controls
-require corresponding rendered outputs. Patch PCA does not accept map
-colormaps or overlay settings.
+reveals the source where the resulting color is pure black. It applies when
+heatmaps, overlays, transparent overlays, or grids are enabled. Patch PCA does
+not accept map colormaps or overlay settings.
 
 Normalization affects rendered maps, overlays, and grids. Raw arrays retain
 analysis values before visualization normalization.
