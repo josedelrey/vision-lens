@@ -228,6 +228,21 @@ VISION_LENS_RUN_REAL_MODELS=1 \
   pytest tests/test_real_models.py -m real_model
 ```
 
+## References
+
+- **AnyUp:** Thomas Wimmer et al., “AnyUp: Universal Feature Upsampling,” ICLR
+  2026. [Paper](https://arxiv.org/abs/2510.12764) ·
+  [Code](https://github.com/wimmerth/anyup)
+- **DINOv2:** Maxime Oquab et al., “DINOv2: Learning Robust Visual Features
+  without Supervision,” 2023. [Paper](https://arxiv.org/abs/2304.07193) ·
+  [Code](https://github.com/facebookresearch/dinov2)
+- **Grad-CAM:** Ramprasaath R. Selvaraju et al., “Grad-CAM: Visual Explanations
+  from Deep Networks via Gradient-Based Localization,” ICCV 2017.
+  [Paper](https://openaccess.thecvf.com/content_ICCV_2017/html/Selvaraju_Grad-CAM_Visual_Explanations_ICCV_2017_paper.html)
+- **Attention rollout:** Samira Abnar and Willem Zuidema, “Quantifying Attention
+  Flow in Transformers,” ACL 2020.
+  [Paper](https://aclanthology.org/2020.acl-main.385/)
+
 ## License and attribution
 
 Vision Lens is available under the [MIT License](LICENSE). Sources for the
