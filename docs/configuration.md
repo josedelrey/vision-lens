@@ -7,20 +7,21 @@ Unknown, missing, conflicting, and inapplicable settings are rejected before
 model weights are loaded.
 
 ```bash
-uv run vision-lens validate --config workflow.yaml
-uv run vision-lens resolve --config workflow.yaml
-uv run vision-lens run --config workflow.yaml
+vision-lens validate --config workflow.yaml
+vision-lens resolve --config workflow.yaml
+vision-lens run --config workflow.yaml
 ```
 
 The YAML file is optional. Every setting has a `--section-key` flag, and every
 flag value is parsed as YAML:
 
 ```bash
-uv run vision-lens validate \
+vision-lens validate \
   --input-files '[examples/1.jpg]' \
   --model-architecture vit \
   --model-backend timm \
   --model-name vit_small_patch8_224.dino \
+  --preprocessing-image-size 224 \
   --analysis-method attention \
   --analysis-layers '[11]' \
   --output-directory outputs/attention
@@ -33,7 +34,7 @@ Video inputs are detected automatically and processed with the default video
 settings. Individual settings can be customized in YAML or with the
 corresponding `--video-*` named flags. `validate` reports detected media counts.
 `resolve` prints the merged, expanded, defaulted, and path-resolved
-configuration. Run `uv run vision-lens --help` for every generated flag.
+configuration. Run `vision-lens --help` for every generated flag.
 
 Relative paths in a YAML file resolve from its nearest ancestor containing
 `pyproject.toml`, or from the YAML file's directory when no such ancestor
@@ -313,8 +314,8 @@ times.
 
 Install video support with `uv sync --locked --extra video`. Videos are sampled
 by timestamp and exported as silent MP4 streams, plus optional alpha-capable MOV
-or WebM streams. Source audio is not copied. The `video` section is optional and
-only overrides the defaults below. It is invalid when no video is selected.
+or WebM streams. Source audio is not copied. Video settings override the defaults
+below and are valid only when at least one video is selected.
 
 | Setting | Default | Meaning |
 |---|---|---|
