@@ -71,6 +71,7 @@ def validate_config(config: VisionLensConfig) -> None:
         assert image_config is not None and video_config is not None
         validate_config(image_config)
         validate_config(video_config)
+        validate_artifact_paths(config)
         return
 
     validate_artifact_paths(config)

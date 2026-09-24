@@ -5,9 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from vision_lens.config import VisionLensConfig, load_config
+from vision_lens.config import VisionLensConfig, load_config, validate_config
 from vision_lens.config.media import split_media_configs
 from vision_lens.errors import ConfigurationError, PipelineError
+from vision_lens.output.artifacts import check_artifact_overwrite
 from vision_lens.pipeline import image as _image_pipeline
 from vision_lens.pipeline import video as _video_pipeline
 from vision_lens.pipeline.progress import progress_output, status
@@ -72,6 +73,7 @@ def _dispatch_pipeline(config: VisionLensConfig) -> _PipelineResult:
             f"Detected {len(image_config.input.paths)} image(s) and "
             f"{len(video_config.input.paths)} video(s)"
         )
+        _preflight_mixed_pipeline(config, video_config)
         image_result = _dispatch_image_pipeline(image_config)
         video_result = _video_pipeline.run_video_from_config(video_config)
         return MixedPipelineResult(
@@ -85,6 +87,15 @@ def _dispatch_pipeline(config: VisionLensConfig) -> _PipelineResult:
     if image_config is not None:
         return _dispatch_image_pipeline(image_config)
     raise ValueError("Configuration does not contain any supported media inputs.")
+
+
+def _preflight_mixed_pipeline(
+    config: VisionLensConfig,
+    video_config: VisionLensConfig,
+) -> None:
+    validate_config(config)
+    check_artifact_overwrite(config)
+    _video_pipeline.preflight_video_dependencies(video_config)
 
 
 def _dispatch_image_pipeline(

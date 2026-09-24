@@ -273,9 +273,38 @@ def validate_artifact_paths(config: VisionLensConfig) -> None:
         assert image_config is not None and video_config is not None
         validate_artifact_paths(image_config)
         validate_artifact_paths(video_config)
+        image_plan = artifact_plan(image_config)
+        video_plan = artifact_plan(video_config)
+        collision = _cross_plan_collision(image_plan, video_plan)
+        if collision is not None:
+            raise ValueError(
+                "A planned image output collides with a planned video output: "
+                f"{collision}. Choose different output or projection paths."
+            )
+        _validate_artifact_plan(
+            config,
+            artifact_plan(config),
+            save_paths=(
+                *_projection_save_paths(image_config),
+                *_projection_save_paths(video_config),
+            ),
+        )
         return
 
     plan = artifact_plan(config)
+    _validate_artifact_plan(
+        config,
+        plan,
+        save_paths=_projection_save_paths(config),
+    )
+
+
+def _validate_artifact_plan(
+    config: VisionLensConfig,
+    plan: ArtifactPlan,
+    *,
+    save_paths: tuple[Path, ...],
+) -> None:
     for directory in plan.output_directories:
         _validate_output_directory(directory)
     for input_path in config.input.paths:
@@ -295,14 +324,37 @@ def validate_artifact_paths(config: VisionLensConfig) -> None:
             f"with a planned output: {config.analysis.projection_path}."
         )
 
-    save_paths = (
-        (config.analysis.save_projection,)
-        if config.video is None
-        else tuple(layout.projection_path for layout in video_run_layouts(config))
-    )
     for save_path in save_paths:
-        if save_path is not None:
-            _validate_write_path(save_path, config, plan)
+        _validate_write_path(save_path, config, plan)
+
+
+def _projection_save_paths(config: VisionLensConfig) -> tuple[Path, ...]:
+    if not isinstance(config.analysis, PatchPCAAnalysisConfig):
+        return ()
+    if config.video is None:
+        return (
+            (config.analysis.save_projection,)
+            if config.analysis.save_projection is not None
+            else ()
+        )
+    return tuple(
+        layout.projection_path
+        for layout in video_run_layouts(config)
+        if layout.projection_path is not None
+    )
+
+
+def _cross_plan_collision(
+    left: ArtifactPlan,
+    right: ArtifactPlan,
+) -> Path | None:
+    for path in sorted(left.exact_paths):
+        if right.matches(path):
+            return path
+    for path in sorted(right.exact_paths):
+        if left.matches(path):
+            return path
+    return None
 
 
 def check_artifact_overwrite(config: VisionLensConfig) -> None:
