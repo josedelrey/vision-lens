@@ -56,8 +56,6 @@ def split_media_configs(
     """Derive canonical image and video configurations from one user config."""
     image_paths, video_paths = partition_media_paths(config.input.paths)
     mixed = bool(image_paths and video_paths)
-    if not mixed:
-        return (config, None) if image_paths else (None, config)
 
     image_config = None
     if image_paths:
@@ -80,11 +78,7 @@ def split_media_configs(
             analysis=image_analysis,
             output=replace(
                 config.output,
-                directory=(
-                    config.output.directory / "images"
-                    if mixed
-                    else config.output.directory
-                ),
+                directory=config.output.directory / "images",
             ),
             video=None,
         )
@@ -92,7 +86,7 @@ def split_media_configs(
     video_config = None
     if video_paths:
         video_analysis = config.analysis
-        if isinstance(video_analysis, PatchPCAAnalysisConfig):
+        if mixed and isinstance(video_analysis, PatchPCAAnalysisConfig):
             if video_analysis.projection == "load":
                 video_analysis = PatchPCAAnalysisConfig(
                     projection="load",
@@ -103,14 +97,12 @@ def split_media_configs(
                     projection="fit",
                     save_projection=video_analysis.save_projection,
                 )
-        elif isinstance(video_analysis, RolloutAnalysisConfig):
+        elif mixed and isinstance(video_analysis, RolloutAnalysisConfig):
             video_analysis = replace(video_analysis, heads=None, head_fusion="mean")
 
-        video_output_directory = config.output.directory
-        if mixed:
-            video_output_directory = config.output.directory / "videos"
-            if len(video_paths) == 1:
-                video_output_directory /= video_paths[0].stem
+        video_output_directory = config.output.directory / "videos"
+        if len(video_paths) == 1:
+            video_output_directory /= video_paths[0].stem
 
         grid_defaults = {
             key: SECTION_DEFAULTS["visualization"][key]
@@ -119,26 +111,39 @@ def split_media_configs(
         video_config = replace(
             config,
             input=InputConfig(paths=video_paths),
-            preprocessing=replace(
-                config.preprocessing,
-                resize=SECTION_DEFAULTS["preprocessing"]["resize"],
-                crop=SECTION_DEFAULTS["preprocessing"]["crop"],
-                pad=SECTION_DEFAULTS["preprocessing"]["pad"],
+            preprocessing=(
+                replace(
+                    config.preprocessing,
+                    resize=SECTION_DEFAULTS["preprocessing"]["resize"],
+                    crop=SECTION_DEFAULTS["preprocessing"]["crop"],
+                    pad=SECTION_DEFAULTS["preprocessing"]["pad"],
+                )
+                if mixed
+                else config.preprocessing
             ),
             analysis=video_analysis,
-            runtime=replace(
-                config.runtime,
-                workers=SECTION_DEFAULTS["runtime"]["workers"],
+            runtime=(
+                replace(
+                    config.runtime,
+                    workers=SECTION_DEFAULTS["runtime"]["workers"],
+                )
+                if mixed
+                else config.runtime
             ),
-            visualization=replace(
-                config.visualization,
-                **grid_defaults,
+            visualization=(
+                replace(config.visualization, **grid_defaults)
+                if mixed
+                else config.visualization
             ),
             output=replace(
                 config.output,
                 directory=video_output_directory,
                 grids=False,
-                image_format=SECTION_DEFAULTS["output"]["image_format"],
+                image_format=(
+                    SECTION_DEFAULTS["output"]["image_format"]
+                    if mixed
+                    else config.output.image_format
+                ),
             ),
             video=config.video or VideoConfig(),
         )

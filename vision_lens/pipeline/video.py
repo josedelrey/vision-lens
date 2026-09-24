@@ -32,7 +32,7 @@ from vision_lens.config import (
     PatchPCAAnalysisConfig,
     RolloutAnalysisConfig,
     VisionLensConfig,
-    validate_config,
+    _validate_branch_config,
 )
 from vision_lens.media.processing import (
     InputBatch,
@@ -57,7 +57,7 @@ from vision_lens.media.video import (
 )
 from vision_lens.models import LoadedModel, load_model
 from vision_lens.output.artifacts import (
-    check_artifact_overwrite,
+    check_branch_artifact_overwrite,
     map_stream_name,
     rendered_stream_name,
     video_artifact_path,
@@ -102,7 +102,7 @@ class _MapStream:
 def run_video_from_config(
     config: VisionLensConfig,
 ) -> VideoPipelineResult | VideoBatchPipelineResult:
-    validate_config(config)
+    _validate_branch_config(config)
     if config.video is None:
         raise ValueError("Video pipeline requires a video configuration section.")
     if len(config.input.paths) == 1:
@@ -125,7 +125,7 @@ def run_video_from_config(
             output=replace(config.output, directory=layout.output_directory),
             analysis=analysis,
         )
-        check_artifact_overwrite(video_config)
+        check_branch_artifact_overwrite(video_config)
         video_configs.append(video_config)
 
     _require_video_encoders(config)
@@ -153,7 +153,7 @@ def _run_single_video_from_config(
     assert config.video is not None
 
     started_at = datetime.now(UTC)
-    check_artifact_overwrite(config)
+    check_branch_artifact_overwrite(config)
     if loaded_model is None:
         _require_video_encoders(config)
     source_path = config.input.paths[0]

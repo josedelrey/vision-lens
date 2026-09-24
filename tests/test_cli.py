@@ -7,7 +7,7 @@ import pytest
 import yaml
 
 from vision_lens import load_config, resolved_config_yaml
-from vision_lens.cli import CONFIG_OPTION_PATHS, _build_parser, _parse_overrides, main
+from vision_lens.cli import CONFIG_OPTION_PATHS, _build_parser, main
 
 BUNDLED_CONFIGS = sorted((Path(__file__).parents[1] / "configs").glob("*.yaml"))
 
@@ -35,61 +35,12 @@ def config_path(tmp_path):
     return path
 
 
-def test_cli_parses_repeated_nested_overrides_as_yaml_values():
-    assert _parse_overrides(
-        [
-            "preprocessing.image_size=672",
-            "analysis.layers=[2, 5, 8, 11]",
-            "model.pretrained=false",
-        ]
-    ) == {
-        "preprocessing": {"image_size": 672},
-        "analysis": {"layers": [2, 5, 8, 11]},
-        "model": {"pretrained": False},
-    }
-
-
-def test_cli_rejects_malformed_override():
-    with pytest.raises(ValueError, match="expected SECTION.KEY=VALUE"):
-        _parse_overrides(["preprocessing.image_size"])
-
-
 def test_cli_without_config_validates_the_supplied_mapping(capsys):
     with pytest.raises(SystemExit, match="2"):
         main(["validate", "--runtime-device", "cpu"])
 
     error = capsys.readouterr().err
     assert "input must select at least one existing file" in error
-
-
-def test_cli_supports_set_only_configuration(capsys, tmp_path):
-    source = tmp_path / "input.jpg"
-    source.touch()
-
-    assert (
-        main(
-            [
-                "validate",
-                "--set",
-                f"input.files=[{source}]",
-                "--set",
-                "model.architecture=vit",
-                "--set",
-                "model.backend=timm",
-                "--set",
-                "model.name=mock_vit",
-                "--set",
-                "analysis.method=attention",
-                "--set",
-                "analysis.layers=[0]",
-                "--set",
-                f"output.directory={tmp_path / 'results'}",
-            ]
-        )
-        == 0
-    )
-
-    assert capsys.readouterr().out == ("configuration is valid (1 image, 0 videos)\n")
 
 
 def test_cli_supports_named_flags_without_config(capsys, tmp_path):
@@ -140,15 +91,17 @@ def test_cli_supports_named_flags_without_config(capsys, tmp_path):
     assert "transparent_overlays: true" in output
 
 
-def test_named_flags_override_set_and_yaml_values(capsys, config_path):
+def test_named_flags_override_yaml_values(capsys, config_path):
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["runtime"] = {"device": "cpu"}
+    config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
     assert (
         main(
             [
                 "resolve",
                 "--config",
                 str(config_path),
-                "--set",
-                "runtime.device=cpu",
                 "--runtime-device",
                 "cuda",
             ]
@@ -264,9 +217,6 @@ def test_bundled_configs_match_their_cli_only_forms(capsys, config_path):
     "arguments",
     [
         ["validate", "--runtime-device", "["],
-        ["validate", "--set", "missing-equals"],
-        ["validate", "--set", "model=value", "--set", "model.name=x"],
-        ["validate", "--set", "unknown.value=true"],
         ["validate", "--output-directory", "{}"],
     ],
 )
@@ -336,8 +286,8 @@ def test_cli_prints_resolved_configuration(capsys, config_path):
                 "resolve",
                 "--config",
                 str(config_path),
-                "--set",
-                "runtime.device=cpu",
+                "--runtime-device",
+                "cpu",
             ]
         )
         == 0
@@ -349,20 +299,20 @@ def test_cli_prints_resolved_configuration(capsys, config_path):
     assert "device: cpu" in output
 
 
-def test_cli_reports_configuration_errors_without_a_traceback(capsys, config_path):
+def test_cli_reports_unknown_flags_without_a_traceback(capsys, config_path):
     with pytest.raises(SystemExit, match="2"):
         main(
             [
                 "validate",
                 "--config",
                 str(config_path),
-                "--set",
-                "visualization.colrmap=viridis",
+                "--visualization-colrmap",
+                "viridis",
             ]
         )
 
     error = capsys.readouterr().err
-    assert "Unknown key(s) in visualization: colrmap" in error
+    assert "unrecognized arguments: --visualization-colrmap viridis" in error
     assert "Traceback" not in error
 
 

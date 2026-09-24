@@ -26,4 +26,3 @@ visualization:
 output:
   directory: outputs/image/dinov2_vitb14_reg4/attention
   transparent_overlays: true
-  overwrite: replace

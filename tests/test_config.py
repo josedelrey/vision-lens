@@ -1,3 +1,4 @@
+import json
 from dataclasses import replace
 from pathlib import Path
 from types import MappingProxyType
@@ -17,7 +18,11 @@ from vision_lens.config import (
     validate_config,
 )
 from vision_lens.config.media import split_media_configs
-from vision_lens.output.artifacts import artifact_plan, grid_page_path
+from vision_lens.output.artifacts import (
+    artifact_plan,
+    grid_page_path,
+    prepare_output_directory,
+)
 
 
 def _minimal_config(
@@ -187,6 +192,7 @@ def test_default_folder_discovery_selects_images_and_videos(tmp_path):
     plan = artifact_plan(config)
     assert plan.output_directories == frozenset(
         {
+            tmp_path / "results",
             tmp_path / "results" / "images",
             tmp_path / "results" / "videos" / "video",
         }
@@ -310,6 +316,8 @@ def test_transparent_video_overlay_formats_are_strict_and_conditional(
     assert config.video.alpha_format == alpha_format
     assert artifact_plan(config).matches(
         config.output.directory
+        / "videos"
+        / "clip"
         / f"clip_attention_layer-0_heads-mean_transparent_overlay.{extension}"
     )
 
@@ -350,7 +358,9 @@ def test_transparent_overlay_is_a_complete_independent_output():
 
     assert config.output.transparent_overlays is True
     assert artifact_plan(config).matches(
-        config.output.directory / "1_layer-0_heads-mean_transparent_overlay.png"
+        config.output.directory
+        / "images"
+        / "1_layer-0_heads-mean_transparent_overlay.png"
     )
 
     raw["output"]["image_format"] = "jpeg"
@@ -1088,14 +1098,15 @@ def test_saved_projection_cannot_collide_with_run_artifacts(tmp_path, collision)
 def test_saved_projection_cannot_collide_with_planned_media(tmp_path):
     raw = _minimal_config(method="patch_pca")
     raw["output"]["directory"] = str(tmp_path)
-    raw["analysis"]["save_projection"] = str(tmp_path / "1_patch_pca.png")
+    raw["analysis"]["save_projection"] = str(tmp_path / "images" / "1_patch_pca.png")
 
     with pytest.raises(ValueError, match="save_projection.*planned output"):
         parse_config(raw)
 
 
 def test_loaded_projection_cannot_collide_with_planned_media(tmp_path):
-    projection_path = tmp_path / "1_patch_pca.png"
+    projection_path = tmp_path / "images" / "1_patch_pca.png"
+    projection_path.parent.mkdir()
     projection_path.touch()
     raw = _minimal_config(method="patch_pca")
     raw["output"]["directory"] = str(tmp_path)
@@ -1115,7 +1126,8 @@ def test_loaded_video_projection_cannot_collide_with_planned_media(tmp_path):
     source.touch()
     output_directory = tmp_path / "outputs"
     output_directory.mkdir()
-    projection_path = output_directory / "clip_patch_pca.mp4"
+    projection_path = output_directory / "videos" / "clip" / "clip_patch_pca.mp4"
+    projection_path.parent.mkdir(parents=True)
     projection_path.touch()
     raw = _minimal_config(method="patch_pca")
     raw["input"] = {"files": [str(source)]}
@@ -1134,8 +1146,9 @@ def test_loaded_video_projection_cannot_collide_with_planned_media(tmp_path):
 
 def test_generated_output_cannot_overwrite_an_input_file(tmp_path):
     source = tmp_path / "source.jpg"
-    collision = tmp_path / "source_gradcam_heatmap.png"
+    collision = tmp_path / "images" / "source_gradcam_heatmap.png"
     source.touch()
+    collision.parent.mkdir()
     collision.touch()
     raw = _minimal_config(
         method="gradcam",
@@ -1161,6 +1174,115 @@ def test_output_directory_may_contain_inputs_without_name_collisions(tmp_path):
     assert config.output.directory == tmp_path
 
 
+def test_replace_clears_managed_outputs_and_preserves_unrelated_files(tmp_path):
+    source = tmp_path / "source.jpg"
+    source.touch()
+    output = tmp_path / "outputs"
+    image_output = output / "images" / "stale.png"
+    video_output = output / "videos" / "old" / "stale.mp4"
+    old_root_output = output / "old-root-output.png"
+    unrelated = output / "notes.txt"
+    image_output.parent.mkdir(parents=True)
+    video_output.parent.mkdir(parents=True)
+    image_output.touch()
+    video_output.touch()
+    old_root_output.touch()
+    unrelated.touch()
+    (output / "run-manifest.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "inputs": [],
+                "outputs": [
+                    str(image_output.resolve()),
+                    str(video_output.resolve()),
+                    str(old_root_output.resolve()),
+                ],
+                "run": {"manifests": []},
+            }
+        ),
+        encoding="utf-8",
+    )
+    raw = _minimal_config()
+    raw["input"]["files"] = [str(source)]
+    raw["output"].update({"directory": str(output), "overwrite": "replace"})
+    config = parse_config(raw)
+
+    prepare_output_directory(config)
+
+    assert not (output / "images").exists()
+    assert not (output / "videos").exists()
+    assert not old_root_output.exists()
+    assert not (output / "run-manifest.json").exists()
+    assert unrelated.is_file()
+
+
+def test_replace_refuses_to_remove_inputs_from_managed_directories(tmp_path):
+    output = tmp_path / "outputs"
+    source = output / "images" / "source.jpg"
+    source.parent.mkdir(parents=True)
+    source.touch()
+    (source.parent / "run-manifest.json").write_text(
+        json.dumps({"schema_version": 1, "inputs": [], "outputs": []}),
+        encoding="utf-8",
+    )
+    raw = _minimal_config()
+    raw["input"]["files"] = [str(source)]
+    raw["output"].update({"directory": str(output), "overwrite": "replace"})
+    config = parse_config(raw)
+
+    with pytest.raises(ValueError, match="contain a protected input"):
+        prepare_output_directory(config)
+
+    assert source.is_file()
+
+
+def test_replace_refuses_unrecognized_reserved_directory_contents(tmp_path):
+    source = tmp_path / "source.jpg"
+    source.touch()
+    output = tmp_path / "outputs"
+    unknown = output / "images" / "notes.txt"
+    unknown.parent.mkdir(parents=True)
+    unknown.touch()
+    raw = _minimal_config()
+    raw["input"]["files"] = [str(source)]
+    raw["output"].update({"directory": str(output), "overwrite": "replace"})
+    config = parse_config(raw)
+
+    with pytest.raises(ValueError, match="unrecognized contents"):
+        prepare_output_directory(config)
+
+    assert unknown.is_file()
+
+
+def test_replace_does_not_trust_manifest_directories_as_artifacts(tmp_path):
+    source = tmp_path / "source.jpg"
+    source.touch()
+    output = tmp_path / "outputs"
+    unrelated = output / "unrelated"
+    unrelated.mkdir(parents=True)
+    (unrelated / "keep.txt").touch()
+    (output / "run-manifest.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "inputs": [],
+                "outputs": [str(unrelated.resolve())],
+            }
+        ),
+        encoding="utf-8",
+    )
+    raw = _minimal_config()
+    raw["input"]["files"] = [str(source)]
+    raw["output"].update({"directory": str(output), "overwrite": "replace"})
+    config = parse_config(raw)
+
+    with pytest.raises(ValueError, match="directory listed as an artifact"):
+        prepare_output_directory(config)
+
+    assert (unrelated / "keep.txt").is_file()
+
+
 def test_multi_video_output_subdirectories_are_validated(tmp_path):
     first = tmp_path / "first.mp4"
     second = tmp_path / "second.mp4"
@@ -1168,7 +1290,8 @@ def test_multi_video_output_subdirectories_are_validated(tmp_path):
     second.touch()
     output = tmp_path / "outputs"
     output.mkdir()
-    (output / "first").touch()
+    (output / "videos").mkdir()
+    (output / "videos" / "first").touch()
     raw = _minimal_config()
     raw["input"]["files"] = [str(first), str(second)]
     raw["output"]["directory"] = str(output)
@@ -1332,8 +1455,10 @@ def test_artifact_plan_only_reserves_possible_grid_pages(tmp_path):
 
     plan = artifact_plan(config)
 
-    assert plan.matches(tmp_path / "layer-0_images_heads-mean.png")
-    assert not plan.matches(tmp_path / "layer-0_images_heads-mean_part-999.png")
+    assert plan.matches(tmp_path / "images" / "layer-0_images_heads-mean.png")
+    assert not plan.matches(
+        tmp_path / "images" / "layer-0_images_heads-mean_part-999.png"
+    )
 
 
 def test_artifact_plan_uses_rollout_only_grid_name(tmp_path):
@@ -1343,8 +1468,8 @@ def test_artifact_plan_uses_rollout_only_grid_name(tmp_path):
 
     plan = artifact_plan(parse_config(raw))
 
-    assert plan.matches(tmp_path / "1_rollout_layers.png")
-    assert not plan.matches(tmp_path / "1_rollout_comparison.png")
+    assert plan.matches(tmp_path / "images" / "1_rollout_layers.png")
+    assert not plan.matches(tmp_path / "images" / "1_rollout_comparison.png")
 
 
 def test_artifact_plan_uses_known_model_dimensions_for_all_selections(tmp_path):
@@ -1355,11 +1480,11 @@ def test_artifact_plan_uses_known_model_dimensions_for_all_selections(tmp_path):
     raw["output"]["directory"] = str(tmp_path)
     plan = artifact_plan(parse_config(raw))
 
-    assert plan.matches(tmp_path / "1_layer-11_head-5_heatmap.png")
-    assert not plan.matches(tmp_path / "1_layer-12_head-5_heatmap.png")
-    assert not plan.matches(tmp_path / "1_layer-11_head-6_heatmap.png")
-    assert plan.matches(tmp_path / "1_layers_head-5_part-002.png")
-    assert not plan.matches(tmp_path / "1_layers_head-5_part-999.png")
+    assert plan.matches(tmp_path / "images" / "1_layer-11_head-5_heatmap.png")
+    assert not plan.matches(tmp_path / "images" / "1_layer-12_head-5_heatmap.png")
+    assert not plan.matches(tmp_path / "images" / "1_layer-11_head-6_heatmap.png")
+    assert plan.matches(tmp_path / "images" / "1_layers_head-5_part-002.png")
+    assert not plan.matches(tmp_path / "images" / "1_layers_head-5_part-999.png")
 
 
 def test_artifact_plan_reserves_video_batches_beyond_six_digits(tmp_path):
@@ -1379,7 +1504,10 @@ def test_artifact_plan_reserves_video_batches_beyond_six_digits(tmp_path):
     config = parse_config(raw)
 
     assert artifact_plan(config).matches(
-        config.output.directory / "clip_attention_layer-0_heads-mean_frames-1000000.npy"
+        config.output.directory
+        / "videos"
+        / "clip"
+        / "clip_attention_layer-0_heads-mean_frames-1000000.npy"
     )
 
 

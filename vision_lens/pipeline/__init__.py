@@ -3,12 +3,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 from vision_lens.config import VisionLensConfig, load_config, validate_config
 from vision_lens.config.media import split_media_configs
 from vision_lens.errors import ConfigurationError, PipelineError
-from vision_lens.output.artifacts import check_artifact_overwrite
+from vision_lens.output.artifacts import (
+    check_artifact_overwrite,
+    prepare_output_directory,
+    run_manifest_path,
+    unique_input_labels,
+)
+from vision_lens.output.manifest import write_run_manifest
 from vision_lens.pipeline import image as _image_pipeline
 from vision_lens.pipeline import video as _video_pipeline
 from vision_lens.pipeline.progress import progress_output, status
@@ -67,35 +74,89 @@ def run_pipeline_from_config(
 
 
 def _dispatch_pipeline(config: VisionLensConfig) -> _PipelineResult:
+    started_at = datetime.now(UTC)
     image_config, video_config = split_media_configs(config)
+    _preflight_pipeline(config, video_config)
+    prepare_output_directory(config)
     if image_config is not None and video_config is not None:
         status(
             f"Detected {len(image_config.input.paths)} image(s) and "
             f"{len(video_config.input.paths)} video(s)"
         )
-        _preflight_mixed_pipeline(config, video_config)
         image_result = _dispatch_image_pipeline(image_config)
         video_result = _video_pipeline.run_video_from_config(video_config)
-        return MixedPipelineResult(
+        result: _PipelineResult = MixedPipelineResult(
             config=config,
             image=image_result,
             video=video_result,
             output_paths=image_result.output_paths + video_result.output_paths,
         )
-    if video_config is not None:
-        return _video_pipeline.run_video_from_config(video_config)
-    if image_config is not None:
-        return _dispatch_image_pipeline(image_config)
-    raise ValueError("Configuration does not contain any supported media inputs.")
+    elif video_config is not None:
+        result = _video_pipeline.run_video_from_config(video_config)
+    elif image_config is not None:
+        result = _dispatch_image_pipeline(image_config)
+    else:
+        raise ValueError("Configuration does not contain any supported media inputs.")
+    _write_root_manifest(config, result, started_at=started_at)
+    return result
 
 
-def _preflight_mixed_pipeline(
+def _preflight_pipeline(
     config: VisionLensConfig,
-    video_config: VisionLensConfig,
+    video_config: VisionLensConfig | None,
 ) -> None:
     validate_config(config)
     check_artifact_overwrite(config)
-    _video_pipeline.preflight_video_dependencies(video_config)
+    if video_config is not None:
+        _video_pipeline.preflight_video_dependencies(video_config)
+
+
+def _write_root_manifest(
+    config: VisionLensConfig,
+    result: _PipelineResult,
+    *,
+    started_at: datetime,
+) -> None:
+    if isinstance(result, MixedPipelineResult):
+        loaded_model = result.image.loaded_model
+        manifests = (
+            run_manifest_path(result.image.config.output.directory),
+            *_video_manifest_paths(result.video),
+        )
+        media = "mixed"
+    elif isinstance(result, _video_pipeline.VideoBatchPipelineResult):
+        loaded_model = result.videos[0].loaded_model
+        manifests = _video_manifest_paths(result)
+        media = "video"
+    elif isinstance(result, _video_pipeline.VideoPipelineResult):
+        loaded_model = result.loaded_model
+        manifests = _video_manifest_paths(result)
+        media = "video"
+    else:
+        loaded_model = result.loaded_model
+        manifests = (run_manifest_path(result.config.output.directory),)
+        media = "image"
+    write_run_manifest(
+        config,
+        loaded_model,
+        unique_input_labels(config.input.paths),
+        result.output_paths,
+        started_at=started_at,
+        run_details={
+            "media": media,
+            "manifests": [str(path.resolve()) for path in manifests],
+        },
+    )
+
+
+def _video_manifest_paths(
+    result: _VideoPipelineResult,
+) -> tuple[Path, ...]:
+    if isinstance(result, _video_pipeline.VideoBatchPipelineResult):
+        return tuple(
+            run_manifest_path(video.config.output.directory) for video in result.videos
+        )
+    return (run_manifest_path(result.config.output.directory),)
 
 
 def _dispatch_image_pipeline(

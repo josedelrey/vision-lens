@@ -105,6 +105,11 @@ def validate_config(config: VisionLensConfig) -> None:
     _configuration_call(_validation.validate_config, config)
 
 
+def _validate_branch_config(config: VisionLensConfig) -> None:
+    """Validate an internally derived media-branch configuration."""
+    _configuration_call(_validation.validate_config, config, _branch_layout=True)
+
+
 def config_to_dict(config: VisionLensConfig) -> dict[str, Any]:
     """Serialize a resolved configuration to its public mapping form."""
     return _configuration_call(_parsing.config_to_dict, config)

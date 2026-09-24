@@ -40,7 +40,7 @@ from vision_lens.config import (
     RolloutAnalysisConfig,
     VisionLensConfig,
     VisualizationConfig,
-    validate_config,
+    _validate_branch_config,
 )
 from vision_lens.media.processing import (
     InputBatch,
@@ -54,7 +54,7 @@ from vision_lens.output.artifacts import (
     attention_image_stem,
     attention_images_grid_stem,
     attention_layers_grid_stem,
-    check_artifact_overwrite,
+    check_branch_artifact_overwrite,
     gradcam_grid_stem,
     gradcam_image_stem,
     grid_page_path,
@@ -331,7 +331,7 @@ class _PatchPCAGridCollector:
 def run_patch_pca_from_config(
     config: VisionLensConfig,
 ) -> PatchPCAPipelineResult:
-    validate_config(config)
+    _validate_branch_config(config)
     if not isinstance(config.analysis, PatchPCAAnalysisConfig):
         raise ValueError(
             f"Expected analysis.method='patch_pca', got {config.analysis.method!r}."
@@ -346,7 +346,7 @@ def run_patch_pca_from_config(
     fit_settings = _pca_fit_settings(config)
 
     started_at = datetime.now(UTC)
-    check_artifact_overwrite(config)
+    check_branch_artifact_overwrite(config)
     labels = unique_input_labels(config.input.paths)
     projection = (
         load_patch_pca_projection(config.analysis.projection_path)
@@ -688,7 +688,7 @@ def _complete_patch_pca_run(
 def run_vit_rollout_comparison_from_config(
     config: VisionLensConfig,
 ) -> PipelineResult:
-    validate_config(config)
+    _validate_branch_config(config)
     if not isinstance(config.analysis, RolloutAnalysisConfig):
         raise ValueError(
             f"Expected analysis.method='rollout', got {config.analysis.method!r}."
@@ -696,7 +696,7 @@ def run_vit_rollout_comparison_from_config(
     from vision_lens.analysis.attention import extract_attention_rollout
 
     started_at = datetime.now(UTC)
-    check_artifact_overwrite(config)
+    check_branch_artifact_overwrite(config)
     labels = unique_input_labels(config.input.paths)
     apply_seed(config.runtime.seed)
     loaded_model = _load_model_with_status(config)
@@ -803,12 +803,12 @@ def run_vit_rollout_comparison_from_config(
 
 
 def run_gradcam_from_config(config: VisionLensConfig) -> GradCamPipelineResult:
-    validate_config(config)
+    _validate_branch_config(config)
     if config.model.architecture != "cnn":
         raise ValueError("Grad-CAM pipeline expects a CNN model config.")
 
     started_at = datetime.now(UTC)
-    check_artifact_overwrite(config)
+    check_branch_artifact_overwrite(config)
     labels = unique_input_labels(config.input.paths)
     apply_seed(config.runtime.seed)
     loaded_model = _load_model_with_status(config)
@@ -921,14 +921,14 @@ def run_gradcam_from_config(config: VisionLensConfig) -> GradCamPipelineResult:
 
 
 def run_vit_attention_from_config(config: VisionLensConfig) -> PipelineResult:
-    validate_config(config)
+    _validate_branch_config(config)
     if not isinstance(config.analysis, AttentionAnalysisConfig):
         raise ValueError(
             f"Expected analysis.method='attention', got {config.analysis.method!r}."
         )
 
     started_at = datetime.now(UTC)
-    check_artifact_overwrite(config)
+    check_branch_artifact_overwrite(config)
     labels = unique_input_labels(config.input.paths)
     apply_seed(config.runtime.seed)
     loaded_model = _load_model_with_status(config)

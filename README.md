@@ -7,7 +7,7 @@
 
 Vision Lens renders diagnostic views of pretrained vision models for images and
 video. It supports transformer attention, attention rollout, Grad-CAM, and PCA
-of patch embeddings. Runs are configured through validated YAML or CLI settings.
+of patch embeddings.
 
 ## What it does
 
@@ -18,15 +18,12 @@ of patch embeddings. Runs are configured through validated YAML or CLI settings.
 | Grad-CAM | Class-specific activation maps | CNNs through `torchvision` |
 | Patch PCA | RGB projections of patch embeddings, with optional foreground selection | Vision Transformers through `timm` |
 
-- Processes images, videos, or mixed folders automatically.
-- Writes heatmaps, overlays, grids, raw arrays, and silent video streams.
+- Processes images and videos.
+- Writes heatmaps, overlays, grids, raw arrays, and video streams.
 - Supports shared/fixed normalization and nearest, bilinear, or AnyUp feature
   interpolation.
 - Saves a `run-manifest.json` with resolved settings, model metadata, inputs,
   outputs, package versions, and run times.
-
-These visualizations are diagnostic views, not causal explanations. PCA colors
-show feature variation, not semantic classes.
 
 ## Results
 
@@ -50,6 +47,7 @@ Clone the repository and create its locked environment:
 git clone https://github.com/josedelrey/vision-lens.git
 cd vision-lens
 uv sync --locked
+source .venv/bin/activate
 ```
 
 For video decoding and export, include the optional video dependency:
@@ -66,20 +64,20 @@ downloads model code from a pinned AnyUp revision and its pretrained checkpoint.
 Run one bundled attention example:
 
 ```bash
-uv run vision-lens run \
+vision-lens run \
   --config configs/attention.dino_vits8.yaml \
   --input-limit 1
 ```
 
-The example writes its artifacts and `run-manifest.json` under
-`outputs/image/dino_vits8/attention/`.
+The example writes its root manifest under `outputs/image/dino_vits8/attention/`
+and its image artifacts in that directory's `images/` subdirectory.
 
 Validate a configuration without loading a model, or inspect its fully resolved
 form:
 
 ```bash
-uv run vision-lens validate --config configs/attention.dino_vits8.yaml
-uv run vision-lens resolve --config configs/attention.dino_vits8.yaml
+vision-lens validate --config configs/attention.dino_vits8.yaml
+vision-lens resolve --config configs/attention.dino_vits8.yaml
 ```
 
 ## Configuration
@@ -109,14 +107,14 @@ output:
 Save it as `workflow.yaml`, then run:
 
 ```bash
-uv run vision-lens run --config workflow.yaml
+vision-lens run --config workflow.yaml
 ```
 
 Every setting is also available as a `--section-key` flag. CLI values are YAML,
 so lists and mappings should normally be quoted:
 
 ```bash
-uv run vision-lens run \
+vision-lens run \
   --input-files '[examples/1.jpg]' \
   --model-architecture vit \
   --model-backend timm \
@@ -127,8 +125,7 @@ uv run vision-lens run \
   --output-directory outputs/attention
 ```
 
-You can combine a YAML file with repeatable `--set section.key=value` overrides
-or named flags. Precedence is: YAML, then `--set`, then named flags.
+Named flags override values from the YAML file.
 
 The bundled [`configs/`](configs/) cover all four methods. The complete setting
 reference, defaults, compatibility rules, and path-resolution behavior are in
@@ -136,9 +133,7 @@ reference, defaults, compatibility rules, and path-resolution behavior are in
 
 ## Images and video
 
-Supported image formats are JPEG, PNG, and WebP. Supported video containers are
-AVI, M4V, MKV, MOV, MP4, and WebM. Extensions are matched case-insensitively;
-Pillow and PyAV perform the actual decoding.
+Supported image formats are JPEG, PNG, and WebP. Supported video containers are AVI, M4V, MKV, MOV, MP4, and WebM. Extensions are matched case-insensitively. Pillow and PyAV handle the actual decoding.
 
 Folders may contain images, videos, or both:
 
@@ -157,20 +152,18 @@ video:
   frame_limit: 100
 ```
 
-Video outputs are silent. Ordinary heatmaps and flattened overlays are MP4;
-transparent overlays can be ProRes 4444 MOV or VP9 WebM. Source audio is not
-copied.
+Video outputs are silent. Standard heatmaps and flattened overlays are saved as MP4. Transparent overlays can be saved as ProRes 4444 MOV or VP9 WebM.
 
 ## Outputs
 
 Depending on the workflow, Vision Lens can write:
 
-- heatmaps or PCA color maps;
-- flattened and transparent overlays;
-- paginated comparison grids;
-- raw NumPy arrays;
-- fitted PCA projections; and
-- rendered video streams.
+- Heatmaps or PCA color maps.
+- Flattened and transparent overlays.
+- Paginated comparison grids.
+- Raw NumPy arrays.
+- Fitted PCA projections.
+- Rendered video streams.
 
 ### Attention across layers
 
@@ -182,12 +175,12 @@ changes across transformer depth:
 | Image 2 | <img src="assets/attention/example-2-layer-2.png" alt="Image 2 attention at layer 2" width="150"> | <img src="assets/attention/example-2-layer-5.png" alt="Image 2 attention at layer 5" width="150"> | <img src="assets/attention/example-2-layer-8.png" alt="Image 2 attention at layer 8" width="150"> | <img src="assets/attention/example-2-layer-11.png" alt="Image 2 attention at layer 11" width="150"> |
 | Image 3 | <img src="assets/attention/example-3-layer-2.png" alt="Image 3 attention at layer 2" width="150"> | <img src="assets/attention/example-3-layer-5.png" alt="Image 3 attention at layer 5" width="150"> | <img src="assets/attention/example-3-layer-8.png" alt="Image 3 attention at layer 8" width="150"> | <img src="assets/attention/example-3-layer-11.png" alt="Image 3 attention at layer 11" width="150"> |
 
-Image-only runs write directly to `output.directory`. A single video does the
-same. Multiple videos receive separate source-named subdirectories. Mixed runs
-use this layout:
+Every run uses the same output layout. Images are grouped together, and each
+video receives a source-named subdirectory:
 
 ```text
 output.directory/
+├── run-manifest.json
 ├── images/
 │   ├── ...
 │   └── run-manifest.json
@@ -197,8 +190,8 @@ output.directory/
         └── run-manifest.json
 ```
 
-The default overwrite policy is `error`; use `replace` or `skip` explicitly when
-rerunning into an existing output directory.
+The default overwrite policy is `error`. Use `replace` to clear stale managed
+outputs before rerunning, or `skip` to preserve existing outputs.
 
 ## Python API
 
@@ -223,16 +216,16 @@ CI:
 
 ```bash
 uv sync --locked --all-extras
-uv run ruff check vision_lens tests
-uv run ruff format --check vision_lens tests
-uv run pytest -m "not real_model"
+ruff check vision_lens tests
+ruff format --check vision_lens tests
+pytest -m "not real_model"
 ```
 
 Real-model smoke tests download pretrained weights and are opt-in:
 
 ```bash
 VISION_LENS_RUN_REAL_MODELS=1 \
-  uv run pytest tests/test_real_models.py -m real_model
+  pytest tests/test_real_models.py -m real_model
 ```
 
 ## License and attribution

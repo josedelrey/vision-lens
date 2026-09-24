@@ -23,4 +23,3 @@ visualization:
 output:
   directory: outputs/image/resnet50/gradcam
   transparent_overlays: true
-  overwrite: replace
