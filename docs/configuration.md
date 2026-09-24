@@ -294,10 +294,11 @@ PNG, and grids use `visualization.grid_format`. `output.grids` and
 With `overwrite: error`, the run fails during preflight if any planned artifact
 already exists. `replace` removes the previous managed `images/` and `videos/`
 trees before writing a pristine set of outputs; it refuses to remove
-unrecognized contents from those reserved paths. Unrelated files directly under
-`output.directory` are preserved. `skip` preserves existing artifacts and writes
-missing ones. Input files, loaded PCA projections, saved projections, and
-planned outputs are checked for path collisions before execution.
+an unrecognized root manifest or unrecognized contents from those reserved
+paths. Unrelated files directly under `output.directory` are preserved. `skip`
+preserves existing artifacts and writes missing ones. Input files, loaded PCA
+projections, saved projections, and planned outputs are checked for path
+collisions before execution.
 
 Each completed run writes an aggregate `run-manifest.json` directly under
 `output.directory`. Image and per-video directories also contain manifests with
