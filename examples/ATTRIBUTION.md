@@ -1,8 +1,8 @@
 # Example image attribution
 
-All eight photographs are used under the [Unsplash License][license]. The
-repository copies were center-cropped, resized to 672 × 672 pixels, converted
-to JPEG at quality 88, and saved without EXIF, ICC profiles, or source metadata.
+The example photographs are used under the [Unsplash License][license].
+Attribution is not required by the license but is provided to preserve
+provenance and credit the photographers.
 
 | File | Subject | Photographer | Original |
 | --- | --- | --- | --- |
@@ -14,10 +14,6 @@ to JPEG at quality 88, and saved without EXIF, ICC profiles, or source metadata.
 | `6.jpg` | Horse | Jacques Bopp | [Unsplash photo][6] |
 | `7.jpg` | Communications tower | Johnny | [Unsplash photo][7] |
 | `8.jpg` | Two giraffes | Hu Chen | [Unsplash photo][8] |
-
-The image license was checked on September 6, 2026. Attribution is not required
-by the Unsplash License, but is provided to preserve provenance and credit the
-photographers.
 
 [license]: https://unsplash.com/license
 [1]: https://unsplash.com/photos/nGd7RNnTBSg
