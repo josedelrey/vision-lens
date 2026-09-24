@@ -681,12 +681,11 @@ def _resolve_path(path: Any, base_dir: Path) -> Path:
 
 
 def _project_root(start: Path) -> Path:
-    for candidate in (start, Path.cwd()):
-        path = candidate.resolve()
-        for directory in (path, *path.parents):
-            if (directory / "pyproject.toml").is_file():
-                return directory
-    return Path.cwd().resolve()
+    path = start.resolve()
+    for directory in (path, *path.parents):
+        if (directory / "pyproject.toml").is_file():
+            return directory
+    return path
 
 
 def _optional_path(value: Any, base_dir: Path, field_name: str) -> Path | None:

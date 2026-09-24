@@ -35,10 +35,11 @@ corresponding `--video-*` named flags. `validate` reports detected media counts.
 `resolve` prints the merged, expanded, defaulted, and path-resolved
 configuration. Run `uv run vision-lens --help` for every generated flag.
 
-With `--config`, relative paths resolve from the nearest ancestor of that file
-containing `pyproject.toml`. Without `--config`, resolution starts from the
-working directory and uses its nearest project root. If none exists, paths use
-the working directory. The `--config` path itself follows normal shell rules.
+Relative paths in a YAML file resolve from its nearest ancestor containing
+`pyproject.toml`, or from the YAML file's directory when no such ancestor
+exists. Without `--config`, relative paths resolve from the nearest ancestor of
+the working directory containing `pyproject.toml`, or from the working directory
+when none exists. The `--config` path itself follows normal shell rules.
 
 ## Workflow compatibility
 
