@@ -34,7 +34,7 @@ of patch embeddings.
 
 ## Install
 
-Requires Linux, Python 3.12, [Git](https://git-scm.com/), and
+Supported on Linux with Python 3.12. Requires [Git](https://git-scm.com/) and
 [uv](https://docs.astral.sh/uv/).
 
 ```bash
