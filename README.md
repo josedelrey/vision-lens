@@ -1,7 +1,7 @@
 # Vision Lens
 
 [![CI](https://github.com/josedelrey/vision-lens/actions/workflows/ci.yml/badge.svg)](https://github.com/josedelrey/vision-lens/actions/workflows/ci.yml)
-[![Python](https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.2%2B-EE4C2C?logo=pytorch&logoColor=white)](https://pytorch.org/)
 [![License](https://img.shields.io/badge/License-MIT-22A559)](LICENSE)
 
@@ -9,7 +9,7 @@ Vision Lens renders diagnostic views of pretrained vision models for images and
 video. It supports transformer attention, attention rollout, Grad-CAM, and PCA
 of patch embeddings.
 
-## What it does
+## Features
 
 | Method | Result | Models |
 |---|---|---|
@@ -32,16 +32,10 @@ of patch embeddings.
 | Horse 5 | <img src="assets/pca/bilinear-mask-5.png" alt="Patch PCA of horse 5" width="360"> | <img src="assets/attention/example-5-layer-11-overlay.png" alt="Layer 11 attention overlay for horse 5" width="360"> |
 | Horse 6 | <img src="assets/pca/bilinear-mask-6.png" alt="Patch PCA of horse 6" width="360"> | <img src="assets/attention/example-6-layer-11-overlay.png" alt="Layer 11 attention overlay for horse 6" width="360"> |
 
-## Requirements
-
-- Linux
-- Python 3.12 or newer
-- [Git](https://git-scm.com/)
-- [uv](https://docs.astral.sh/uv/)
-
 ## Install
 
-Clone the repository and create its locked environment:
+Requires Linux, Python 3.12, [Git](https://git-scm.com/), and
+[uv](https://docs.astral.sh/uv/).
 
 ```bash
 git clone https://github.com/josedelrey/vision-lens.git
