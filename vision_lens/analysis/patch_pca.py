@@ -16,6 +16,7 @@ from vision_lens.analysis.anyup import (
     upsample_values_streaming,
 )
 from vision_lens.analysis.attention import infer_patch_grid_from_image
+from vision_lens.analysis.pca_colors import blend_component_scores, component_palette
 from vision_lens.config.schema import (
     VISUALIZATION_INTERPOLATION_CHOICES,
     VisualizationInterpolation,
@@ -38,6 +39,7 @@ class PatchPCAResult:
     projection: PatchPCAProjection | None = None
     rgb_patches: Any | None = None
     interpolation: Interpolation = "bilinear"
+    component_scores: Any | None = None
 
 
 @dataclass(frozen=True)
@@ -52,6 +54,11 @@ class PatchPCAProjection:
     foreground_side: Literal["high", "low"]
     rgb_fit_scope: RGBFitScope
     foreground_separation: bool
+    component_colors: Any | None = None
+
+    @property
+    def rgb_dimensions(self) -> int:
+        return int(self.rgb_components.shape[1])
 
 
 def extract_patch_pca(
@@ -68,6 +75,7 @@ def extract_patch_pca(
     output_size: tuple[int, int] | None = None,
     anyup_query_chunk_size: int | None = None,
     render_images: bool = True,
+    rgb_dimensions: int | None = None,
 ) -> PatchPCAResult:
     """Extract ViT patch tokens and render their shared PCA projection as RGB."""
     if metadata.patch_size is None:
@@ -90,6 +98,7 @@ def extract_patch_pca(
         guidance_image=inputs if guidance_image is None else guidance_image,
         anyup_query_chunk_size=anyup_query_chunk_size,
         render_images=render_images,
+        rgb_dimensions=rgb_dimensions,
     )
 
 
@@ -126,6 +135,7 @@ def project_patch_embeddings(
     guidance_image: Any | None = None,
     anyup_query_chunk_size: int | None = None,
     render_images: bool = True,
+    rgb_dimensions: int | None = None,
 ) -> PatchPCAResult:
     """Project a batch of patch embeddings into one shared RGB PCA space."""
     _validate_projection_request(
@@ -138,6 +148,7 @@ def project_patch_embeddings(
         anyup_query_chunk_size=anyup_query_chunk_size,
         render_images=render_images,
     )
+    _validate_rgb_dimensions(rgb_dimensions)
     embeddings, flattened = _prepare_patch_embeddings(patch_embeddings, patch_grid)
     batch_size, patch_count, feature_count = embeddings.shape
     projection, resolved_foreground_separation, first_component = (
@@ -149,6 +160,7 @@ def project_patch_embeddings(
             foreground_side,
             rgb_fit_scope,
             projection,
+            rgb_dimensions,
         )
     )
     foreground_mask = _projection_foreground_mask(
@@ -156,6 +168,16 @@ def project_patch_embeddings(
         projection,
         resolved_foreground_separation,
         batch_size * patch_count,
+    )
+    component_scores = (
+        _apply_projection(
+            flattened,
+            projection.rgb_components,
+            projection.rgb_minimum,
+            projection.rgb_maximum,
+        )
+        if projection.rgb_dimensions > 3
+        else None
     )
     batched_rgb_patches = _project_rgb_patches(
         flattened,
@@ -165,6 +187,7 @@ def project_patch_embeddings(
         interpolation,
         batch_size,
         patch_count,
+        component_scores,
     )
     batched_foreground_mask = foreground_mask.reshape(batch_size, patch_count)
     images, output_foreground_mask = _render_projected_patches(
@@ -190,6 +213,11 @@ def project_patch_embeddings(
         projection=projection,
         rgb_patches=batched_rgb_patches,
         interpolation=interpolation,
+        component_scores=(
+            component_scores.reshape(batch_size, patch_count, -1)
+            if component_scores is not None
+            else None
+        ),
     )
 
 
@@ -262,6 +290,7 @@ def _resolve_patch_projection(
     foreground_side: Literal["high", "low"],
     rgb_fit_scope: RGBFitScope,
     projection: PatchPCAProjection | None,
+    rgb_dimensions: int | None,
 ) -> tuple[PatchPCAProjection, bool, Any | None]:
     if projection is None:
         resolved_foreground_separation = (
@@ -273,9 +302,12 @@ def _resolve_patch_projection(
             foreground_threshold,
             foreground_side,
             rgb_fit_scope,
+            3 if rgb_dimensions is None else rgb_dimensions,
         )
     else:
         _validate_projection(projection, feature_count)
+        if rgb_dimensions is not None and rgb_dimensions != projection.rgb_dimensions:
+            raise ValueError("rgb_dimensions does not match the saved projection.")
         resolved_foreground_separation = (
             projection.foreground_separation
             if foreground_separation is None
@@ -316,6 +348,7 @@ def _project_rgb_patches(
     interpolation: Interpolation,
     batch_size: int,
     patch_count: int,
+    component_scores: Any | None,
 ) -> Any:
     rgb_patches = torch.zeros(
         (flattened.shape[0], 3),
@@ -332,13 +365,17 @@ def _project_rgb_patches(
     )
     projected_embeddings = flattened[projected_mask]
     if projected_embeddings.numel():
-        projected_rgb = _apply_projection(
-            projected_embeddings,
-            projection.rgb_components,
-            projection.rgb_minimum,
-            projection.rgb_maximum,
+        projected_scores = (
+            component_scores[projected_mask]
+            if component_scores is not None
+            else _apply_projection(
+                projected_embeddings,
+                projection.rgb_components,
+                projection.rgb_minimum,
+                projection.rgb_maximum,
+            )
         )
-        rgb_patches[projected_mask] = projected_rgb[:, :3]
+        rgb_patches[projected_mask] = _colorize_scores(projected_scores, projection)
     return rgb_patches.reshape(batch_size, patch_count, 3)
 
 
@@ -446,12 +483,13 @@ def _render_anyup_pca_images(
             image_size,
         )
         flattened = upsampled.permute(0, 2, 3, 1).reshape(-1, feature_count)
-        rendered = _apply_projection(
+        scores = _apply_projection(
             flattened,
             projection.rgb_components,
             projection.rgb_minimum,
             projection.rgb_maximum,
-        )[:, :3]
+        )
+        rendered = _colorize_scores(scores, projection)
         if dense_mask:
             dense_first_component = _apply_projection(
                 flattened,
@@ -488,14 +526,16 @@ def _render_anyup_pca_images(
             -1,
             value_components.shape[1],
         )
-        rendered = _normalize_with_bounds(
-            flattened[:, :3],
+        dimensions = projection.rgb_dimensions
+        scores = _normalize_with_bounds(
+            flattened[:, :dimensions],
             projection.rgb_minimum,
             projection.rgb_maximum,
         )
+        rendered = _colorize_scores(scores, projection)
         if dense_mask:
             dense_first_component = _normalize_with_bounds(
-                flattened[:, 3:4],
+                flattened[:, dimensions : dimensions + 1],
                 projection.foreground_minimum,
                 projection.foreground_maximum,
             )[:, 0]
@@ -541,6 +581,7 @@ def fit_patch_pca_projection_batches(
     foreground_side: Literal["high", "low"] = "high",
     rgb_fit_scope: RGBFitScope = "foreground",
     rgb_percentile_bounds: tuple[float, float] | None = None,
+    rgb_dimensions: int | None = None,
 ) -> PatchPCAProjection:
     """Fit one approximate PCA projection from all embedding batches."""
     _validate_batched_projection_request(
@@ -550,6 +591,8 @@ def fit_patch_pca_projection_batches(
         rgb_fit_scope,
         rgb_percentile_bounds,
     )
+    _validate_rgb_dimensions(rgb_dimensions)
+    rgb_dimensions = 3 if rgb_dimensions is None else rgb_dimensions
     (
         foreground_components,
         foreground_minimum,
@@ -579,6 +622,7 @@ def fit_patch_pca_projection_batches(
         rgb_batches,
         feature_count=int(foreground_components.shape[0]),
         percentile_bounds=rgb_percentile_bounds,
+        rgb_dimensions=rgb_dimensions,
     )
 
     return PatchPCAProjection(
@@ -592,6 +636,7 @@ def fit_patch_pca_projection_batches(
         foreground_side=foreground_side,
         rgb_fit_scope=resolved_rgb_fit_scope,
         foreground_separation=foreground_separation,
+        component_colors=torch.tensor(component_palette(rgb_dimensions)),
     )
 
 
@@ -681,17 +726,19 @@ def _fit_rgb_projection_batches(
     *,
     feature_count: int,
     percentile_bounds: tuple[float, float] | None,
+    rgb_dimensions: int,
 ) -> tuple[Any, Any, Any]:
+    _validate_rgb_dimensions(rgb_dimensions, feature_count)
     rgb_components = _fit_batched_components(
         rgb_batches,
-        components=3,
+        components=rgb_dimensions,
         allow_empty=True,
         feature_count=feature_count,
     )
-    if rgb_components.shape[1] < 3:
+    if rgb_components.shape[1] < rgb_dimensions:
         rgb_components = functional.pad(
             rgb_components,
-            (0, 3 - rgb_components.shape[1]),
+            (0, rgb_dimensions - rgb_components.shape[1]),
         )
     if rgb_components.numel():
         if percentile_bounds is None:
@@ -708,8 +755,8 @@ def _fit_rgb_projection_batches(
                 allow_empty=True,
             )
     else:
-        rgb_minimum = torch.zeros(3)
-        rgb_maximum = torch.zeros(3)
+        rgb_minimum = torch.zeros(rgb_dimensions)
+        rgb_maximum = torch.zeros(rgb_dimensions)
     return rgb_components, rgb_minimum, rgb_maximum
 
 
@@ -732,6 +779,7 @@ def save_patch_pca_projection(
             foreground_side=projection.foreground_side,
             rgb_fit_scope=projection.rgb_fit_scope,
             foreground_separation=projection.foreground_separation,
+            component_colors=_as_numpy(_projection_colors(projection)),
         )
     return output
 
@@ -755,7 +803,7 @@ def load_patch_pca_projection(path: str | Path) -> PatchPCAProjection:
             raise ValueError(
                 f"PCA projection is missing required value(s): {', '.join(missing)}."
             )
-        return PatchPCAProjection(
+        projection = PatchPCAProjection(
             foreground_components=torch.from_numpy(values["foreground_components"]),
             foreground_minimum=torch.from_numpy(values["foreground_minimum"]),
             foreground_maximum=torch.from_numpy(values["foreground_maximum"]),
@@ -766,7 +814,14 @@ def load_patch_pca_projection(path: str | Path) -> PatchPCAProjection:
             foreground_side=str(values["foreground_side"]),
             rgb_fit_scope=str(values["rgb_fit_scope"]),
             foreground_separation=bool(values["foreground_separation"]),
+            component_colors=(
+                torch.from_numpy(values["component_colors"])
+                if "component_colors" in values.files
+                else None
+            ),
         )
+        _validate_projection(projection, int(projection.foreground_components.shape[0]))
+        return projection
 
 
 def _patch_tokens_from_features(features: Any, patch_count: int) -> Any:
@@ -819,7 +874,9 @@ def _fit_projection(
     foreground_threshold: ForegroundThreshold,
     foreground_side: Literal["high", "low"],
     rgb_fit_scope: RGBFitScope,
+    rgb_dimensions: int,
 ) -> tuple[PatchPCAProjection, Any]:
+    _validate_rgb_dimensions(rgb_dimensions, int(values.shape[1]))
     if foreground_separation:
         first_projected, first_components = _fit_pca_projection(values, components=1)
         first_minimum, first_maximum = _value_bounds(first_projected)
@@ -849,15 +906,17 @@ def _fit_projection(
     )
     rgb_values = values if resolved_rgb_fit_scope == "all" else values[foreground_mask]
     if rgb_values.numel():
-        rgb_projected, rgb_components = _fit_pca_projection(rgb_values, components=3)
+        rgb_projected, rgb_components = _fit_pca_projection(
+            rgb_values, components=rgb_dimensions
+        )
         rgb_minimum, rgb_maximum = _value_bounds(rgb_projected)
     else:
-        rgb_components = values.new_zeros((values.shape[1], 3))
-        rgb_minimum = values.new_zeros(3)
-        rgb_maximum = values.new_zeros(3)
+        rgb_components = values.new_zeros((values.shape[1], rgb_dimensions))
+        rgb_minimum = values.new_zeros(rgb_dimensions)
+        rgb_maximum = values.new_zeros(rgb_dimensions)
 
-    if rgb_components.shape[1] < 3:
-        missing = 3 - rgb_components.shape[1]
+    if rgb_components.shape[1] < rgb_dimensions:
+        missing = rgb_dimensions - rgb_components.shape[1]
         rgb_components = functional.pad(rgb_components, (0, missing))
         rgb_minimum = functional.pad(rgb_minimum, (0, missing))
         rgb_maximum = functional.pad(rgb_maximum, (0, missing))
@@ -873,6 +932,7 @@ def _fit_projection(
         foreground_side=foreground_side,
         rgb_fit_scope=resolved_rgb_fit_scope,
         foreground_separation=foreground_separation,
+        component_colors=torch.tensor(component_palette(rgb_dimensions)),
     )
     return projection, normalized_first
 
@@ -1074,15 +1134,69 @@ def _apply_projection(
     return _normalize_with_bounds(values @ components, minimum, maximum)
 
 
+def _validate_rgb_dimensions(
+    dimensions: int | None, feature_count: int | None = None
+) -> None:
+    if dimensions is None:
+        return
+    if (
+        isinstance(dimensions, bool)
+        or not isinstance(dimensions, int)
+        or dimensions < 3
+    ):
+        raise ValueError("rgb_dimensions must be an integer of at least 3.")
+    if feature_count is not None and dimensions > 3 and dimensions > feature_count:
+        raise ValueError(
+            f"rgb_dimensions ({dimensions}) exceeds the model's patch-embedding "
+            f"feature count ({feature_count})."
+        )
+
+
+def _projection_colors(projection: PatchPCAProjection) -> Any:
+    if projection.component_colors is not None:
+        return projection.component_colors
+    return torch.tensor(component_palette(projection.rgb_dimensions))
+
+
+def _colorize_scores(scores: Any, projection: PatchPCAProjection) -> Any:
+    if projection.rgb_dimensions == 3:
+        return scores
+    return blend_component_scores(scores, _projection_colors(projection))
+
+
 def _validate_projection(projection: PatchPCAProjection, feature_count: int) -> None:
     if tuple(projection.foreground_components.shape) != (feature_count, 1):
         raise ValueError(
             "PCA projection feature count does not match model patch embeddings."
         )
-    if tuple(projection.rgb_components.shape) != (feature_count, 3):
+    if (
+        projection.rgb_components.ndim != 2
+        or projection.rgb_components.shape[0] != feature_count
+    ):
         raise ValueError(
             "PCA RGB projection feature count does not match model patch embeddings."
         )
+    dimensions = projection.rgb_dimensions
+    _validate_rgb_dimensions(dimensions, feature_count)
+    for name, size in (
+        ("foreground_minimum", 1),
+        ("foreground_maximum", 1),
+        ("rgb_minimum", dimensions),
+        ("rgb_maximum", dimensions),
+    ):
+        if tuple(getattr(projection, name).shape) != (size,):
+            raise ValueError(f"PCA projection {name} must have shape ({size},).")
+    if projection.component_colors is not None:
+        colors = _as_numpy(projection.component_colors)
+        if (
+            colors.shape != (dimensions, 3)
+            or not np.isfinite(colors).all()
+            or np.any((colors < 0) | (colors > 1))
+        ):
+            raise ValueError(
+                f"PCA component colors must have shape ({dimensions}, 3) "
+                "with finite values between 0 and 1."
+            )
 
 
 def _as_numpy(value: Any) -> Any:

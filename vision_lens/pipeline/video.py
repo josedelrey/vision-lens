@@ -305,6 +305,7 @@ def _run_single_video_from_config(
                     pca.rgb_patches,
                     pca.foreground_mask,
                     frame_batch.index,
+                    component_scores=pca.component_scores,
                 )
             else:
                 analysis = _analyze_maps(
@@ -470,6 +471,7 @@ class _VideoExports:
         rgb_patches: Any,
         foreground_mask: Any,
         batch_index: int,
+        component_scores: Any | None = None,
     ) -> None:
         for pca_image in pca_images:
             if self.config.output.heatmaps:
@@ -488,6 +490,10 @@ class _VideoExports:
                 frames,
                 batch_index,
             )
+            if component_scores is not None:
+                self._write_raw_batch(
+                    "patch_pca_components", component_scores, frames, batch_index
+                )
 
     def close(self) -> None:
         close_video_writers(
@@ -664,6 +670,7 @@ def _video_pca_projection(
             foreground_threshold=fit_settings[1],
             foreground_side=fit_settings[2],
             rgb_fit_scope=fit_settings[3],
+            rgb_dimensions=analysis.rgb_dimensions,
         )
 
 

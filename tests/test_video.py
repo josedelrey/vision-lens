@@ -277,10 +277,12 @@ def test_temporal_smoothing_is_sequential_across_batches():
 
 
 @pytest.mark.parametrize("foreground_separation", [True, False])
+@pytest.mark.parametrize("rgb_dimensions", [3, 5])
 def test_short_pca_video_uses_frozen_projection_and_bounded_batches(
     monkeypatch,
     tmp_path,
     foreground_separation,
+    rgb_dimensions,
 ):
     from vision_lens.pipeline import video as video_pipeline
 
@@ -306,6 +308,7 @@ def test_short_pca_video_uses_frozen_projection_and_bounded_batches(
             "analysis": {
                 "method": "patch_pca",
                 "foreground_separation": foreground_separation,
+                "rgb_dimensions": rgb_dimensions,
             },
             "runtime": {"device": "cpu", "batch_size": 2},
             "visualization": {"output_size": [64, 48]},
@@ -377,6 +380,7 @@ def test_short_pca_video_uses_frozen_projection_and_bounded_batches(
             "foreground" if foreground_separation else "all"
         )
         assert "rgb_percentile_bounds" not in kwargs
+        assert kwargs["rgb_dimensions"] == rgb_dimensions
         return original_fit(*args, **kwargs)
 
     monkeypatch.setattr(
@@ -425,14 +429,22 @@ def test_short_pca_video_uses_frozen_projection_and_bounded_batches(
     for mask in rendered_masks:
         assert bool(mask.all()) is (not foreground_separation)
         assert mask.any()
-    assert {path.name for path in result.output_paths} == {
+    expected_outputs = {
         "clip_patch_pca.mp4",
         "clip_patch_pca_rgb_frames-000000.npz",
         "clip_patch_pca_rgb_frames-000001.npz",
         "clip_patch_pca_foreground_mask_frames-000000.npz",
         "clip_patch_pca_foreground_mask_frames-000001.npz",
     }
-    _assert_pca_raw_outputs(result.output_paths, foreground_separation)
+    if rgb_dimensions > 3:
+        expected_outputs.update(
+            {
+                "clip_patch_pca_components_frames-000000.npz",
+                "clip_patch_pca_components_frames-000001.npz",
+            }
+        )
+    assert {path.name for path in result.output_paths} == expected_outputs
+    _assert_pca_raw_outputs(result.output_paths, foreground_separation, rgb_dimensions)
     for output_path in (p for p in result.output_paths if p.suffix == ".mp4"):
         assert probe_video(output_path).duration == pytest.approx(1.0, abs=0.05)
         with av.open(str(output_path)) as container:
@@ -458,13 +470,16 @@ def test_short_pca_video_uses_frozen_projection_and_bounded_batches(
     ]
 
 
-def _assert_pca_raw_outputs(paths, foreground_separation):
+def _assert_pca_raw_outputs(paths, foreground_separation, rgb_dimensions=3):
     for path in (path for path in paths if path.suffix == ".npz"):
         with np.load(path) as values:
             assert len(values["data"]) == len(values["timestamps"])
             if "foreground_mask" in path.name:
                 assert values["data"].dtype == np.bool_
                 assert bool(values["data"].all()) is (not foreground_separation)
+            elif "patch_pca_components" in path.name:
+                assert values["data"].shape[1:] == (4, rgb_dimensions)
+                assert np.isfinite(values["data"]).all()
 
 
 @pytest.mark.parametrize(("sampling_rate", "expected_frames"), [(2, 2), ("auto", 4)])

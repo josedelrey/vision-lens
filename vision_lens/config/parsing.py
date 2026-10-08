@@ -553,6 +553,12 @@ def _parse_analysis(
         base_dir,
         "analysis.save_projection",
     )
+    rgb_dimensions = _positive_int(
+        section.get("rgb_dimensions", PATCH_PCA_FIT_DEFAULTS["rgb_dimensions"]),
+        "analysis.rgb_dimensions",
+    )
+    if rgb_dimensions < 3:
+        raise ValueError("analysis.rgb_dimensions must be at least 3.")
     foreground_separation = _bool(
         section.get(
             "foreground_separation",
@@ -565,6 +571,7 @@ def _parse_analysis(
             foreground_separation=False,
             projection=projection,
             save_projection=save_projection,
+            rgb_dimensions=rgb_dimensions,
         )
     foreground_threshold = _foreground_threshold(
         section.get(
@@ -587,6 +594,7 @@ def _parse_analysis(
         rgb_fit_scope=rgb_fit_scope,
         projection=projection,
         save_projection=save_projection,
+        rgb_dimensions=rgb_dimensions,
     )
 
 

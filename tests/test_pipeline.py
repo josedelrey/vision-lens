@@ -1143,9 +1143,11 @@ def test_patch_pca_keeps_single_image_page_in_larger_run(tmp_path):
     ]
 
 
+@pytest.mark.parametrize("rgb_dimensions", [3, 5])
 def test_patch_pca_pipeline_combines_grid_across_bounded_batches(
     monkeypatch,
     tmp_path,
+    rgb_dimensions,
 ):
     from vision_lens.media import processing
     from vision_lens.pipeline import image as image_pipeline
@@ -1170,11 +1172,14 @@ def test_patch_pca_pipeline_combines_grid_across_bounded_batches(
             "output": {
                 "directory": str(output_dir),
                 "grids": True,
+                "raw_arrays": rgb_dimensions > 3,
             },
             "preprocessing": {"image_size": 4},
             "analysis": {
                 "method": "patch_pca",
                 "foreground_separation": True,
+                "rgb_dimensions": rgb_dimensions,
+                "save_projection": str(tmp_path / "projection.npz"),
             },
             "runtime": {"device": "cpu", "batch_size": 2},
         }
@@ -1223,12 +1228,27 @@ def test_patch_pca_pipeline_combines_grid_across_bounded_batches(
     assert extracted_batch_sizes == [2, 1]
     assert result.patch_pca is None
     assert result.processed_inputs == 3
-    assert {path.name for path in result.output_paths} == {
+    expected_outputs = {
         "image-0_patch_pca.png",
         "image-1_patch_pca.png",
         "image-2_patch_pca.png",
         "patch_pca_comparison.png",
+        "projection.npz",
     }
+    if rgb_dimensions > 3:
+        for index in range(3):
+            expected_outputs.update(
+                {
+                    f"image-{index}_patch_embeddings.npy",
+                    f"image-{index}_foreground_mask.npy",
+                    f"image-{index}_patch_pca_components.npy",
+                }
+            )
+            scores = np.load(output_dir / f"image-{index}_patch_pca_components.npy")
+            assert scores.shape == (4, rgb_dimensions)
+    assert {path.name for path in result.output_paths} == expected_outputs
+    with np.load(tmp_path / "projection.npz") as projection:
+        assert projection["rgb_components"].shape == (5, rgb_dimensions)
     assert not list(output_dir.glob("patch_pca_comparison_part-*.png"))
     assert (output_dir / "run-manifest.json").is_file()
 

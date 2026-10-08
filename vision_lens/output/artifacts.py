@@ -584,6 +584,17 @@ def _image_patch_pca_paths(config: VisionLensConfig) -> set[Path]:
                     config.output.raw_format,
                 )
             )
+            if config.analysis.projection == "load" or (
+                config.analysis.rgb_dimensions or 3
+            ) > 3:
+                paths.add(
+                    image_artifact_path(
+                        config.output.directory,
+                        label,
+                        "patch_pca_components",
+                        config.output.raw_format,
+                    )
+                )
     if config.output.grids:
         page_size = config.visualization.items_per_grid or len(config.input.paths)
         page_count = (len(config.input.paths) + page_size - 1) // page_size
@@ -739,7 +750,9 @@ def _video_artifact_patterns(
         patterns.append(rf"{prefix}_{stream}_transparent_overlay\.{alpha_extension}")
     if config.output.raw_arrays:
         raw_stream = (
-            r"patch_pca_(?:rgb|foreground_mask)" if stream == "patch_pca" else stream
+            r"patch_pca_(?:rgb|foreground_mask|components)"
+            if stream == "patch_pca"
+            else stream
         )
         extension = re.escape(config.output.raw_format)
         patterns.append(rf"{prefix}_{raw_stream}_frames-\d{{6,}}\.{extension}")
