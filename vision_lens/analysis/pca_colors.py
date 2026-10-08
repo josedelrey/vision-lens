@@ -34,16 +34,25 @@ def _oklab(rgb: np.ndarray) -> np.ndarray:
 
 @lru_cache(maxsize=4)
 def _candidates(levels: int) -> tuple[np.ndarray, np.ndarray]:
+    """Sample fully saturated, maximum-value colors along six RGB cube edges."""
     grid = np.linspace(0, 1, levels)
-    rgb = np.stack(np.meshgrid(grid, grid, grid, indexing="ij"), axis=-1)
-    rgb = rgb.reshape(-1, 3)
-    perceptual = _oklab(rgb)
-    colorful = (
-        (perceptual[:, 0] >= 0.45)
-        & (perceptual[:, 0] <= 0.95)
-        & (np.linalg.norm(perceptual[:, 1:], axis=1) >= 0.06)
+    zero = np.zeros(levels)
+    one = np.ones(levels)
+    rgb = np.concatenate(
+        [
+            np.column_stack(channels)
+            for channels in (
+                (one, zero, grid),
+                (one, grid, zero),
+                (zero, one, grid),
+                (grid, one, zero),
+                (zero, grid, one),
+                (grid, zero, one),
+            )
+        ]
     )
-    return rgb[colorful], perceptual[colorful]
+    rgb = np.unique(rgb, axis=0)
+    return rgb, _oklab(rgb)
 
 
 @lru_cache(maxsize=16)

@@ -51,6 +51,14 @@ def test_component_palette_extends_distinct_colors_and_blends_scores():
     assert bright.min() > 0
 
 
+def test_large_component_palettes_keep_full_saturation_and_brightness():
+    palette = component_palette(256)
+    assert np.unique(palette, axis=0).shape[0] == 256
+    np.testing.assert_array_equal(palette.min(axis=1), np.zeros(256))
+    np.testing.assert_array_equal(palette.max(axis=1), np.ones(256))
+    np.testing.assert_array_equal(palette[:100], component_palette(100))
+
+
 @pytest.mark.parametrize("foreground", [True, False])
 def test_higher_dimensional_fit_matches_batched_fit_and_replays(tmp_path, foreground):
     embeddings = torch.randn(2, 16, 8, generator=torch.Generator().manual_seed(4))
