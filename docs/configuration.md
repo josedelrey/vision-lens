@@ -201,11 +201,15 @@ one RGB channel at zero and another at one. This excludes dark and muted
 component colors. The remaining channel starts with 17 evenly spaced levels
 and is sampled more finely when the candidates run out. Selection is
 deterministic, so increasing the count extends the palette in the same order.
-Each patch blends these colors using its normalized component scores. If a
-blend exceeds the RGB range, all three channels are scaled together to preserve
-their ratios. Blends can still appear pale or gray when several components
-contribute similarly. Output images and video still have three RGB channels,
-so blended colors cannot uniquely encode every higher dimensional score.
+For counts above three, each patch blends these colors as a weighted average,
+using its normalized component scores as weights. The resulting color is
+multiplied by the patch's strongest component score to control brightness.
+Zero scores produce black. Adding components does not accumulate brightness
+or force the blend's strongest RGB channel to one. Balanced blends can still
+appear pale or gray when several components contribute similarly. Output
+images and video still have three RGB channels, so blended colors cannot
+uniquely encode every higher dimensional score. Loaded higher dimensional
+projections also use this blending rule with their saved components and palette.
 
 The fit uses the requested number of leading PCA components, ordered by
 decreasing variance. Counts above three must not exceed the model's patch
