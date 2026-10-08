@@ -837,6 +837,77 @@ def test_patch_pca_rejects_unknown_rgb_fit_scope():
         parse_config(raw_config)
 
 
+@pytest.mark.parametrize("foreground", [True, False])
+@pytest.mark.parametrize("media", ["image", "video", "mixed"])
+def test_pca_dimensions_round_trip_across_media(tmp_path, foreground, media):
+    image = tmp_path / "image.jpg"
+    video = tmp_path / "video.mp4"
+    image.touch()
+    video.touch()
+    raw = _minimal_config(method="patch_pca")
+    raw["input"]["files"] = {
+        "image": [str(image)],
+        "video": [str(video)],
+        "mixed": [str(image), str(video)],
+    }[media]
+    raw["analysis"].update(rgb_dimensions=6, foreground_separation=foreground)
+    config = parse_config(raw)
+    resolved = config_to_dict(config)
+    assert resolved["analysis"]["rgb_dimensions"] == 6
+    assert parse_config(resolved).analysis == config.analysis
+    branches = [branch for branch in split_media_configs(config) if branch is not None]
+    assert all(branch.analysis.rgb_dimensions == 6 for branch in branches)
+
+
+@pytest.mark.parametrize("dimensions", [2, 0, -1, 3.5, True, "6"])
+def test_config_rejects_invalid_pca_dimensions(dimensions):
+    raw = _minimal_config(method="patch_pca")
+    raw["analysis"]["rgb_dimensions"] = dimensions
+    with pytest.raises(ValueError, match="analysis.rgb_dimensions"):
+        parse_config(raw)
+
+
+def test_pca_dimension_setting_is_fit_only(tmp_path):
+    path = tmp_path / "projection.npz"
+    path.touch()
+    raw = _minimal_config(method="patch_pca")
+    raw["analysis"].update(
+        projection="load", projection_path=str(path), rgb_dimensions=6
+    )
+    with pytest.raises(ValueError, match="analysis.rgb_dimensions.*not applicable"):
+        parse_config(raw)
+    raw = _minimal_config(method="attention")
+    raw["analysis"]["rgb_dimensions"] = 6
+    with pytest.raises(ValueError, match="Unknown key.*rgb_dimensions"):
+        parse_config(raw)
+
+
+@pytest.mark.parametrize("media", ["image", "video"])
+def test_pca_component_exports_are_protected_by_preflight(tmp_path, media):
+    suffix = "jpg" if media == "image" else "mp4"
+    source = tmp_path / f"input.{suffix}"
+    source.touch()
+    raw = _minimal_config(method="patch_pca")
+    raw["input"]["files"] = [str(source)]
+    raw["analysis"].update(rgb_dimensions=6, save_projection="unused.npz")
+    raw["output"].update(directory=str(tmp_path / "outputs"), raw_arrays=True)
+    config = parse_config(raw)
+    plan = artifact_plan(config)
+    if media == "image":
+        target = config.output.directory / "images" / "input_patch_pca_components.npy"
+    else:
+        target = (
+            config.output.directory
+            / "videos"
+            / "input"
+            / "input_patch_pca_components_frames-000000.npy"
+        )
+    assert plan.matches(target)
+    raw["analysis"]["save_projection"] = str(target)
+    with pytest.raises(ValueError, match="save_projection.*planned output path"):
+        parse_config(raw)
+
+
 def test_patch_pca_accepts_auto_threshold_and_rejects_other_strings():
     raw_config = _minimal_config(method="patch_pca")
     raw_config["analysis"]["foreground_threshold"] = "auto"

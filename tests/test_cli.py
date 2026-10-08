@@ -115,6 +115,17 @@ def test_legacy_video_flag_is_rejected():
         _build_parser().parse_args(["--video"])
 
 
+def test_cli_overrides_pca_dimension_count(capsys, config_path):
+    assert (
+        main(
+            ["resolve", "--config", str(config_path), "--analysis-rgb-dimensions", "6"]
+        )
+        == 0
+    )
+    resolved = yaml.safe_load(capsys.readouterr().out)
+    assert resolved["analysis"]["rgb_dimensions"] == 6
+
+
 def test_video_input_adds_default_video_settings_automatically(capsys, tmp_path):
     source = tmp_path / "input.mp4"
     source.touch()

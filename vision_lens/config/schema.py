@@ -125,6 +125,7 @@ class PatchPCAAnalysisConfig:
     projection: ProjectionMode = "fit"
     projection_path: Path | None = None
     save_projection: Path | None = None
+    rgb_dimensions: int | None = None
     method: Literal["patch_pca"] = field(default="patch_pca", init=False)
 
 
@@ -241,6 +242,7 @@ class VisionLensConfig:
 DEFAULT_INPUT_PATTERNS = ("*",)
 DEFAULT_ANALYSIS_METHOD = "attention"
 PATCH_PCA_FIT_DEFAULTS = {
+    "rgb_dimensions": 3,
     "foreground_separation": True,
     "foreground_threshold": 0.5,
     "foreground_side": "high",

@@ -179,6 +179,7 @@ analysis:
 | `analysis.foreground_threshold` | `0.5` | Normalized PC1 cutoff or `auto` for an Otsu split. Foreground mode only. |
 | `analysis.foreground_side` | `high` | Keep values above or below the cutoff. Foreground mode only. |
 | `analysis.rgb_fit_scope` | `foreground` | Fit RGB PCA from `foreground` or `all` fitting patches. Foreground mode only. |
+| `analysis.rgb_dimensions` | `3` | Number of PCA components used for coloring, an integer of at least three. Fit mode only, valid for images and video. |
 | `analysis.projection` | `fit` | Fit a projection or `load` a saved one. |
 | `analysis.projection_path` | `null` | `.npz` file required with `projection: load`. |
 | `analysis.save_projection` | `null` | Save a fitted projection to `.npz`. |
@@ -189,6 +190,32 @@ other foreground settings. All patches contribute. With `projection: load`,
 supply only `projection_path`. The saved foreground rule and color range are
 reused for both images and video. Saving a projection may be the sole output of
 a PCA run.
+
+`rgb_dimensions: 3` preserves the existing RGB mapping exactly. To include more
+embedding directions, set `analysis.rgb_dimensions: 6`, for example. The first
+three component colors are red, green, and blue. Each additional component gets
+the candidate color that maximizes its minimum
+[Oklab](https://bottosson.github.io/posts/oklab/) distance to existing colors. Selection is
+deterministic, so increasing the count extends the palette in the same order.
+Each patch blends these colors using its normalized component scores. If a
+blend exceeds the RGB range, all three channels are scaled together to preserve
+their ratios. Output images and video still have three RGB channels, so blended
+colors cannot uniquely encode every higher dimensional score.
+
+The fit uses the requested number of leading PCA components, ordered by
+decreasing variance. Counts above three must not exceed the model's patch
+embedding feature count. Missing components in a small fitting set are padded
+with zeros. Foreground selection still uses its separate PC1 fit. Saved
+projections retain the component count, palette, and score bounds. With
+`projection: load`, omit `rgb_dimensions` and reuse the saved settings. Existing
+three-component projection files remain supported.
+
+For counts above three, `output.raw_arrays: true` also exports
+`patch_pca_components` arrays with normalized scores for every patch, including
+background patches, before color blending or masking. Their last axis has
+`rgb_dimensions` entries. Image files contain one patch array per input and
+video files contain one array per frame batch, alongside the existing raw
+outputs.
 
 Video PCA fits once from a few representative frames plus optional external
 reference images selected by `video.pca_fit_images`. Choose reference images of

@@ -502,6 +502,7 @@ def _fit_single_batch_pca(
             foreground_threshold=context.fit_settings[1],
             foreground_side=context.fit_settings[2],
             rgb_fit_scope=context.fit_settings[3],
+            rgb_dimensions=config.analysis.rgb_dimensions,
             interpolation=config.visualization.interpolation,
             guidance_image=_pca_guidance(context, batch.inputs),
             output_size=_analysis_output_size(config, context.loaded_model),
@@ -556,6 +557,7 @@ def _fit_staged_pca(
             foreground_threshold=context.fit_settings[1],
             foreground_side=context.fit_settings[2],
             rgb_fit_scope=context.fit_settings[3],
+            rgb_dimensions=context.config.analysis.rgb_dimensions,
         )
         output_paths = _project_staged_pca(context, staged_batches, projection)
     return output_paths, projection
@@ -1437,6 +1439,14 @@ def _export_patch_pca_arrays(
             output_paths.append(
                 _save_array(patch_pca.foreground_mask[index], mask_path)
             )
+        if patch_pca.component_scores is not None:
+            scores_path = image_artifact_path(
+                output_dir, label, "patch_pca_components", output.raw_format
+            )
+            if _can_write(scores_path, output.overwrite):
+                output_paths.append(
+                    _save_array(patch_pca.component_scores[index], scores_path)
+                )
     return tuple(output_paths)
 
 
@@ -2012,6 +2022,7 @@ def _fit_image_pca_projection(
             foreground_threshold=fit_settings[1],
             foreground_side=fit_settings[2],
             rgb_fit_scope=fit_settings[3],
+            rgb_dimensions=config.analysis.rgb_dimensions,
         )
 
 

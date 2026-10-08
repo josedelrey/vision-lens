@@ -398,6 +398,8 @@ def _validate_patch_pca_analysis_values(
             RGB_FIT_SCOPE_CHOICES,
         )
     _require_choice(analysis.projection, "analysis.projection", PROJECTION_CHOICES)
+    if analysis.rgb_dimensions is not None:
+        _require_int(analysis.rgb_dimensions, "analysis.rgb_dimensions", minimum=3)
     if analysis.projection_path is not None:
         _require_path(analysis.projection_path, "analysis.projection_path")
     if analysis.save_projection is not None:
