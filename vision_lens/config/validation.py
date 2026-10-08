@@ -294,16 +294,19 @@ def _validate_resolved_values(config: VisionLensConfig) -> None:
         _validate_video_values(config.video)
 
 
-def _validate_input_values(input_config: InputConfig) -> None:
+def _validate_input_values(
+    input_config: InputConfig, field_name: str = "input"
+) -> None:
     if not isinstance(input_config.paths, tuple) or not input_config.paths:
-        raise ValueError("input.paths must contain at least one file.")
+        raise ValueError(f"{field_name}.paths must contain at least one file.")
     for path in input_config.paths:
-        _require_path(path, "input.paths")
+        _require_path(path, f"{field_name}.paths")
         if not path.is_file():
-            raise ValueError(f"Input file does not exist: {path}.")
+            label = "Input" if field_name == "input" else field_name
+            raise ValueError(f"{label} file does not exist: {path}.")
     image_paths, video_paths = partition_media_paths(input_config.paths)
     if len(image_paths) + len(video_paths) != len(input_config.paths):
-        raise ValueError("input.paths contains an unsupported media type.")
+        raise ValueError(f"{field_name}.paths contains an unsupported media type.")
 
 
 def _validate_model_values(model: ModelConfig) -> None:
@@ -346,11 +349,7 @@ def _validate_analysis_values(config: VisionLensConfig) -> None:
         _validate_gradcam_analysis_values(analysis)
     else:
         assert isinstance(analysis, PatchPCAAnalysisConfig)
-        image_paths, video_paths = partition_media_paths(config.input.paths)
-        _validate_patch_pca_analysis_values(
-            analysis,
-            is_video=bool(video_paths and not image_paths),
-        )
+        _validate_patch_pca_analysis_values(analysis)
 
 
 def _validate_attention_analysis_values(
@@ -370,8 +369,6 @@ def _validate_gradcam_analysis_values(analysis: GradCAMAnalysisConfig) -> None:
 
 def _validate_patch_pca_analysis_values(
     analysis: PatchPCAAnalysisConfig,
-    *,
-    is_video: bool,
 ) -> None:
     if analysis.foreground_separation is not None:
         _require_bool(
@@ -405,12 +402,8 @@ def _validate_patch_pca_analysis_values(
         _require_path(analysis.projection_path, "analysis.projection_path")
     if analysis.save_projection is not None:
         _require_path(analysis.save_projection, "analysis.save_projection")
-    if (
-        not is_video
-        and analysis.projection == "fit"
-        and analysis.foreground_separation is None
-    ):
-        raise ValueError("Image patch PCA requires analysis.foreground_separation.")
+    if analysis.projection == "fit" and analysis.foreground_separation is None:
+        raise ValueError("Patch PCA requires analysis.foreground_separation.")
     if analysis.foreground_separation is True and any(
         value is None
         for value in (
@@ -567,6 +560,12 @@ def _validate_video_values(video: VideoConfig) -> None:
     if video.frame_limit is not None:
         _require_int(video.frame_limit, "video.frame_limit", minimum=1)
     _require_int(video.pca_fit_frames, "video.pca_fit_frames", minimum=1)
+    if video.pca_fit_images is not None:
+        _require_instance(video.pca_fit_images, InputConfig, "video.pca_fit_images")
+        _validate_input_values(video.pca_fit_images, "video.pca_fit_images")
+        _, videos = partition_media_paths(video.pca_fit_images.paths)
+        if videos:
+            raise ValueError("video.pca_fit_images must contain only images.")
     _require_number(
         video.temporal_smoothing,
         "video.temporal_smoothing",
@@ -785,16 +784,7 @@ def _applicable_analysis_keys(
             analysis.intersection_update({"method", "projection", "projection_path"})
         else:
             analysis.discard("projection_path")
-            if is_video:
-                analysis.difference_update(
-                    {
-                        "foreground_separation",
-                        "foreground_threshold",
-                        "foreground_side",
-                        "rgb_fit_scope",
-                    }
-                )
-            elif not config.analysis.foreground_separation:
+            if not config.analysis.foreground_separation:
                 analysis.difference_update(
                     {"foreground_threshold", "foreground_side", "rgb_fit_scope"}
                 )
@@ -864,7 +854,7 @@ def _applicable_video_keys(
             isinstance(config.analysis, PatchPCAAnalysisConfig)
             and config.analysis.projection == "fit"
         ):
-            video.add("pca_fit_frames")
+            video.update({"pca_fit_frames", "pca_fit_images"})
         if method != "patch_pca" or config.output.heatmaps:
             video.add("temporal_smoothing")
         if config.output.heatmaps or config.output.overlays:

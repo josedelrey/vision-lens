@@ -86,18 +86,7 @@ def split_media_configs(
     video_config = None
     if video_paths:
         video_analysis = config.analysis
-        if mixed and isinstance(video_analysis, PatchPCAAnalysisConfig):
-            if video_analysis.projection == "load":
-                video_analysis = PatchPCAAnalysisConfig(
-                    projection="load",
-                    projection_path=video_analysis.projection_path,
-                )
-            else:
-                video_analysis = PatchPCAAnalysisConfig(
-                    projection="fit",
-                    save_projection=video_analysis.save_projection,
-                )
-        elif mixed and isinstance(video_analysis, RolloutAnalysisConfig):
+        if mixed and isinstance(video_analysis, RolloutAnalysisConfig):
             video_analysis = replace(video_analysis, heads=None, head_fusion="mean")
 
         video_output_directory = config.output.directory / "videos"

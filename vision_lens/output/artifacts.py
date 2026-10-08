@@ -337,6 +337,12 @@ def _validate_artifact_plan(
                 f"A generated output would overwrite input file {input_path}. "
                 "Choose a different output.directory or rename the input."
             )
+    for input_path in _pca_fit_paths(config):
+        if plan.matches(input_path):
+            raise ValueError(
+                "A generated output would overwrite video.pca_fit_images "
+                f"input file {input_path}. Choose a different output path."
+            )
 
     if not isinstance(config.analysis, PatchPCAAnalysisConfig):
         return
@@ -409,6 +415,7 @@ def prepare_output_directory(config: VisionLensConfig) -> None:
 
     candidates = _replacement_candidates(config.output.directory)
     protected = {path.resolve() for path in config.input.paths}
+    protected.update(path.resolve() for path in _pca_fit_paths(config))
     if (
         isinstance(config.analysis, PatchPCAAnalysisConfig)
         and config.analysis.projection_path is not None
@@ -603,12 +610,18 @@ def _validate_write_path(
             f"analysis.save_projection must be a file path, not a directory: {path}."
         )
     _validate_existing_parent(path, "analysis.save_projection")
-    if path in config.input.paths:
+    if path in config.input.paths or path in _pca_fit_paths(config):
         raise ValueError("analysis.save_projection must not overwrite an input file.")
     if plan.matches_non_projection(path):
         raise ValueError(
             f"analysis.save_projection must not use a planned output path: {path}."
         )
+
+
+def _pca_fit_paths(config: VisionLensConfig) -> tuple[Path, ...]:
+    if config.video is None or config.video.pca_fit_images is None:
+        return ()
+    return config.video.pca_fit_images.paths
 
 
 def _image_artifact_patterns(
@@ -725,7 +738,9 @@ def _video_artifact_patterns(
         alpha_extension = ALPHA_FORMAT_EXTENSIONS[config.video.alpha_format]
         patterns.append(rf"{prefix}_{stream}_transparent_overlay\.{alpha_extension}")
     if config.output.raw_arrays:
-        raw_stream = "patch_pca_rgb" if stream == "patch_pca" else stream
+        raw_stream = (
+            r"patch_pca_(?:rgb|foreground_mask)" if stream == "patch_pca" else stream
+        )
         extension = re.escape(config.output.raw_format)
         patterns.append(rf"{prefix}_{raw_stream}_frames-\d{{6,}}\.{extension}")
     return tuple(re.compile(pattern) for pattern in patterns)

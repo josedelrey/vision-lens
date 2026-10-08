@@ -37,6 +37,7 @@ from vision_lens.config import (
 from vision_lens.media.processing import (
     InputBatch,
     build_batch_preprocessor,
+    iter_input_batches,
     preprocess_batch,
 )
 from vision_lens.media.video import (
@@ -71,8 +72,12 @@ from vision_lens.output.visualization import (
     render_heatmap,
     render_transparent_overlay,
 )
-from vision_lens.pipeline.progress import status, track_video_batches
-from vision_lens.pipeline.runtime import anyup_guidance, apply_seed
+from vision_lens.pipeline.progress import (
+    status,
+    track_image_batches,
+    track_video_batches,
+)
+from vision_lens.pipeline.runtime import anyup_guidance, apply_seed, pca_fit_settings
 
 
 @dataclass(frozen=True)
@@ -272,7 +277,6 @@ def _run_single_video_from_config(
                     embeddings,
                     patch_grid=_patch_grid(loaded_model),
                     image_size=(resolution[1], resolution[0]),
-                    foreground_separation=False,
                     projection=projection,
                     interpolation=config.visualization.interpolation,
                     anyup_query_chunk_size=(
@@ -299,6 +303,7 @@ def _run_single_video_from_config(
                     frame_batch.frames,
                     pca_images,
                     pca.rgb_patches,
+                    pca.foreground_mask,
                     frame_batch.index,
                 )
             else:
@@ -463,6 +468,7 @@ class _VideoExports:
         frames: tuple[SampledVideoFrame, ...],
         pca_images: tuple[Image.Image, ...],
         rgb_patches: Any,
+        foreground_mask: Any,
         batch_index: int,
     ) -> None:
         for pca_image in pca_images:
@@ -473,6 +479,12 @@ class _VideoExports:
             self._write_raw_batch(
                 "patch_pca_rgb",
                 rgb_patches,
+                frames,
+                batch_index,
+            )
+            self._write_raw_batch(
+                "patch_pca_foreground_mask",
+                foreground_mask,
                 frames,
                 batch_index,
             )
@@ -636,17 +648,55 @@ def _video_pca_projection(
         if not staged_paths:
             raise ValueError("The configured video time range selected no PCA frames.")
 
+        _stage_pca_fit_images(
+            config, loaded_model, transform, Path(temporary_directory), staged_paths
+        )
+
         def embedding_batches() -> Any:
             for path in staged_paths:
                 yield np.load(path, allow_pickle=False)
 
         status("Fitting PCA projection")
+        fit_settings = pca_fit_settings(analysis)
         return fit_patch_pca_projection_batches(
             embedding_batches,
-            foreground_separation=False,
-            rgb_fit_scope="all",
-            rgb_percentile_bounds=(0.01, 0.99),
+            foreground_separation=fit_settings[0],
+            foreground_threshold=fit_settings[1],
+            foreground_side=fit_settings[2],
+            rgb_fit_scope=fit_settings[3],
         )
+
+
+def _stage_pca_fit_images(
+    config: VisionLensConfig,
+    loaded_model: LoadedModel,
+    transform: Any,
+    directory: Path,
+    staged_paths: list[Path],
+) -> None:
+    assert config.video is not None
+    fit_images = config.video.pca_fit_images
+    if fit_images is None:
+        return
+    for input_batch in track_image_batches(
+        iter_input_batches(
+            fit_images.paths,
+            tuple(path.stem for path in fit_images.paths),
+            batch_size=config.runtime.batch_size,
+        ),
+        total=len(fit_images.paths),
+        description="Extract PCA reference embeddings",
+    ):
+        batch = preprocess_batch(
+            input_batch, transform, loaded_model, include_display_images=False
+        )
+        embeddings = extract_patch_embeddings(
+            loaded_model.model, batch.inputs, _patch_grid(loaded_model)
+        )
+        path = directory / f"fit-{len(staged_paths):06d}.npy"
+        with path.open("wb") as file:
+            np.save(file, _as_numpy(embeddings))
+        staged_paths.append(path)
 
 
 def _require_video_encoders(config: VisionLensConfig) -> None:

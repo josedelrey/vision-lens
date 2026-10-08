@@ -175,10 +175,10 @@ analysis:
 | Setting | Default | Meaning |
 |---|---|---|
 | `analysis.method` | required | `patch_pca`. |
-| `analysis.foreground_separation` | `true` for images | Use the first component to select image patches. Video always uses the full frame. |
-| `analysis.foreground_threshold` | `0.5` | Normalized PC1 cutoff or `auto` for an Otsu split. Image foreground mode only. |
-| `analysis.foreground_side` | `high` | Keep values above or below the cutoff. Image foreground mode only. |
-| `analysis.rgb_fit_scope` | `foreground` | Fit RGB PCA from `foreground` or `all` image patches. Image foreground mode only. |
+| `analysis.foreground_separation` | `true` | Use the first component to select foreground patches in images and video. |
+| `analysis.foreground_threshold` | `0.5` | Normalized PC1 cutoff or `auto` for an Otsu split. Foreground mode only. |
+| `analysis.foreground_side` | `high` | Keep values above or below the cutoff. Foreground mode only. |
+| `analysis.rgb_fit_scope` | `foreground` | Fit RGB PCA from `foreground` or `all` fitting patches. Foreground mode only. |
 | `analysis.projection` | `fit` | Fit a projection or `load` a saved one. |
 | `analysis.projection_path` | `null` | `.npz` file required with `projection: load`. |
 | `analysis.save_projection` | `null` | Save a fitted projection to `.npz`. |
@@ -187,9 +187,70 @@ One image run fits a shared projection, threshold, and RGB range across all its
 images, making colors comparable. With `foreground_separation: false`, omit the
 other foreground settings. All patches contribute. With `projection: load`,
 supply only `projection_path`. The saved foreground rule and color range are
-reused. Video PCA fits a full-frame projection from representative frames
-controlled by `video.pca_fit_frames`, so foreground settings are invalid for
-video. Saving a projection may be the sole output of a PCA run.
+reused for both images and video. Saving a projection may be the sole output of
+a PCA run.
+
+Video PCA fits once from a few representative frames plus optional external
+reference images selected by `video.pca_fit_images`. Choose reference images of
+the subject you want to inspect across varied poses and backgrounds. The first
+component, foreground threshold, RGB components, and min/max color bounds all
+come from this combined set and stay fixed for every output frame. Reference
+images contribute only to fitting and are not exported as image results.
+
+```yaml
+input:
+  files: [/path/to/person.mp4]
+
+model:
+  architecture: vit
+  backend: timm
+  name: hf_hub:timm/vit_base_patch14_dinov2.lvd142m
+
+analysis:
+  method: patch_pca
+  foreground_threshold: auto
+  foreground_side: high
+
+video:
+  pca_fit_frames: 3
+  pca_fit_images:
+    folders: [/path/to/person-reference-images]
+    recursive: true
+    limit: 40
+
+visualization:
+  output_size: match
+  interpolation: bilinear_mask
+
+output:
+  directory: outputs/person-pca
+```
+
+`video.pca_fit_images` accepts the same `files`, `folders`, `patterns`,
+`recursive`, and `limit` selectors as `input`. Paths follow the same resolution
+rules. Explicit files must be supported images, folder scans ignore other media,
+and an empty selection is rejected. Files are deduplicated and folder matches
+are sorted before applying the limit. Reference images use the video's model
+geometry and preprocessing, including its normalization. Embeddings are extracted
+in bounded batches and staged temporarily for fitting. Each video combines its
+own selected frames with the same reference set and fits its own projection.
+To compare colors across multiple clips, save one fitted projection and load it
+for every clip using the same model and preprocessing. `runtime.seed` makes
+repeated fits reproducible for a fixed fitting set and batch size.
+
+The default fit frame count is now `3`, previously `32`. Foreground separation
+now defaults to `true` for video, matching images. Existing explicit
+`pca_fit_frames` values remain valid. For full-frame coloring, set
+`foreground_separation: false` and omit threshold, side, and RGB scope settings.
+Omitting `pca_fit_images` keeps frame-only fitting available. With
+`projection: load`, omit both `pca_fit_frames` and `pca_fit_images`, along with all
+foreground fit settings. The saved projection controls foreground and colors.
+
+PCA is an unsupervised visualization. Reference images influence the dominant
+variation in the embedding space, so the foreground split may still capture
+background, lighting, or pose variation. Inspect the result and adjust the
+foreground side or threshold. Colors describe embedding directions rather than
+class labels, and they are comparable within one frozen projection.
 
 Loaded projections must match the model's patch-embedding feature count. PCA
 uses an approximate low-rank fit over selected embeddings. Large image groups or
@@ -255,7 +316,7 @@ dimensions. Set an explicit size to interpolate directly at that resolution.
 | `visualization.normalization_range` | `null` | Required `[min, max]` when normalization is `fixed`. |
 
 `nearest` preserves patch or activation blocks. `bilinear` blends between them.
-For foreground-separated image PCA, `bilinear_mask` blends projected colors but
+For foreground-separated PCA, `bilinear_mask` blends projected colors but
 keeps a sharp foreground boundary. Without foreground separation it behaves
 like bilinear. The AnyUp modes load model code from a pinned revision of the
 [official repository](https://github.com/wimmerth/anyup) and download its
@@ -323,7 +384,8 @@ below and are valid only when at least one video is selected.
 | `video.end_time` | `null` | Exclusive end timestamp. `null` reads to the end. |
 | `video.sampling_rate` | `5.0` | Sampled frames per second and output playback FPS. `auto` uses reported average source FPS. |
 | `video.frame_limit` | `null` | Maximum sampled frames in the selected time range. |
-| `video.pca_fit_frames` | `32` | Representative frames used to fit video PCA. |
+| `video.pca_fit_frames` | `3` | Maximum representative sampled frames used to fit video PCA, at least one. Known-length inputs use evenly spaced samples in the selected window. Unknown-length inputs use the first samples. Only valid for PCA fitting. |
+| `video.pca_fit_images` | `null` | External fitting images selected with `files`, `folders`, `patterns`, `recursive`, and `limit`. Only valid for PCA fitting. |
 | `video.temporal_smoothing` | `0.0` | Previous-frame blend strength from 0 to 1 for consecutive rendered maps. |
 | `video.codec` | `libx264` | PyAV/FFmpeg encoder for MP4 outputs. |
 | `video.alpha_format` | `prores_4444` | Transparent-overlay encoding. `prores_4444` produces a `.mov`, while `vp9` produces a `.webm`. Only applicable when `output.transparent_overlays: true`. |
@@ -332,7 +394,9 @@ Each video runs independently in a source-named subdirectory.
 `sampling_rate: auto` requires a valid reported average source FPS. Use a number
 otherwise. Output streams have a constant playback rate even for variable-rate
 sources. Raw arrays are exported in bounded batches. NPZ batches include sample
-timestamps.
+timestamps. Raw PCA outputs include RGB patch arrays and foreground masks. A mask
+has patch resolution, or dense output resolution when dense AnyUp rendering is
+enabled. Manifests record the resolved reference files and their metadata.
 
 ProRes 4444 is the default transparent-video format and targets editing
 workflows. VP9 alpha produces smaller WebM files, but alpha playback support

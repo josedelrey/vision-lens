@@ -148,6 +148,31 @@ video:
 
 Video outputs are silent. Standard heatmaps and flattened overlays are saved as MP4. Transparent overlays can be saved as ProRes 4444 MOV or VP9 WebM.
 
+For video patch PCA, combine a few frames with external images of the subject:
+
+```yaml
+analysis:
+  method: patch_pca
+  foreground_threshold: auto
+  foreground_side: high
+
+video:
+  pca_fit_frames: 3
+  pca_fit_images:
+    folders: [/path/to/subject-reference-images]
+    recursive: true
+    limit: 40
+```
+
+One projection is fitted from the combined set and reused throughout each clip.
+Reference images contribute only to fitting. Foreground separation now defaults
+to `true` for video, matching images. For full-frame colors, set
+`foreground_separation: false` and omit threshold, side, and RGB scope settings.
+The default fit count is three frames, and explicit existing counts remain
+valid. PCA colors reveal feature variation, and the foreground
+side may need adjustment for your subject. See the [PCA configuration reference](docs/configuration.md#patch-pca)
+for a complete video example and saved-projection rules.
+
 ## Outputs
 
 Depending on the workflow, Vision Lens can write:

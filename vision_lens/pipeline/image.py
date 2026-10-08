@@ -77,7 +77,7 @@ from vision_lens.output.visualization import (
     shared_value_range,
 )
 from vision_lens.pipeline.progress import status, track_image_batches, track_units
-from vision_lens.pipeline.runtime import anyup_guidance, apply_seed
+from vision_lens.pipeline.runtime import anyup_guidance, apply_seed, pca_fit_settings
 
 ROLLOUT_GRID_MAX_COLUMNS = 4
 
@@ -343,7 +343,7 @@ def run_patch_pca_from_config(
         and config.analysis.foreground_separation is None
     ):
         raise ValueError("Image patch PCA requires foreground analysis settings.")
-    fit_settings = _pca_fit_settings(config)
+    fit_settings = pca_fit_settings(config.analysis)
 
     started_at = datetime.now(UTC)
     check_branch_artifact_overwrite(config)
@@ -1966,34 +1966,6 @@ def _patch_grid(loaded_model: LoadedModel) -> tuple[int, int]:
     if patch_size is None:
         raise ValueError("Patch PCA requires a model with a known patch size.")
     return infer_patch_grid_from_image(loaded_model.metadata.image_size, patch_size)
-
-
-def _pca_fit_settings(
-    config: VisionLensConfig,
-) -> tuple[
-    bool,
-    ForegroundThreshold,
-    Literal["high", "low"],
-    RGBFitScope,
-]:
-    foreground_separation = config.analysis.foreground_separation
-    if foreground_separation is not True:
-        return False, 0.5, "high", "all"
-    if any(
-        value is None
-        for value in (
-            config.analysis.foreground_threshold,
-            config.analysis.foreground_side,
-            config.analysis.rgb_fit_scope,
-        )
-    ):
-        raise ValueError("Foreground-separated patch PCA requires fit settings.")
-    return (
-        True,
-        config.analysis.foreground_threshold,
-        config.analysis.foreground_side,
-        config.analysis.rgb_fit_scope,
-    )
 
 
 def _fit_image_pca_projection(
