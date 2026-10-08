@@ -276,15 +276,23 @@ def test_temporal_smoothing_is_sequential_across_batches():
     assert _smooth_streams((unchanged,), {}, 0) == (unchanged,)
 
 
+@pytest.mark.parametrize("foreground_separation", [True, False])
 def test_short_pca_video_uses_frozen_projection_and_bounded_batches(
     monkeypatch,
     tmp_path,
+    foreground_separation,
 ):
     from vision_lens.pipeline import video as video_pipeline
 
     source = tmp_path / "clip.mp4"
     output_dir = tmp_path / "outputs"
     _make_video(source, frame_count=6, frame_rate=6)
+    references = tmp_path / "references"
+    references.mkdir()
+    for index in range(3):
+        Image.new("RGB", (32, 24), (index * 80, 0, 0)).save(
+            references / f"reference-{index}.png"
+        )
     config = parse_config(
         {
             "input": {"files": [str(source)]},
@@ -297,16 +305,20 @@ def test_short_pca_video_uses_frozen_projection_and_bounded_batches(
             "preprocessing": {"image_size": 4},
             "analysis": {
                 "method": "patch_pca",
+                "foreground_separation": foreground_separation,
             },
             "runtime": {"device": "cpu", "batch_size": 2},
             "visualization": {"output_size": [64, 48]},
             "output": {
                 "directory": str(output_dir),
                 "overwrite": "error",
+                "raw_arrays": True,
+                "raw_format": "npz",
             },
             "video": {
                 "sampling_rate": 3,
                 "pca_fit_frames": 2,
+                "pca_fit_images": {"folders": [str(references)]},
             },
         }
     )
@@ -328,29 +340,43 @@ def test_short_pca_video_uses_frozen_projection_and_bounded_batches(
     embedding_batch_sizes = []
     projection_ids = []
     rendered_masks = []
+    fit_batch_sizes = []
+    fit_batches = []
+    fitted_frame_indices = []
     original_project = video_pipeline.project_patch_embeddings
     original_fit = video_pipeline.fit_patch_pca_projection_batches
+    original_preprocess_frames = video_pipeline._preprocess_frames
 
     def fake_embeddings(_model, inputs, _patch_grid):
         embedding_batch_sizes.append(len(inputs))
-        start = len(embedding_batch_sizes) * 10
-        return torch.arange(
-            start,
-            start + len(inputs) * 4 * 5,
+        patches = torch.tensor(
+            [[-4, 0, 0, 1, 0], [-3, 1, 0, 0, 0], [3, 0, 1, 0, 0], [4, 0, 0, 0, 1]],
             dtype=torch.float32,
-        ).reshape(len(inputs), 4, 5)
+        )
+        embeddings = patches.unsqueeze(0).expand(len(inputs), -1, -1).clone()
+        embeddings[:, :, :3] += inputs.mean(dim=(2, 3))[:, None, :] * 5
+        return embeddings
+
+    def record_preprocess_frames(index, frames, *args, **kwargs):
+        if not fit_batch_sizes:
+            fitted_frame_indices.extend(frame.index for frame in frames)
+        return original_preprocess_frames(index, frames, *args, **kwargs)
 
     def record_projection(*args, **kwargs):
         projection_ids.append(id(kwargs["projection"]))
-        assert kwargs["foreground_separation"] is False
+        assert "foreground_separation" not in kwargs
         result = original_project(*args, **kwargs)
         rendered_masks.append(result.foreground_mask)
         return result
 
     def record_fit(*args, **kwargs):
-        assert kwargs["foreground_separation"] is False
-        assert kwargs["rgb_fit_scope"] == "all"
-        assert kwargs["rgb_percentile_bounds"] == (0.01, 0.99)
+        fit_batches.extend(torch.from_numpy(batch) for batch in args[0]())
+        fit_batch_sizes.extend(len(batch) for batch in fit_batches)
+        assert kwargs["foreground_separation"] is foreground_separation
+        assert kwargs["rgb_fit_scope"] == (
+            "foreground" if foreground_separation else "all"
+        )
+        assert "rgb_percentile_bounds" not in kwargs
         return original_fit(*args, **kwargs)
 
     monkeypatch.setattr(
@@ -361,9 +387,17 @@ def test_short_pca_video_uses_frozen_projection_and_bounded_batches(
     monkeypatch.setattr(
         video_pipeline,
         "build_batch_preprocessor",
-        lambda *_args, **_kwargs: lambda _image: torch.ones(3, 4, 4),
+        lambda *_args, **_kwargs: (
+            lambda image: (
+                torch.tensor(
+                    np.asarray(image.resize((4, 4))), dtype=torch.float32
+                ).permute(2, 0, 1)
+                / 255
+            )
+        ),
     )
     monkeypatch.setattr(video_pipeline, "extract_patch_embeddings", fake_embeddings)
+    monkeypatch.setattr(video_pipeline, "_preprocess_frames", record_preprocess_frames)
     monkeypatch.setattr(video_pipeline, "project_patch_embeddings", record_projection)
     monkeypatch.setattr(
         video_pipeline,
@@ -377,12 +411,29 @@ def test_short_pca_video_uses_frozen_projection_and_bounded_batches(
     assert result.frame_rate == 3
     assert result.duration == pytest.approx(1.0)
     assert max(embedding_batch_sizes) <= 2
+    assert sum(fit_batch_sizes) == 5
+    assert max(fit_batch_sizes) <= 2
+    reference_embeddings = torch.cat(fit_batches)[-3:]
+    assert not torch.equal(reference_embeddings[0], reference_embeddings[1])
+    torch.testing.assert_close(
+        reference_embeddings[2, :, 0] - reference_embeddings[0, :, 0],
+        torch.full((4,), 160 / 255 * 5),
+    )
+    assert fitted_frame_indices == [0, 2]
     assert len(set(projection_ids)) == 1
-    assert rendered_masks and all(mask.all() for mask in rendered_masks)
+    assert rendered_masks
+    for mask in rendered_masks:
+        assert bool(mask.all()) is (not foreground_separation)
+        assert mask.any()
     assert {path.name for path in result.output_paths} == {
         "clip_patch_pca.mp4",
+        "clip_patch_pca_rgb_frames-000000.npz",
+        "clip_patch_pca_rgb_frames-000001.npz",
+        "clip_patch_pca_foreground_mask_frames-000000.npz",
+        "clip_patch_pca_foreground_mask_frames-000001.npz",
     }
-    for output_path in result.output_paths:
+    _assert_pca_raw_outputs(result.output_paths, foreground_separation)
+    for output_path in (p for p in result.output_paths if p.suffix == ".mp4"):
         assert probe_video(output_path).duration == pytest.approx(1.0, abs=0.05)
         with av.open(str(output_path)) as container:
             assert not container.streams.audio
@@ -393,12 +444,27 @@ def test_short_pca_video_uses_frozen_projection_and_bounded_batches(
     assert manifest["run"]["sampling_rate"] == 3
     assert manifest["run"]["encoded_duration"] == 1
     assert manifest["run"]["audio"] == "omitted"
+    assert len(manifest["pca_fit_inputs"]) == 3
+    assert all(item["size_bytes"] > 0 for item in manifest["pca_fit_inputs"])
+    assert manifest["inputs"][0]["path"] == str(source)
+    assert len(manifest["inputs"]) == 1
     root_manifest = json.loads((output_dir / "run-manifest.json").read_text())
     assert root_manifest["run"] == {
         "manifests": [str(video_manifest.resolve())],
         "media": "video",
     }
-    assert root_manifest["outputs"] == [str(result.output_paths[0].resolve())]
+    assert root_manifest["outputs"] == [
+        str(path.resolve()) for path in result.output_paths
+    ]
+
+
+def _assert_pca_raw_outputs(paths, foreground_separation):
+    for path in (path for path in paths if path.suffix == ".npz"):
+        with np.load(path) as values:
+            assert len(values["data"]) == len(values["timestamps"])
+            if "foreground_mask" in path.name:
+                assert values["data"].dtype == np.bool_
+                assert bool(values["data"].all()) is (not foreground_separation)
 
 
 @pytest.mark.parametrize(("sampling_rate", "expected_frames"), [(2, 2), ("auto", 4)])

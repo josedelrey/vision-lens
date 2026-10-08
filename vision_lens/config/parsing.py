@@ -30,7 +30,7 @@ from vision_lens.config.schema import (
     NORMALIZATION_CHOICES,
     OVERWRITE_CHOICES,
     PAD_CHOICES,
-    PATCH_PCA_IMAGE_FIT_DEFAULTS,
+    PATCH_PCA_FIT_DEFAULTS,
     PRECISION_CHOICES,
     PREPROCESSING_INTERPOLATION_CHOICES,
     PROJECTION_CHOICES,
@@ -191,7 +191,6 @@ def parse_config(
             analysis_section,
             method,
             base,
-            is_video=video_only,
         ),
         runtime=RuntimeConfig(
             device=_device(
@@ -394,6 +393,9 @@ def parse_config(
                     ),
                     "video.pca_fit_frames",
                 ),
+                pca_fit_images=_parse_pca_fit_images(
+                    video_section.get("pca_fit_images"), base
+                ),
                 temporal_smoothing=_unit_interval(
                     video_section.get(
                         "temporal_smoothing",
@@ -420,30 +422,41 @@ def parse_config(
     return config
 
 
-def _parse_input(section: dict[str, Any], base_dir: Path) -> InputConfig:
+def _parse_input(
+    section: dict[str, Any],
+    base_dir: Path,
+    *,
+    field_name: str = "input",
+    images_only: bool = False,
+) -> InputConfig:
     raw_files = section.get("files", [])
     raw_folders = section.get("folders", [])
     files = tuple(
-        _resolve_path(path, base_dir) for path in _list(raw_files, "input.files")
+        _resolve_path(path, base_dir)
+        for path in _list(raw_files, f"{field_name}.files")
     )
     folders = tuple(
-        _resolve_path(path, base_dir) for path in _list(raw_folders, "input.folders")
+        _resolve_path(path, base_dir)
+        for path in _list(raw_folders, f"{field_name}.folders")
     )
     patterns = tuple(
-        _relative_glob_pattern(pattern, "input.patterns")
+        _relative_glob_pattern(pattern, f"{field_name}.patterns")
         for pattern in _list(
             section.get("patterns", list(DEFAULT_INPUT_PATTERNS)),
-            "input.patterns",
+            f"{field_name}.patterns",
             allow_empty=False,
         )
     )
-    recursive = _bool(section.get("recursive", False), "input.recursive")
-    limit = _optional_positive_int(section.get("limit"), "input.limit")
+    recursive = _bool(section.get("recursive", False), f"{field_name}.recursive")
+    limit = _optional_positive_int(section.get("limit"), f"{field_name}.limit")
 
     invalid_folders = [path for path in folders if not path.is_dir()]
     if invalid_folders:
         paths = ", ".join(str(path) for path in invalid_folders)
-        raise ValueError(f"Input folder(s) do not exist: {paths}.")
+        raise ValueError(f"{field_name} folder(s) do not exist: {paths}.")
+
+    if images_only and any(media_kind(path) != "image" for path in files):
+        raise ValueError(f"{field_name}.files must contain only supported images.")
 
     unsupported_files = [path for path in files if media_kind(path) is None]
     if unsupported_files:
@@ -461,7 +474,9 @@ def _parse_input(section: dict[str, Any], base_dir: Path) -> InputConfig:
             folder_matches.update(
                 path.resolve()
                 for path in matches
-                if path.is_file() and media_kind(path) is not None
+                if path.is_file()
+                and media_kind(path) is not None
+                and (not images_only or media_kind(path) == "image")
             )
         selected.extend(sorted(folder_matches))
 
@@ -469,17 +484,28 @@ def _parse_input(section: dict[str, Any], base_dir: Path) -> InputConfig:
     if limit is not None:
         unique = unique[:limit]
     if not unique:
-        raise ValueError("input must select at least one existing file.")
+        raise ValueError(f"{field_name} must select at least one existing file.")
 
     return InputConfig(paths=unique)
+
+
+def _parse_pca_fit_images(value: Any, base_dir: Path) -> InputConfig | None:
+    field_name = "video.pca_fit_images"
+    section = _optional_mapping(value, field_name)
+    if section is None:
+        return None
+    _reject_unknown_keys(field_name, section, SECTION_KEYS["input"])
+    if not section.get("folders"):
+        unused = set(section) & {"patterns", "recursive"}
+        if unused:
+            raise ValueError(f"{field_name}.patterns and recursive require folders.")
+    return _parse_input(section, base_dir, field_name=field_name, images_only=True)
 
 
 def _parse_analysis(
     section: dict[str, Any],
     method: AnalysisMethod,
     base_dir: Path,
-    *,
-    is_video: bool = False,
 ) -> AnalysisConfig:
     if method in {"attention", "rollout"}:
         config_type = (
@@ -527,15 +553,10 @@ def _parse_analysis(
         base_dir,
         "analysis.save_projection",
     )
-    if is_video:
-        return PatchPCAAnalysisConfig(
-            projection=projection,
-            save_projection=save_projection,
-        )
     foreground_separation = _bool(
         section.get(
             "foreground_separation",
-            PATCH_PCA_IMAGE_FIT_DEFAULTS["foreground_separation"],
+            PATCH_PCA_FIT_DEFAULTS["foreground_separation"],
         ),
         "analysis.foreground_separation",
     )
@@ -548,14 +569,14 @@ def _parse_analysis(
     foreground_threshold = _foreground_threshold(
         section.get(
             "foreground_threshold",
-            PATCH_PCA_IMAGE_FIT_DEFAULTS["foreground_threshold"],
+            PATCH_PCA_FIT_DEFAULTS["foreground_threshold"],
         ),
     )
     foreground_side = _foreground_side(
-        section.get("foreground_side", PATCH_PCA_IMAGE_FIT_DEFAULTS["foreground_side"])
+        section.get("foreground_side", PATCH_PCA_FIT_DEFAULTS["foreground_side"])
     )
     rgb_fit_scope = _choice(
-        section.get("rgb_fit_scope", PATCH_PCA_IMAGE_FIT_DEFAULTS["rgb_fit_scope"]),
+        section.get("rgb_fit_scope", PATCH_PCA_FIT_DEFAULTS["rgb_fit_scope"]),
         "analysis.rgb_fit_scope",
         RGB_FIT_SCOPE_CHOICES,
     )
@@ -1022,6 +1043,8 @@ def _config_dataclass_to_dict(value: Any) -> dict[str, Any]:
 def _config_value(value: Any) -> Any:
     if isinstance(value, Path):
         return str(value)
+    if isinstance(value, InputConfig):
+        return {"files": [str(path) for path in value.paths]}
     if is_dataclass(value):
         return _config_dataclass_to_dict(value)
     if isinstance(value, tuple | list):

@@ -219,10 +219,11 @@ class VideoConfig:
     end_time: float | None = None
     sampling_rate: float | Literal["auto"] = 5.0
     frame_limit: int | None = None
-    pca_fit_frames: int = 32
+    pca_fit_frames: int = 3
     temporal_smoothing: float = 0.0
     codec: str = "libx264"
     alpha_format: AlphaFormat = "prores_4444"
+    pca_fit_images: InputConfig | None = None
 
 
 @dataclass(frozen=True)
@@ -239,7 +240,7 @@ class VisionLensConfig:
 
 DEFAULT_INPUT_PATTERNS = ("*",)
 DEFAULT_ANALYSIS_METHOD = "attention"
-PATCH_PCA_IMAGE_FIT_DEFAULTS = {
+PATCH_PCA_FIT_DEFAULTS = {
     "foreground_separation": True,
     "foreground_threshold": 0.5,
     "foreground_side": "high",

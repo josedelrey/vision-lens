@@ -150,6 +150,36 @@ def test_video_input_adds_default_video_settings_automatically(capsys, tmp_path)
     assert "sampling_rate: 5.0" in output
 
 
+def test_cli_resolves_video_pca_reference_folder(capsys, tmp_path, config_path):
+    source = tmp_path / "clip.mp4"
+    source.touch()
+    references = tmp_path / "references"
+    references.mkdir()
+    reference = references / "subject.png"
+    reference.touch()
+
+    assert (
+        main(
+            [
+                "resolve",
+                "--config",
+                str(config_path),
+                "--input-files",
+                yaml.safe_dump([str(source)]),
+                "--video-pca-fit-images",
+                yaml.safe_dump({"folders": [str(references)]}),
+            ]
+        )
+        == 0
+    )
+
+    resolved = yaml.safe_load(capsys.readouterr().out)
+    assert resolved["input"]["files"] == [str(source)]
+    assert resolved["video"]["pca_fit_images"] == {"files": [str(reference)]}
+    assert resolved["video"]["pca_fit_frames"] == 3
+    assert resolved["analysis"]["foreground_separation"] is True
+
+
 def test_every_config_setting_has_a_named_cli_flag():
     parser = _build_parser()
     available = {

@@ -147,7 +147,8 @@ def test_video_settings_apply_documented_defaults(tmp_path):
     assert config.video.end_time is None
     assert config.video.sampling_rate == 5
     assert config.video.frame_limit is None
-    assert config.video.pca_fit_frames == 32
+    assert config.video.pca_fit_frames == 3
+    assert config.video.pca_fit_images is None
     assert config.video.temporal_smoothing == 0
     assert config.video.codec == "libx264"
     assert config.video.alpha_format == "prores_4444"
@@ -264,7 +265,9 @@ def test_mixed_patch_pca_derives_media_specific_analysis(tmp_path):
     assert image_config.analysis.save_projection == tmp_path / "projection_images.npz"
     assert video_config is not None
     assert isinstance(video_config.analysis, PatchPCAAnalysisConfig)
-    assert video_config.analysis.foreground_separation is None
+    assert video_config.analysis.foreground_separation is True
+    assert video_config.analysis.foreground_threshold == 0.5
+    assert video_config.analysis.rgb_fit_scope == "foreground"
     assert video_config.analysis.save_projection == projection
 
 
@@ -376,7 +379,7 @@ def test_patch_pca_rejects_transparent_overlay_output():
         parse_config(raw)
 
 
-def test_video_patch_pca_has_no_image_foreground_settings(tmp_path):
+def test_video_patch_pca_uses_image_foreground_settings(tmp_path):
     source = tmp_path / "clip.mp4"
     source.touch()
     raw = _minimal_config(method="patch_pca")
@@ -386,20 +389,167 @@ def test_video_patch_pca_has_no_image_foreground_settings(tmp_path):
     config = parse_config(raw)
     resolved = config_to_dict(config)["analysis"]
 
-    assert config.analysis.foreground_separation is None
-    assert config.analysis.foreground_threshold is None
-    assert config.analysis.foreground_side is None
-    assert config.analysis.rgb_fit_scope is None
-    assert "foreground_separation" not in resolved
-    assert "foreground_threshold" not in resolved
-    assert "foreground_side" not in resolved
-    assert "rgb_fit_scope" not in resolved
+    assert config.analysis.foreground_separation is True
+    assert config.analysis.foreground_threshold == 0.5
+    assert config.analysis.foreground_side == "high"
+    assert config.analysis.rgb_fit_scope == "foreground"
+    assert resolved["foreground_separation"] is True
+    assert resolved["foreground_threshold"] == 0.5
+    assert resolved["foreground_side"] == "high"
+    assert resolved["rgb_fit_scope"] == "foreground"
 
     raw["analysis"]["foreground_threshold"] = 0.2
+    assert parse_config(raw).analysis.foreground_threshold == 0.2
+
+    raw["analysis"]["foreground_separation"] = False
     with pytest.raises(
         ValueError, match="analysis.foreground_threshold.*not applicable"
     ):
         parse_config(raw)
+
+
+def _video_pca_config(tmp_path):
+    source = tmp_path / "clip.mp4"
+    source.touch()
+    raw = _minimal_config(method="patch_pca")
+    raw["input"] = {"files": [str(source)]}
+    raw["output"]["directory"] = str(tmp_path / "outputs")
+    raw["video"] = {}
+    return raw
+
+
+def test_video_pca_reference_selection_round_trips_and_preserves_mixed_settings(
+    tmp_path,
+):
+    raw = _video_pca_config(tmp_path)
+    references = tmp_path / "references"
+    (references / "nested").mkdir(parents=True)
+    for relative in ("a.PNG", "b.png", "nested/c.png", "nested/ignored.mp4"):
+        (references / relative).touch()
+    raw["analysis"].update(
+        {
+            "foreground_threshold": "auto",
+            "foreground_side": "low",
+            "rgb_fit_scope": "all",
+        }
+    )
+    raw["video"]["pca_fit_images"] = {
+        "files": ["references/a.PNG"],
+        "folders": ["references"],
+        "recursive": True,
+        "limit": 3,
+    }
+
+    config = parse_config(raw, base_dir=tmp_path)
+    selected = config.video.pca_fit_images.paths
+    assert selected == (
+        references / "a.PNG",
+        references / "b.png",
+        references / "nested/c.png",
+    )
+    assert len(config.input.paths) == 1
+    resolved = config_to_dict(config)
+    assert resolved["video"]["pca_fit_images"] == {
+        "files": [str(path) for path in selected]
+    }
+    assert parse_config(resolved) == config
+
+    raw["input"]["files"].append("references/a.PNG")
+    mixed = parse_config(raw, base_dir=tmp_path)
+    image_config, video_config = split_media_configs(mixed)
+    assert image_config.video is None
+    assert image_config.analysis == video_config.analysis
+    assert video_config.video.pca_fit_images.paths == selected
+    assert parse_config(config_to_dict(mixed)) == mixed
+
+
+@pytest.mark.parametrize(
+    ("selector", "message"),
+    [
+        ([], "must be a mapping"),
+        ({}, "must select at least one"),
+        ({"folders": ["missing"]}, "folder.*do not exist"),
+        ({"files": ["missing.jpg"]}, "file does not exist"),
+        ({"files": ["clip.mp4"]}, "only supported images"),
+        ({"folders": ["empty"]}, "must select at least one"),
+        ({"folder": "empty"}, "Unknown key"),
+        ({"files": ["reference.png"], "recursive": False}, "require folders"),
+        ({"folders": ["empty"], "limit": 0}, "positive integer"),
+        ({"folders": ["empty"], "patterns": ["../*.png"]}, "relative glob"),
+        ({"folders": ["empty"], "recursive": "yes"}, "true or false"),
+    ],
+)
+def test_video_pca_rejects_invalid_reference_selectors(tmp_path, selector, message):
+    raw = _video_pca_config(tmp_path)
+    (tmp_path / "empty").mkdir()
+    (tmp_path / "reference.png").touch()
+    raw["video"]["pca_fit_images"] = selector
+
+    with pytest.raises(ValueError, match=message):
+        parse_config(raw, base_dir=tmp_path)
+
+
+@pytest.mark.parametrize("workflow", ["attention", "load", "image"])
+def test_video_pca_references_require_video_projection_fitting(tmp_path, workflow):
+    raw = _video_pca_config(tmp_path)
+    reference = tmp_path / "reference.png"
+    reference.touch()
+    raw["video"]["pca_fit_images"] = {"files": [str(reference)]}
+    if workflow == "attention":
+        raw["analysis"] = {"method": "attention", "layers": [0]}
+    elif workflow == "load":
+        projection = tmp_path / "projection.npz"
+        projection.touch()
+        raw["analysis"] = {
+            "method": "patch_pca",
+            "projection": "load",
+            "projection_path": str(projection),
+        }
+    else:
+        raw["input"]["files"] = [str(reference)]
+
+    with pytest.raises(ValueError, match="video.pca_fit_images.*not applicable"):
+        parse_config(raw)
+
+
+def test_video_pca_rejects_resolved_video_reference(tmp_path):
+    config = parse_config(_video_pca_config(tmp_path))
+    invalid = replace(
+        config,
+        video=replace(config.video, pca_fit_images=config.input),
+    )
+    with pytest.raises(ValueError, match="pca_fit_images.*only images"):
+        validate_config(invalid)
+
+
+def test_video_pca_projection_cannot_overwrite_reference_image(tmp_path):
+    raw = _video_pca_config(tmp_path)
+    reference = tmp_path / "reference.png"
+    reference.touch()
+    raw["video"]["pca_fit_images"] = {"files": [str(reference)]}
+    raw["analysis"]["save_projection"] = str(reference)
+
+    with pytest.raises(ValueError, match="overwrite.*pca_fit_images"):
+        parse_config(raw)
+
+
+def test_output_replacement_protects_pca_reference_directory(tmp_path):
+    raw = _video_pca_config(tmp_path)
+    reference = tmp_path / "outputs" / "images" / "reference.png"
+    reference.parent.mkdir(parents=True)
+    reference.touch()
+    raw["video"]["pca_fit_images"] = {"files": [str(reference)]}
+    raw["output"]["overwrite"] = "replace"
+    (tmp_path / "outputs" / "run-manifest.json").write_text(
+        json.dumps(
+            {"schema_version": 1, "inputs": [], "outputs": [], "run": {"manifests": []}}
+        )
+    )
+
+    config = parse_config(raw)
+    with pytest.raises(ValueError, match="contain a protected input"):
+        prepare_output_directory(config)
+    assert reference.is_file()
 
 
 def test_video_rejects_crop_and_pad_that_shift_spatial_maps(tmp_path):

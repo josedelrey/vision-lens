@@ -79,6 +79,15 @@ def write_run_manifest(
     }
     if run_details is not None:
         payload["run"] = dict(run_details)
+    if config.video is not None and config.video.pca_fit_images is not None:
+        payload["pca_fit_inputs"] = [
+            {
+                "path": str(input_path),
+                "size_bytes": input_path.stat().st_size,
+                "modified_ns": input_path.stat().st_mtime_ns,
+            }
+            for input_path in config.video.pca_fit_images.paths
+        ]
     temporary_path = None
     try:
         with NamedTemporaryFile(
