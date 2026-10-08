@@ -13,3 +13,5 @@ dist/
 outputs/
 videos/
 /scripts/
+/configs/local/
+/pca-reference-images/
