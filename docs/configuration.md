@@ -184,56 +184,26 @@ analysis:
 | `analysis.projection_path` | `null` | `.npz` file required with `projection: load`. |
 | `analysis.save_projection` | `null` | Save a fitted projection to `.npz`. |
 
-One image run fits a shared projection, threshold, and RGB range across all its
-images, making colors comparable. With `foreground_separation: false`, omit the
-other foreground settings. All patches contribute. With `projection: load`,
-supply only `projection_path`. The saved foreground rule and color range are
-reused for both images and video. Saving a projection may be the sole output of
-a PCA run.
+Image PCA fits one shared projection across the selected images. Video PCA
+fits one projection per clip from `video.pca_fit_frames` frames, defaulting to
+three, plus optional reference images in `video.pca_fit_images`. The projection
+stays fixed throughout the clip. References are used only for fitting. Choose
+images of the subject with varied poses and backgrounds.
 
-`rgb_dimensions: 3` preserves the existing RGB mapping exactly. To include more
-embedding directions, set `analysis.rgb_dimensions: 6`, for example. The first
-three component colors are red, green, and blue. Each additional component gets
-the candidate color that maximizes its minimum
-[Oklab](https://bottosson.github.io/posts/oklab/) distance to existing colors.
-Candidates have full saturation and maximum brightness in HSV, with at least
-one RGB channel at zero and another at one. This excludes dark and muted
-component colors. The remaining channel starts with 17 evenly spaced levels
-and is sampled more finely when the candidates run out. Selection is
-deterministic, so increasing the count extends the palette in the same order.
-For counts above three, each patch blends these colors as a weighted average,
-using its normalized component scores as weights. The resulting color is
-multiplied by the patch's strongest component score to control brightness.
-Zero scores produce black. Adding components does not accumulate brightness
-or force the blend's strongest RGB channel to one. Balanced blends can still
-appear pale or gray when several components contribute similarly. Output
-images and video still have three RGB channels, so blended colors cannot
-uniquely encode every higher dimensional score. Loaded higher dimensional
-projections also use this blending rule with their saved components and palette.
+`analysis.rgb_dimensions: 3` preserves the original RGB mapping. Higher counts
+use more leading PCA components, up to the model's embedding feature count.
+Additional colors are bright and saturated, selected for separation in
+[Oklab](https://bottosson.github.io/posts/oklab/). Patches blend them according to
+their normalized scores, with brightness set by the strongest score.
+Foreground selection uses a separate PC1 fit regardless of the color count.
 
-The fit uses the requested number of leading PCA components, ordered by
-decreasing variance. Counts above three must not exceed the model's patch
-embedding feature count. Missing components in a small fitting set are padded
-with zeros. Foreground selection still uses its separate PC1 fit. Saved
-projections retain the component count, palette, and score bounds. With
-`projection: load`, omit `rgb_dimensions` and reuse the saved settings. Existing
-three-component projection files remain supported.
-Loading an existing projection keeps its saved palette. Fit a new projection
-to use the saturated palette if the saved one contains muted colors.
+For full-frame coloring, set `foreground_separation: false` and omit
+`foreground_threshold`, `foreground_side`, and `rgb_fit_scope`.
 
-For counts above three, `output.raw_arrays: true` also exports
-`patch_pca_components` arrays with normalized scores for every patch, including
-background patches, before color blending or masking. Their last axis has
-`rgb_dimensions` entries. Image files contain one patch array per input and
-video files contain one array per frame batch, alongside the existing raw
-outputs.
-
-Video PCA fits once from a few representative frames plus optional external
-reference images selected by `video.pca_fit_images`. Choose reference images of
-the subject you want to inspect across varied poses and backgrounds. The first
-component, foreground threshold, RGB components, and min/max color bounds all
-come from this combined set and stay fixed for every output frame. Reference
-images contribute only to fitting and are not exported as image results.
+Above three dimensions, `output.raw_arrays: true` also saves
+`patch_pca_components` with normalized scores for all patches before blending
+or masking. The last axis contains `rgb_dimensions` values, with one file per
+image or video frame batch.
 
 ```yaml
 input:
@@ -264,37 +234,22 @@ output:
   directory: outputs/person-pca
 ```
 
-`video.pca_fit_images` accepts the same `files`, `folders`, `patterns`,
-`recursive`, and `limit` selectors as `input`. Paths follow the same resolution
-rules. Explicit files must be supported images, folder scans ignore other media,
-and an empty selection is rejected. Files are deduplicated and folder matches
-are sorted before applying the limit. Reference images use the video's model
-geometry and preprocessing, including its normalization. Embeddings are extracted
-in bounded batches and staged temporarily for fitting. Each video combines its
-own selected frames with the same reference set and fits its own projection.
-To compare colors across multiple clips, save one fitted projection and load it
-for every clip using the same model and preprocessing. `runtime.seed` makes
-repeated fits reproducible for a fixed fitting set and batch size.
+`video.pca_fit_images` uses the same selectors and path rules as `input`, with
+the video's preprocessing applied to each reference. Empty selections are
+rejected. Omit it to fit from video frames alone. Use `runtime.seed` for
+repeatable fits with a fixed input set and batch size.
 
-The default fit frame count is now `3`, previously `32`. Foreground separation
-now defaults to `true` for video, matching images. Existing explicit
-`pca_fit_frames` values remain valid. For full-frame coloring, set
-`foreground_separation: false` and omit threshold, side, and RGB scope settings.
-Omitting `pca_fit_images` keeps frame-only fitting available. With
-`projection: load`, omit both `pca_fit_frames` and `pca_fit_images`, along with all
-foreground fit settings. The saved projection controls foreground and colors.
+To compare colors across runs, save a projection with `save_projection` and
+reuse it with the same model and preprocessing. Set `projection: load` and
+`projection_path`, then omit all fitting settings, including `rgb_dimensions`,
+`video.pca_fit_frames`, and `video.pca_fit_images`. Saved projections retain
+their palette, component count, foreground rule, and color ranges. Older
+three-component files remain supported. Saving a projection can be the only
+output of a run.
 
-PCA is an unsupervised visualization. Reference images influence the dominant
-variation in the embedding space, so the foreground split may still capture
-background, lighting, or pose variation. Inspect the result and adjust the
-foreground side or threshold. Colors describe embedding directions rather than
-class labels, and they are comparable within one frozen projection.
-
-Loaded projections must match the model's patch-embedding feature count. PCA
-uses an approximate low-rank fit over selected embeddings. Large image groups or
-long video fit windows may require substantial memory. The subject may appear on
-either side of the first PCA component. Use `foreground_side: high` to keep
-values above the threshold or `foreground_side: low` to keep values below it.
+PCA colors show variation in model features. Lighting, pose, or background can
+influence the foreground split. Inspect the results and adjust
+`foreground_side` or `foreground_threshold` as needed.
 
 ## Runtime
 
