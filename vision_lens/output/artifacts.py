@@ -584,9 +584,10 @@ def _image_patch_pca_paths(config: VisionLensConfig) -> set[Path]:
                     config.output.raw_format,
                 )
             )
-            if config.analysis.projection == "load" or (
-                config.analysis.rgb_dimensions or 3
-            ) > 3:
+            if (
+                config.analysis.projection == "load"
+                or (config.analysis.rgb_dimensions or 3) > 3
+            ):
                 paths.add(
                     image_artifact_path(
                         config.output.directory,
