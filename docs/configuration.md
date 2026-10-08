@@ -195,12 +195,17 @@ a PCA run.
 embedding directions, set `analysis.rgb_dimensions: 6`, for example. The first
 three component colors are red, green, and blue. Each additional component gets
 the candidate color that maximizes its minimum
-[Oklab](https://bottosson.github.io/posts/oklab/) distance to existing colors. Selection is
+[Oklab](https://bottosson.github.io/posts/oklab/) distance to existing colors.
+Candidates have full saturation and maximum brightness in HSV, with at least
+one RGB channel at zero and another at one. This excludes dark and muted
+component colors. The remaining channel starts with 17 evenly spaced levels
+and is sampled more finely when the candidates run out. Selection is
 deterministic, so increasing the count extends the palette in the same order.
 Each patch blends these colors using its normalized component scores. If a
 blend exceeds the RGB range, all three channels are scaled together to preserve
-their ratios. Output images and video still have three RGB channels, so blended
-colors cannot uniquely encode every higher dimensional score.
+their ratios. Blends can still appear pale or gray when several components
+contribute similarly. Output images and video still have three RGB channels,
+so blended colors cannot uniquely encode every higher dimensional score.
 
 The fit uses the requested number of leading PCA components, ordered by
 decreasing variance. Counts above three must not exceed the model's patch
@@ -209,6 +214,8 @@ with zeros. Foreground selection still uses its separate PC1 fit. Saved
 projections retain the component count, palette, and score bounds. With
 `projection: load`, omit `rgb_dimensions` and reuse the saved settings. Existing
 three-component projection files remain supported.
+Loading an existing projection keeps its saved palette. Fit a new projection
+to use the saturated palette if the saved one contains muted colors.
 
 For counts above three, `output.raw_arrays: true` also exports
 `patch_pca_components` arrays with normalized scores for every patch, including
