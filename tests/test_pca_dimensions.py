@@ -45,10 +45,49 @@ def test_component_palette_extends_distinct_colors_and_blends_scores():
     blend = blend_component_scores(
         torch.tensor([[0.0, 0.0, 0.0, 0.25, 0.5]]), colors[:5]
     )
-    torch.testing.assert_close(blend[0], 0.25 * colors[3] + 0.5 * colors[4])
+    torch.testing.assert_close(blend[0], (colors[3] + 2 * colors[4]) / 3 * 0.5)
     bright = blend_component_scores(torch.ones(1, 12), colors)
-    assert bright.max() == 1
+    assert bright.max() < 1
     assert bright.min() > 0
+
+
+@pytest.mark.parametrize("strength", [0.0, 0.2, 0.5, 1.0])
+def test_single_component_keeps_its_color_and_score_brightness(strength):
+    colors = torch.tensor(component_palette(6))
+    rendered = blend_component_scores(torch.eye(6) * strength, colors)
+    torch.testing.assert_close(rendered, colors * strength)
+
+
+@pytest.mark.parametrize("dimensions", [4, 6, 12, 64])
+def test_many_components_cannot_accumulate_full_brightness(dimensions):
+    colors = torch.tensor(component_palette(dimensions))
+    scores = torch.full((2, dimensions), 0.5)
+    scores[1, 0] = 0.8
+    rendered = blend_component_scores(scores, colors)
+    assert torch.isfinite(rendered).all()
+    assert rendered.min() >= 0
+    assert rendered[0].max() < 0.5
+    assert rendered[1].max() < 0.8
+
+
+def test_brightness_and_hue_survive_repeated_contributions_and_zero_padding():
+    colors = torch.tensor(component_palette(6))
+    scores = torch.tensor([[0.1, 0.7, 0.2, 0.4, 0.0, 0.3]])
+    rendered = blend_component_scores(scores, colors)
+    repeated = blend_component_scores(scores.repeat(1, 4), colors.repeat(4, 1))
+    padded = blend_component_scores(
+        torch.nn.functional.pad(scores, (0, 6)), torch.tensor(component_palette(12))
+    )
+    torch.testing.assert_close(rendered, repeated)
+    torch.testing.assert_close(rendered, padded)
+
+
+def test_zero_component_scores_render_black_without_invalid_values():
+    rendered = blend_component_scores(
+        torch.zeros(2, 6), torch.tensor(component_palette(6))
+    )
+    assert torch.isfinite(rendered).all()
+    assert not rendered.any()
 
 
 def test_large_component_palettes_keep_full_saturation_and_brightness():

@@ -85,9 +85,12 @@ def component_palette(dimensions: int) -> np.ndarray:
 
 
 def blend_component_scores(scores: Any, colors: Any) -> Any:
-    """Blend normalized component scores while preserving the RGB color ratios."""
+    """Blend component hues with brightness bounded by the strongest score."""
     if scores.shape[-1] == 3:
         return scores
     colors = torch.as_tensor(colors, dtype=scores.dtype, device=scores.device)
-    mixed = scores @ colors
-    return mixed / mixed.amax(dim=-1, keepdim=True).clamp_min(1)
+    total = scores.sum(dim=-1, keepdim=True)
+    safe_total = torch.where(total > 0, total, torch.ones_like(total))
+    weights = scores / safe_total
+    strength = scores.amax(dim=-1, keepdim=True)
+    return (weights @ colors) * strength
