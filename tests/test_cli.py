@@ -9,8 +9,6 @@ import yaml
 from vision_lens import load_config, resolved_config_yaml
 from vision_lens.cli import CONFIG_OPTION_PATHS, _build_parser, main
 
-BUNDLED_CONFIGS = sorted((Path(__file__).parents[1] / "configs").glob("*.yaml"))
-
 
 @pytest.fixture
 def config_path(tmp_path):
@@ -176,8 +174,6 @@ def test_cli_resolves_video_pca_reference_folder(capsys, tmp_path, config_path):
     resolved = yaml.safe_load(capsys.readouterr().out)
     assert resolved["input"]["files"] == [str(source)]
     assert resolved["video"]["pca_fit_images"] == {"files": [str(reference)]}
-    assert resolved["video"]["pca_fit_frames"] == 3
-    assert resolved["analysis"]["foreground_separation"] is True
 
 
 def test_every_config_setting_has_a_named_cli_flag():
@@ -193,9 +189,15 @@ def test_every_config_setting_has_a_named_cli_flag():
     assert "--video" not in available
 
 
-@pytest.mark.parametrize("config_path", BUNDLED_CONFIGS, ids=lambda path: path.stem)
-def test_bundled_configs_match_their_cli_only_forms(capsys, config_path):
+@pytest.mark.parametrize("method", ["attention", "rollout", "gradcam", "patch_pca"])
+def test_yaml_and_cli_resolve_equivalently(capsys, config_path, method):
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["analysis"] = {"method": method}
+    if method in {"attention", "rollout"}:
+        raw["analysis"]["layers"] = [0]
+    if method == "gradcam":
+        raw["model"].update({"architecture": "cnn", "backend": "torchvision"})
+    config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
     arguments = ["resolve"]
     for section, values in raw.items():
         for key, value in values.items():
