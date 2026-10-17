@@ -29,8 +29,8 @@ of patch embeddings.
 
 | Example | Patch PCA | Layer 11 attention overlay |
 |:---|:---:|:---:|
-| Horse 5 | <img src="assets/pca/bilinear-mask-5.png" alt="Patch PCA of horse 5" width="360"> | <img src="assets/attention/example-5-layer-11-overlay.png" alt="Layer 11 attention overlay for horse 5" width="360"> |
-| Horse 6 | <img src="assets/pca/bilinear-mask-6.png" alt="Patch PCA of horse 6" width="360"> | <img src="assets/attention/example-6-layer-11-overlay.png" alt="Layer 11 attention overlay for horse 6" width="360"> |
+| Horse 5 | <img src="assets/pca/bilinear-mask-5.png" alt="Patch PCA of horse 5" width="360" align="middle"> | <img src="assets/attention/example-5-layer-11-overlay.png" alt="Layer 11 attention overlay for horse 5" width="360" align="middle"> |
+| Horse 6 | <img src="assets/pca/bilinear-mask-6.png" alt="Patch PCA of horse 6" width="360" align="middle"> | <img src="assets/attention/example-6-layer-11-overlay.png" alt="Layer 11 attention overlay for horse 6" width="360" align="middle"> |
 
 ## Install
 
@@ -191,8 +191,8 @@ changes across transformer depth:
 
 | Example | Layer 2 | Layer 5 | Layer 8 | Layer 11 |
 |:---|:---:|:---:|:---:|:---:|
-| Image 2 | <img src="assets/attention/example-2-layer-2.png" alt="Image 2 attention at layer 2" width="150"> | <img src="assets/attention/example-2-layer-5.png" alt="Image 2 attention at layer 5" width="150"> | <img src="assets/attention/example-2-layer-8.png" alt="Image 2 attention at layer 8" width="150"> | <img src="assets/attention/example-2-layer-11.png" alt="Image 2 attention at layer 11" width="150"> |
-| Image 3 | <img src="assets/attention/example-3-layer-2.png" alt="Image 3 attention at layer 2" width="150"> | <img src="assets/attention/example-3-layer-5.png" alt="Image 3 attention at layer 5" width="150"> | <img src="assets/attention/example-3-layer-8.png" alt="Image 3 attention at layer 8" width="150"> | <img src="assets/attention/example-3-layer-11.png" alt="Image 3 attention at layer 11" width="150"> |
+| Image 2 | <img src="assets/attention/example-2-layer-2.png" alt="Image 2 attention at layer 2" width="150" align="middle"> | <img src="assets/attention/example-2-layer-5.png" alt="Image 2 attention at layer 5" width="150" align="middle"> | <img src="assets/attention/example-2-layer-8.png" alt="Image 2 attention at layer 8" width="150" align="middle"> | <img src="assets/attention/example-2-layer-11.png" alt="Image 2 attention at layer 11" width="150" align="middle"> |
+| Image 3 | <img src="assets/attention/example-3-layer-2.png" alt="Image 3 attention at layer 2" width="150" align="middle"> | <img src="assets/attention/example-3-layer-5.png" alt="Image 3 attention at layer 5" width="150" align="middle"> | <img src="assets/attention/example-3-layer-8.png" alt="Image 3 attention at layer 8" width="150" align="middle"> | <img src="assets/attention/example-3-layer-11.png" alt="Image 3 attention at layer 11" width="150" align="middle"> |
 
 Every run uses the same output layout. Images are grouped together, and each
 video receives a source-named subdirectory:
